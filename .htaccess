@@ -1,0 +1,29 @@
+# Guard for the case where this project is cloned straight into a web root.
+#
+# Laravel expects the document root to be public/. On shared hosting a clone often
+# lands in public_html instead, and then every file here is fetchable: .env with the
+# APP_KEY and database password, storage/ with the logs, vendor/, composer.lock, the
+# lot. That is why this file exists rather than relying on the deployer to remember.
+#
+# The right fix is still to point the document root at public/, or to move the
+# application above the web root. This only makes the wrong setup safe instead of
+# silently exposed.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Hand everything to public/, which has its own .htaccess and the front
+    # controller. A request for /.env becomes public/.env, which does not exist,
+    # so it answers 404 rather than serving the file.
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Belt and braces. If mod_rewrite is unavailable the rewrite above does nothing,
+# and without these rules the files below would be served as plain text.
+<FilesMatch "^\.env|^\.env\..*|^\.git|^\.gitignore$|^\.gitattributes$|composer\.(json|lock)$|package(-lock)?\.json$|^artisan$|^phpunit\.xml$|^error_log$|\.log$|\.sqlite$">
+    Require all denied
+</FilesMatch>
+
+# No directory listings. Without this, a missing index shows the whole tree, which
+# is how an exposed deployment is usually discovered in the first place.
+Options -Indexes
