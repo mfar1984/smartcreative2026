@@ -1,0 +1,11 @@
+*
+!private/
+!public/
+!.gitignore
+
+# The two .gitkeep files have to be re-included here rather than in the root
+# .gitignore. Git gives the deepest matching ignore file the last word, so the
+# `*` above beats a negation written higher up, and without these lines a fresh
+# clone has no storage/app/public directory for uploads to land in.
+!private/.gitkeep
+!public/.gitkeep

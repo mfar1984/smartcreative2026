@@ -1,0 +1,35 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.js';
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+}
+/* ==========================================================================
+   Top Header
+   Posisi, background dan keadaan show/hide ditulis eksplisit di sini supaya
+   tidak bergantung pada utility Tailwind yang ditoggle melalui JavaScript.
+   ========================================================================== */
+#top-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    background-color: #1e3a8a; /* blue-900 */
+    border-bottom: 1px solid #1e40af; /* blue-800 */
+    transform: translateY(-100%);
+    opacity: 0;
+    visibility: hidden;
+    transition: transform 0.3s ease, opacity 0.3s ease, visibility 0.3s ease;
+}
+
+#top-header.is-visible {
+    transform: translateY(0);
+    opacity: 1;
+    visibility: visible;
+}

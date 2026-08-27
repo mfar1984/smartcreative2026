@@ -1,0 +1,68 @@
+# Never commit these.
+#
+# .env carries the APP_KEY and the database password. The CHIP API key is not in
+# here (it lives encrypted in the settings table), but APP_KEY is what decrypts
+# that table, so this file leaking is still the worst case.
+.env
+.env.backup
+.env.production
+/auth.json
+/storage/*.key
+
+# Rebuilt on the server.
+/vendor
+/node_modules
+
+# public/build is deliberately NOT ignored.
+#
+# Shared cPanel hosting rarely has a working node toolchain, so a clone that has
+# to run `npm run build` before it looks right is a clone that ships unstyled.
+# The three compiled files are about 127 KB. If you later build on the server or
+# in CI, add /public/build back to this list.
+/public/hot
+
+# A symlink, recreated with `php artisan storage:link` after cloning.
+/public/storage
+
+# Runtime state. The directories are tracked through their .gitkeep so a fresh
+# clone can boot; what the application writes into them is not.
+#
+# storage/app is handled by storage/app/.gitignore instead of here. Laravel ships
+# that file containing `*`, and git gives the deepest ignore file the last word,
+# so a negation written at this level would have no effect on it.
+/storage/framework/cache/data/*
+!/storage/framework/cache/data/.gitkeep
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitkeep
+/storage/framework/testing/*
+!/storage/framework/testing/.gitkeep
+/storage/framework/views/*
+!/storage/framework/views/.gitkeep
+/storage/logs/*
+!/storage/logs/.gitkeep
+/storage/pail
+*.log
+
+# An abandoned local sqlite file from early development. The project runs on
+# MySQL; this only ever held a few sessions.
+/database/database.sqlite
+
+# macOS leaves one of these beside every file when copying to a non-Mac volume.
+# There were 14,415 of them in the working copy.
+._*
+.DS_Store
+
+# Editors and local tooling.
+/.fleet
+/.idea
+/.nova
+/.vscode
+/.zed
+.phpactor.json
+.phpunit.result.cache
+/.phpunit.cache
+
+# Windows and Homestead leftovers.
+Thumbs.db
+Homestead.json
+Homestead.yaml
