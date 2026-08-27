@@ -249,51 +249,6 @@
         </x-admin.panel>
     @endif
 
-    {{-- ==================== Recent activity ==================== --}}
-    <x-admin.panel title="Recent Activity" icon="pulse" :flush="true">
-        <div class="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-100">
-            <p class="text-sm text-gray-600">The latest actions taken in the admin area.</p>
-
-            @if ($can['activity'])
-                <a href="{{ route('admin.settings.logging', ['tab' => 'activity']) }}"
-                   class="text-sm font-semibold text-blue-600 hover:text-blue-700 transition whitespace-nowrap shrink-0">
-                    View all
-                </a>
-            @endif
-        </div>
-
-        @if (! $can['activity'])
-            <p class="px-5 py-8 text-sm text-gray-500 text-center">
-                Your role does not include permission to view the activity log.
-            </p>
-        @elseif ($recentActivity->isEmpty())
-            <p class="px-5 py-8 text-sm text-gray-500 text-center">
-                No activity recorded yet.
-            </p>
-        @else
-            <ul class="divide-y divide-gray-100">
-                @foreach ($recentActivity as $entry)
-                    <li class="flex items-start gap-3 px-5 py-3">
-                        <span class="w-2 h-2 mt-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden="true"></span>
-
-                        <div class="min-w-0 flex-1">
-                            <p class="text-sm text-gray-900">{{ $entry->description }}</p>
-                            <p class="text-xs text-gray-500 mt-0.5">
-                                {{ $entry->actor_label ?? 'System' }}
-                                &middot; {{ $entry->created_at?->format('d M Y, g:i a') }}
-                                @if ($entry->ip_address)
-                                    &middot; {{ $entry->ip_address }}
-                                @endif
-                            </p>
-                        </div>
-
-                        <code class="hidden sm:inline text-xs text-gray-400 shrink-0">{{ $entry->action }}</code>
-                    </li>
-                @endforeach
-            </ul>
-        @endif
-    </x-admin.panel>
-
     {{-- Says the figures are cached, because a number that looks live but is not is
          worse than a stale one that admits it. --}}
     <p class="text-xs text-gray-400 mt-4">

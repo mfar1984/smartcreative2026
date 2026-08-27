@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\ActivityLog;
 use App\Support\DashboardMetrics;
 use Illuminate\Http\Request;
 
@@ -33,7 +32,6 @@ class DashboardController extends Controller
             'money' => $user->hasPermission('payments.view'),
             'events' => $user->hasPermission('events.view'),
             'tournaments' => $user->hasPermission('tournaments.view'),
-            'activity' => $user->hasPermission('logs.activity.view'),
             'unpaid' => $user->hasPermission('payments.unpaid.view'),
         ];
 
@@ -62,10 +60,6 @@ class DashboardController extends Controller
             'paymentBreakdown' => $can['money'] ? $data['payment_breakdown'] : [],
             'topEvents' => $can['money'] ? $data['top_events'] : [],
             'upcomingEvents' => $can['events'] ? $data['upcoming_events'] : [],
-
-            'recentActivity' => $can['activity']
-                ? ActivityLog::query()->latest('created_at')->limit(8)->get()
-                : collect(),
         ]);
     }
 
