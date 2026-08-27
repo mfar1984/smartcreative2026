@@ -20,29 +20,30 @@
     </x-slot:actions>
 
     {{-- ==================== Headline figures ====================
-         Two rows grouped by meaning: money first, then what is happening. A single
-         grid holding all five sat as three plus two, and the empty cell read as
-         something that had failed to load.
+         One even strip. Splitting them into rows of two and three left a gap that
+         read as something failing to load, and two different row widths on one
+         screen is just harder to scan.
 
-         Only the cards this role may see are present, so a narrower role gets fewer
-         cards rather than gaps. --}}
-    @foreach (['money' => 'sm:grid-cols-2', 'activity' => 'sm:grid-cols-2 lg:grid-cols-3'] as $group => $columns)
-        @if (($cards[$group] ?? collect())->isNotEmpty())
-            <div class="grid grid-cols-1 {{ $columns }} gap-4 mb-4">
-                @foreach ($cards[$group] as $card)
-                    <x-admin.stat-card
-                        :label="$card['label']"
-                        :value="$card['value']"
-                        :note="$card['note']"
-                        :accent="$card['accent']"
-                        :icon="$card['icon']"
-                        :href="$card['href']"
-                        :change="$card['change']"
-                        :change-note="$card['changeNote']" />
-                @endforeach
-            </div>
-        @endif
-    @endforeach
+         auto-rows-fr keeps every card the same height whatever length of note it
+         carries, so the bottom edge is a straight line across.
+
+         Only the cards this role may see are present, so a narrower role gets a
+         shorter strip rather than holes. --}}
+    @if ($cards->isNotEmpty())
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 auto-rows-fr gap-3 mb-5">
+            @foreach ($cards as $card)
+                <x-admin.stat-card
+                    :label="$card['label']"
+                    :value="$card['value']"
+                    :note="$card['note']"
+                    :accent="$card['accent']"
+                    :icon="$card['icon']"
+                    :href="$card['href']"
+                    :change="$card['change']"
+                    :change-note="$card['changeNote']" />
+            @endforeach
+        </div>
+    @endif
 
     {{-- ==================== Charts ==================== --}}
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
@@ -50,13 +51,14 @@
         @if ($can['money'])
             <x-admin.panel title="Money Collected" icon="cash">
                 <div class="px-5 py-5">
-                    <p class="text-sm text-gray-600 mb-4">
+                    <p class="text-sm text-gray-600 mb-5">
                         Paid entries per day over the last {{ $trendDays }} days. Quiet days are
                         drawn as zero rather than skipped, so a flat week looks flat.
                     </p>
 
                     <x-admin.chart-area
                         :points="$revenueSeries"
+                        :peak-label="$revenuePeak"
                         tone="green"
                         empty="No payments have been recorded in the last {{ $trendDays }} days." />
                 </div>
@@ -66,13 +68,14 @@
         @if ($can['events'])
             <x-admin.panel title="Registrations Taken" icon="clipboard">
                 <div class="px-5 py-5">
-                    <p class="text-sm text-gray-600 mb-4">
+                    <p class="text-sm text-gray-600 mb-5">
                         Entries received per day over the last {{ $barDays }} days, whether they
                         have been paid for or not.
                     </p>
 
-                    <x-admin.chart-bars
+                    <x-admin.chart-area
                         :points="$registrationSeries"
+                        :peak-label="$registrationPeak"
                         tone="blue"
                         empty="No registrations have come in over the last {{ $barDays }} days." />
                 </div>

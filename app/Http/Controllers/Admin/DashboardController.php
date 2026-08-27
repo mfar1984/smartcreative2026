@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Support\DashboardMetrics;
+use App\Support\PaymentFigures;
 use Illuminate\Http\Request;
 
 /**
@@ -48,12 +49,18 @@ class DashboardController extends Controller
             'barDays' => self::BAR_DAYS,
             'generatedAt' => $data['generated_at'],
 
+            'cards' => collect($this->cards($data, $can)),
+
             /*
-             | Grouped so the view can draw two even rows instead of one grid that
-             | leaves a hole. Five cards in a three column grid sits as three then
-             | two, and the gap reads as something failing to load.
+             | The top of each chart's axis, formatted here because only this class
+             | knows which series is money and which is a plain count.
              */
-            'cards' => collect($this->cards($data, $can))->groupBy('group'),
+            'revenuePeak' => PaymentFigures::money(
+                (float) (collect($data['revenue_series'])->max('value') ?? 0),
+            ),
+            'registrationPeak' => number_format(
+                (float) (collect($data['registration_series'])->max('value') ?? 0),
+            ),
 
             'revenueSeries' => $can['money'] ? $data['revenue_series'] : [],
             'registrationSeries' => $can['events'] ? $data['registration_series'] : [],
@@ -84,7 +91,7 @@ class DashboardController extends Controller
             $cards[] = [
                 'group' => 'money',
                 'label' => 'Collected',
-                'value' => \App\Support\PaymentFigures::money($revenue['value']),
+                'value' => PaymentFigures::money($revenue['value']),
                 'note' => sprintf('Last %d days', self::TREND_DAYS),
                 'accent' => 'green',
                 'icon' => 'cash',
@@ -98,7 +105,7 @@ class DashboardController extends Controller
             $cards[] = [
                 'group' => 'money',
                 'label' => 'Outstanding',
-                'value' => \App\Support\PaymentFigures::money($revenue['outstanding']),
+                'value' => PaymentFigures::money($revenue['outstanding']),
                 'note' => 'Owed on entries not cancelled',
                 'accent' => $revenue['outstanding'] > 0 ? 'amber' : 'green',
                 'icon' => 'credit-card',
