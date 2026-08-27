@@ -9,6 +9,7 @@ use App\Services\AdminLogger;
 use App\Services\Messaging\InfobipGateway;
 use App\Services\Messaging\MessagingException;
 use App\Services\Messaging\TelegramNotifier;
+use App\Support\ChipBalance;
 use App\Support\MailSettings;
 use App\Support\PhoneNumber;
 use App\Support\PaymentSettings;
@@ -441,6 +442,19 @@ class IntegrationController extends Controller
         // this one is now stale and would be reported back on the next page.
         if ($tab === 'email') {
             MailSettings::flush();
+        }
+
+        /*
+         | Swapping the payment credentials has to drop the cached account balance.
+         |
+         | Without this the sidebar keeps showing the figure fetched under the old
+         | key: for up to five minutes if the new key works, and indefinitely if it
+         | does not, because the fallback figure is stored without an expiry. A test
+         | account's balance sitting under a live key is the worst version of that,
+         | since it looks like a working integration reporting the wrong money.
+         */
+        if ($tab === 'payments') {
+            ChipBalance::forget();
         }
 
         AdminLogger::activity(

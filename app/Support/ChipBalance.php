@@ -23,14 +23,38 @@ final class ChipBalance
     /** How long a fetched figure counts as current. */
     private const FRESH_FOR_MINUTES = 5;
 
-    /** Cache key holding the last figure that arrived, kept with no expiry. */
-    private const KEY_LAST = 'chip.balance.last';
-
-    /** Cache key whose mere presence means the last figure is still current. */
-    private const KEY_FRESH = 'chip.balance.fresh';
+    /**
+     * How old the fallback figure may get before it stops being shown.
+     *
+     * Beyond this the sidebar shows nothing rather than a number. "We could not
+     * ask" and "here is a figure from two days ago" are different statements, and
+     * only one of them is safe to put next to a currency symbol.
+     */
+    private const MAX_STALE_HOURS = 6;
 
     public function __construct(private readonly ChipGateway $gateway)
     {
+    }
+
+    /**
+     * Cache keys, fingerprinted with the credentials they were fetched under.
+     *
+     * This is what makes a key swap safe. Change the API key and the keys change
+     * with it, so the old account's balance is unreachable rather than waiting to
+     * be invalidated by someone remembering to call forget(). A test balance shown
+     * under a live key looks like a working integration reporting the wrong money,
+     * which is worse than showing nothing.
+     *
+     * @return array{fresh: string, last: string}
+     */
+    private function keys(): array
+    {
+        $fingerprint = substr(hash('sha256', (string) PaymentSettings::chipApiKey()), 0, 16);
+
+        return [
+            'fresh' => "chip.balance.{$fingerprint}.fresh",
+            'last' => "chip.balance.{$fingerprint}.last",
+        ];
     }
 
     /**
@@ -44,17 +68,21 @@ final class ChipBalance
             return null;
         }
 
-        $last = Cache::get(self::KEY_LAST);
+        ['fresh' => $freshKey, 'last' => $lastKey] = $this->keys();
 
-        if (Cache::has(self::KEY_FRESH) && is_array($last)) {
+        $last = Cache::get($lastKey);
+
+        if (Cache::has($freshKey) && is_array($last)) {
             return $this->present($last, stale: false);
         }
 
         $fetched = $this->fetch();
 
         if ($fetched !== null) {
-            Cache::forever(self::KEY_LAST, $fetched);
-            Cache::put(self::KEY_FRESH, true, now()->addMinutes(self::FRESH_FOR_MINUTES));
+            // Held for the maximum staleness rather than forever, so a figure can
+            // never outlive the point at which it stops being worth showing.
+            Cache::put($lastKey, $fetched, now()->addHours(self::MAX_STALE_HOURS));
+            Cache::put($freshKey, true, now()->addMinutes(self::FRESH_FOR_MINUTES));
 
             return $this->present($fetched, stale: false);
         }
@@ -62,9 +90,11 @@ final class ChipBalance
         /*
          | The fetch failed. Hold the failure for a minute so a CHIP outage is not
          | retried on every single page load, then fall back to whatever arrived
-         | last, marked stale.
+         | last, marked stale. Past MAX_STALE_HOURS there is nothing to fall back
+         | to, because the entry has expired, and the line disappears instead of
+         | quoting an old number.
          */
-        Cache::put(self::KEY_FRESH, true, now()->addMinute());
+        Cache::put($freshKey, true, now()->addMinute());
 
         return is_array($last) ? $this->present($last, stale: true) : null;
     }
@@ -139,12 +169,15 @@ final class ChipBalance
     /**
      * Drop the cache so the next read asks CHIP again.
      *
-     * Called after anything that would move the balance, and available for a
-     * deliberate refresh later.
+     * Called when the payment credentials are saved. The keys are fingerprinted so
+     * a changed key already misses, but the old entries would otherwise sit in the
+     * cache store until they expired, and clearing them keeps the store honest.
      */
     public static function forget(): void
     {
-        Cache::forget(self::KEY_FRESH);
-        Cache::forget(self::KEY_LAST);
+        $fingerprint = substr(hash('sha256', (string) PaymentSettings::chipApiKey()), 0, 16);
+
+        Cache::forget("chip.balance.{$fingerprint}.fresh");
+        Cache::forget("chip.balance.{$fingerprint}.last");
     }
 }
