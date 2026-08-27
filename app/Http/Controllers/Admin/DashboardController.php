@@ -50,7 +50,12 @@ class DashboardController extends Controller
             'barDays' => self::BAR_DAYS,
             'generatedAt' => $data['generated_at'],
 
-            'cards' => $this->cards($data, $can),
+            /*
+             | Grouped so the view can draw two even rows instead of one grid that
+             | leaves a hole. Five cards in a three column grid sits as three then
+             | two, and the gap reads as something failing to load.
+             */
+            'cards' => collect($this->cards($data, $can))->groupBy('group'),
 
             'revenueSeries' => $can['money'] ? $data['revenue_series'] : [],
             'registrationSeries' => $can['events'] ? $data['registration_series'] : [],
@@ -83,6 +88,7 @@ class DashboardController extends Controller
             $revenue = $data['revenue'];
 
             $cards[] = [
+                'group' => 'money',
                 'label' => 'Collected',
                 'value' => \App\Support\PaymentFigures::money($revenue['value']),
                 'note' => sprintf('Last %d days', self::TREND_DAYS),
@@ -96,6 +102,7 @@ class DashboardController extends Controller
             ];
 
             $cards[] = [
+                'group' => 'money',
                 'label' => 'Outstanding',
                 'value' => \App\Support\PaymentFigures::money($revenue['outstanding']),
                 'note' => 'Owed on entries not cancelled',
@@ -111,6 +118,7 @@ class DashboardController extends Controller
             $registrations = $data['registrations'];
 
             $cards[] = [
+                'group' => 'activity',
                 'label' => 'Registrations',
                 'value' => number_format($registrations['value']),
                 'note' => sprintf(
@@ -130,6 +138,7 @@ class DashboardController extends Controller
             $people = $data['people'];
 
             $cards[] = [
+                'group' => 'activity',
                 'label' => 'People Entered',
                 'value' => number_format($people['value']),
                 'note' => sprintf('%s of them players', number_format($people['players'])),
@@ -145,6 +154,7 @@ class DashboardController extends Controller
             $tournaments = $data['tournaments'];
 
             $cards[] = [
+                'group' => 'activity',
                 'label' => 'Tournaments',
                 'value' => number_format($tournaments['live']),
                 'note' => sprintf(

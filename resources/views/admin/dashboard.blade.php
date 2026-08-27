@@ -1,27 +1,48 @@
 @extends('layouts.admin')
 
 @section('title', 'Dashboard')
-@section('subheading', 'How the events, money and tournaments are doing')
+
+{{-- A breadcrumb rather than a subheading, because the page card below carries the
+     title. Both would print the same heading twice. --}}
+@section('breadcrumb')
+    <span class="font-semibold text-gray-700">Dashboard</span>
+@endsection
 
 @section('content')
+<x-admin.page-card
+    title="Dashboard"
+    description="How the events, money and tournaments are doing.">
+
+    <x-slot:actions>
+        <span class="text-xs text-gray-500">
+            Worked out {{ $generatedAt->diffForHumans() }}
+        </span>
+    </x-slot:actions>
+
     {{-- ==================== Headline figures ====================
-         Only the cards this role may see are in $cards, so the grid closes up
-         rather than leaving holes for a role with narrower permissions. --}}
-    @if ($cards !== [])
-        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-            @foreach ($cards as $card)
-                <x-admin.stat-card
-                    :label="$card['label']"
-                    :value="$card['value']"
-                    :note="$card['note']"
-                    :accent="$card['accent']"
-                    :icon="$card['icon']"
-                    :href="$card['href']"
-                    :change="$card['change']"
-                    :change-note="$card['changeNote']" />
-            @endforeach
-        </div>
-    @endif
+         Two rows grouped by meaning: money first, then what is happening. A single
+         grid holding all five sat as three plus two, and the empty cell read as
+         something that had failed to load.
+
+         Only the cards this role may see are present, so a narrower role gets fewer
+         cards rather than gaps. --}}
+    @foreach (['money' => 'sm:grid-cols-2', 'activity' => 'sm:grid-cols-2 lg:grid-cols-3'] as $group => $columns)
+        @if (($cards[$group] ?? collect())->isNotEmpty())
+            <div class="grid grid-cols-1 {{ $columns }} gap-4 mb-4">
+                @foreach ($cards[$group] as $card)
+                    <x-admin.stat-card
+                        :label="$card['label']"
+                        :value="$card['value']"
+                        :note="$card['note']"
+                        :accent="$card['accent']"
+                        :icon="$card['icon']"
+                        :href="$card['href']"
+                        :change="$card['change']"
+                        :change-note="$card['changeNote']" />
+                @endforeach
+            </div>
+        @endif
+    @endforeach
 
     {{-- ==================== Charts ==================== --}}
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
@@ -273,10 +294,11 @@
         @endif
     </x-admin.panel>
 
-    {{-- Says when the figures were worked out, because they are cached for two
-         minutes and a number that looks live but is not is worse than a stale one
-         that admits it. --}}
+    {{-- Says the figures are cached, because a number that looks live but is not is
+         worse than a stale one that admits it. --}}
     <p class="text-xs text-gray-400 mt-4">
-        Figures worked out {{ $generatedAt->diffForHumans() }}. Refreshed at most every two minutes.
+        Figures are worked out at most every two minutes, so a change you have just
+        made can take a moment to appear here.
     </p>
+</x-admin.page-card>
 @endsection
