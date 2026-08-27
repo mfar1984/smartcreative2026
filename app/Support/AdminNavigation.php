@@ -238,6 +238,31 @@ class AdminNavigation
                             ],
                         ],
                     ],
+
+                    /*
+                    | Portfolio. Website content rather than operations, so it sits
+                    | last in Modules: nothing here touches a participant, a payment
+                    | or a result.
+                    |
+                    | A group with one child rather than a plain item, so the second
+                    | screen this will grow does not force the sidebar to be
+                    | restructured later.
+                    */
+                    [
+                        'kind' => 'group',
+                        'key' => 'portfolio',
+                        'label' => 'Portfolio',
+                        'icon' => 'photo',
+                        'children' => [
+                            [
+                                'label' => 'Projects',
+                                'route' => 'admin.portfolio.index',
+                                // Wildcard so create and edit keep this item lit.
+                                'active' => 'admin.portfolio.*',
+                                'permission' => 'portfolio.view',
+                            ],
+                        ],
+                    ],
                 ],
             ],
 

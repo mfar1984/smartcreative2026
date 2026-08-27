@@ -190,6 +190,21 @@ class RolesAndPermissionsSeeder extends Seeder
             ],
         ],
 
+        /*
+        | Portfolio. Website content rather than operations: nothing here touches a
+        | participant, a payment or a result, so the four actions are the plain set
+        | with no separate publish permission. Publishing is a status on the form,
+        | and anyone trusted to write the entry is trusted to say it is finished.
+        */
+        'Portfolio' => [
+            'Projects' => [
+                'view' => ['portfolio.view', 'View portfolio projects'],
+                'create' => ['portfolio.create', 'Add portfolio projects'],
+                'update' => ['portfolio.update', 'Edit portfolio projects'],
+                'delete' => ['portfolio.delete', 'Delete portfolio projects'],
+            ],
+        ],
+
         'General Config' => [
             'General Settings' => [
                 'view' => ['settings.general.view', 'View general config'],
@@ -324,6 +339,11 @@ class RolesAndPermissionsSeeder extends Seeder
                 'tournaments.settings.view',
                 'tournaments.settings.update',
 
+                'portfolio.view',
+                'portfolio.create',
+                'portfolio.update',
+                'portfolio.delete',
+
                 'settings.general.view',
                 'settings.general.update',
                 'settings.backup.view',
@@ -395,6 +415,9 @@ class RolesAndPermissionsSeeder extends Seeder
                 'tournaments.rules.view',
                 'tournaments.halloffame.view',
                 'tournaments.settings.view',
+
+                // Can read the portfolio, cannot publish anything to the website.
+                'portfolio.view',
 
                 'settings.general.view',
                 'settings.integration.view',

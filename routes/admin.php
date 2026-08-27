@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\Campaign\CampaignReportController;
 use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
 use App\Http\Controllers\Admin\Event\ParticipantController;
 use App\Http\Controllers\Admin\Payment\PaymentController;
+use App\Http\Controllers\Admin\Portfolio\ProjectController as PortfolioProjectController;
 use App\Http\Controllers\Admin\Event\RegistrationController as EventRegistrationController;
 use App\Http\Controllers\Admin\Event\SettingsController as EventSettingsController;
 use App\Http\Controllers\Admin\Settings\GeneralConfigController;
@@ -407,6 +408,43 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:tournaments.matches.generate')->name('stages.generate');
             Route::delete('{tournament}/stages/{stage}/draw', [StageController::class, 'discard'])
                 ->middleware('permission:tournaments.matches.generate')->name('stages.discard');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Portfolio
+        |----------------------------------------------------------------------
+        |
+        | Work delivered, shown on the public Portfolio page. Website content
+        | rather than operations, which is why it sits after the modules that run
+        | an event and before Settings.
+        |
+        | No show route: the public page is the detail view, so a second read only
+        | screen in the admin would be two places to keep in step for no gain.
+        |
+        */
+        Route::prefix('portfolio')->name('portfolio.')->group(function () {
+
+            // `create` is declared before `{project}` so it is not swallowed as a
+            // route parameter.
+            Route::get('/', [PortfolioProjectController::class, 'index'])
+                ->middleware('permission:portfolio.view')
+                ->name('index');
+            Route::get('create', [PortfolioProjectController::class, 'create'])
+                ->middleware('permission:portfolio.create')
+                ->name('create');
+            Route::post('/', [PortfolioProjectController::class, 'store'])
+                ->middleware('permission:portfolio.create')
+                ->name('store');
+            Route::get('{project}/edit', [PortfolioProjectController::class, 'edit'])
+                ->middleware('permission:portfolio.update')
+                ->name('edit');
+            Route::put('{project}', [PortfolioProjectController::class, 'update'])
+                ->middleware('permission:portfolio.update')
+                ->name('update');
+            Route::delete('{project}', [PortfolioProjectController::class, 'destroy'])
+                ->middleware('permission:portfolio.delete')
+                ->name('destroy');
         });
 
         Route::prefix('settings')->name('settings.')->group(function () {

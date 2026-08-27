@@ -8,9 +8,11 @@ use App\Http\Controllers\LegalController;
 use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\Messaging\InfobipDeliveryController;
 use App\Http\Controllers\Payment\ChipWebhookController;
+use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\Payment\RegistrationPaymentController;
 use App\Http\Controllers\Public\TournamentPublicController;
 use App\Http\Controllers\RegistrationController;
+use App\Http\Controllers\ServiceController;
 
 // Home route
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -28,9 +30,14 @@ Route::get('/services', [MaintenanceController::class, 'services'])->name('servi
 */
 Route::get('/hall-of-fame', [TournamentPublicController::class, 'hallOfFame'])->name('hall-of-fame');
 Route::get('/events/{slug}/ranking', [TournamentPublicController::class, 'ranking'])->name('events.ranking');
-Route::get('/services/event-management', [MaintenanceController::class, 'eventManagement'])->name('services.event-management');
-Route::get('/services/online-registration', [MaintenanceController::class, 'onlineRegistration'])->name('services.online-registration');
-Route::get('/services/digital-creative', [MaintenanceController::class, 'digitalCreative'])->name('services.digital-creative');
+/*
+| The three service pages. Each is laid out differently on purpose: they are bought
+| for different reasons, and a visitor comparing them should be able to tell them
+| apart rather than reading three variations of the same grid.
+*/
+Route::get('/services/event-management', [ServiceController::class, 'eventManagement'])->name('services.event-management');
+Route::get('/services/online-registration', [ServiceController::class, 'onlineRegistration'])->name('services.online-registration');
+Route::get('/services/digital-creative', [ServiceController::class, 'digitalCreative'])->name('services.digital-creative');
 
 /*
 | Campaign tracking. Reached by strangers from links inside email, so identified
@@ -111,8 +118,12 @@ Route::get('/registration/{slug}', [RegistrationController::class, 'show'])->nam
 */
 Route::post('/payments/chip/webhook', ChipWebhookController::class)->name('payments.chip.webhook');
 
-// Portfolio route
-Route::get('/portfolio', [MaintenanceController::class, 'portfolio'])->name('portfolio');
+/*
+| Portfolio. Reads the portfolio_projects table, published entries only, so a
+| write up can be drafted over several sittings without appearing half finished on
+| the live site.
+*/
+Route::get('/portfolio', [PortfolioController::class, 'index'])->name('portfolio');
 
 // Shop route
 Route::get('/shop', [MaintenanceController::class, 'shop'])->name('shop');
