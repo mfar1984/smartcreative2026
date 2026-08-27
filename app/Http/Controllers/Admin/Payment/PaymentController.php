@@ -7,10 +7,16 @@ use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Services\AdminLogger;
 use App\Services\EventNotifier;
+use App\Services\Payment\ChipGateway;
+use App\Services\Payment\PaymentGatewayException;
+use App\Services\Payment\PaymentGatewayManager;
+use App\Support\ChipBalance;
 use App\Support\PaymentFigures;
 use App\Support\PaymentSettings;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -108,11 +114,21 @@ class PaymentController extends Controller
             'filters' => compact('status', 'eventId', 'search', 'from', 'to'),
             'isFiltered' => $status !== '' || $eventId !== '' || $search !== '' || filled($from) || filled($to),
             'canExport' => $request->user()->hasPermission('payments.export'),
+
+            // The refund column only exists for a role that may send one, so nobody
+            // is shown a control that would fail on press.
+            'canRefund' => $request->user()->hasPermission('payments.refund'),
+            'gatewayLabel' => PaymentSettings::providerLabel(),
         ]);
     }
 
     /**
      * What has been given back.
+     *
+     * Selected on the amount rather than on the status, because a partial refund
+     * leaves the entry `paid`: some of the money is still ours, so calling the whole
+     * entry refunded would be wrong. Filtering on the status alone used to miss
+     * every partial refund entirely.
      */
     public function refunds(Request $request)
     {
@@ -120,19 +136,147 @@ class PaymentController extends Controller
 
         $query = PaymentFigures::window(PaymentFigures::base(), $from, $to)
             ->with(['event', 'participants'])
-            ->where('payment_status', EventRegistration::PAYMENT_REFUNDED);
+            ->where('refunded_amount', '>', 0);
 
         return view('admin.payment.refunds', [
-            'registrations' => $query->clone()->latest('updated_at')->paginate(self::PER_PAGE)->withQueryString(),
-            'total' => (float) $query->clone()->sum('amount'),
+            'registrations' => $query->clone()->latest('refunded_at')->paginate(self::PER_PAGE)->withQueryString(),
+
+            // The refunded amount, not the charge. Summing `amount` reported a
+            // partial refund as though the whole entry had come back.
+            'total' => (float) $query->clone()->sum('refunded_amount'),
             'count' => $query->clone()->count(),
             'filters' => compact('from', 'to'),
 
-            // Whether this application could issue one, as opposed to record one
-            // that was issued elsewhere. It cannot, and the page says so.
-            'canIssue' => false,
+            'canIssue' => $request->user()->hasPermission('payments.refund'),
             'gatewayLabel' => PaymentSettings::providerLabel(),
         ]);
+    }
+
+    /**
+     * Send money back through the gateway.
+     *
+     * The order matters and is the whole point of this method: CHIP is asked first,
+     * and our records are only written once it has confirmed. Marking a refund
+     * locally and then calling the gateway would leave the books claiming money
+     * moved whenever that call failed.
+     */
+    public function refund(Request $request, EventRegistration $registration, PaymentGatewayManager $gateways)
+    {
+        // Checked again here, not only on the route. This is the button that takes
+        // money out of the account.
+        if (! $request->user()->hasPermission('payments.refund')) {
+            abort(403);
+        }
+
+        if (blank($registration->payment_reference)) {
+            return back()->withErrors([
+                'refund' => 'This entry has no gateway reference, so there is nothing for CHIP to refund. It was most likely settled by hand.',
+            ]);
+        }
+
+        $refundable = $registration->refundableAmount();
+
+        if ($refundable <= 0) {
+            return back()->withErrors([
+                'refund' => $registration->isFullyRefunded()
+                    ? 'This entry has already been refunded in full.'
+                    : 'Only a paid entry can be refunded.',
+            ]);
+        }
+
+        $data = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0.01', 'max:' . $refundable],
+            'reason' => ['required', 'string', 'max:255'],
+        ], [
+            'amount.max' => sprintf(
+                'The most that can still be refunded on this entry is %s.',
+                PaymentFigures::money($refundable),
+            ),
+            'reason.required' => 'A reason is required. A refund nobody can explain later is worse than no refund.',
+        ]);
+
+        /*
+         | Resolving the gateway is inside the try on purpose. active() throws when
+         | no provider is selected or its credentials are incomplete, and leaving
+         | that outside meant an unconfigured gateway produced a 500 rather than
+         | telling the operator that nothing was sent.
+         */
+        try {
+            $gateway = $gateways->active();
+
+            if (! $gateway instanceof ChipGateway) {
+                return back()->withErrors([
+                    'refund' => sprintf(
+                        'Refunds through the gateway are only implemented for CHIP, and %s is selected.',
+                        PaymentSettings::providerLabel(),
+                    ),
+                ]);
+            }
+
+            // Cents, because that is the unit CHIP works in.
+            $result = $gateway->refund(
+                $registration->payment_reference,
+                (int) round(((float) $data['amount']) * 100),
+            );
+        } catch (PaymentGatewayException $e) {
+            Log::warning('Refund refused by the gateway.', [
+                'registration' => $registration->reference,
+                'requested' => $data['amount'],
+                'detail' => $e->getMessage(),
+            ]);
+
+            return back()->withInput()->withErrors(['refund' => $e->publicMessage()]);
+        }
+
+        $before = [
+            'payment_status' => $registration->payment_status,
+            'refunded_amount' => (float) $registration->refunded_amount,
+        ];
+
+        DB::transaction(function () use ($registration, $result, $data) {
+            // The figure CHIP reported, not the figure that was asked for: a gateway
+            // may return less, and recording the request would overstate it.
+            $total = (float) $registration->refunded_amount + $result['amount'];
+
+            $registration->forceFill([
+                'refunded_amount' => $total,
+                'refunded_at' => now(),
+                'refund_reason' => $data['reason'],
+
+                /*
+                 | Only a full refund changes the status. A partial one stays paid,
+                 | because part of the money is still ours and the entry still counts
+                 | towards what the event took.
+                 */
+                'payment_status' => $total >= ((float) $registration->amount - 0.001)
+                    ? EventRegistration::PAYMENT_REFUNDED
+                    : $registration->payment_status,
+            ])->save();
+        });
+
+        AdminLogger::activity('payments.refund', sprintf(
+            'Refunded %s on %s.',
+            PaymentFigures::money($result['amount']),
+            $registration->reference,
+        ));
+
+        AdminLogger::audit($registration, 'payment.refunded', $before, [
+            'refunded_amount' => (float) $registration->fresh()->refunded_amount,
+            'payment_status' => $registration->fresh()->payment_status,
+            'reason' => $data['reason'],
+            'gateway_refund_id' => $result['id'],
+            'is_test' => $result['is_test'],
+        ]);
+
+        // The account balance in the sidebar has just moved.
+        ChipBalance::forget();
+
+        return back()->with('status', sprintf(
+            '%s refunded on %s.%s',
+            PaymentFigures::money($result['amount']),
+            $registration->reference,
+            $result['is_test'] ? ' This was a test transaction, so no real money moved.' : '',
+        ));
     }
 
     /**

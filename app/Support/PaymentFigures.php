@@ -42,8 +42,25 @@ class PaymentFigures
         return EventRegistration::query()->where('amount', '>', 0);
     }
 
-    /** What is held now. */
+    /**
+     * What is held now, after anything that has been sent back.
+     *
+     * Refunds are subtracted rather than the row being dropped. A partial refund
+     * leaves the entry `paid`, and counting the full charge would overstate the
+     * takings by whatever went back; excluding the row entirely would understate
+     * them by whatever stayed.
+     */
     public static function collected(?string $from = null, ?string $to = null): float
+    {
+        $paid = (float) self::window(self::base(), $from, $to)
+            ->where('payment_status', EventRegistration::PAYMENT_PAID)
+            ->sum('amount');
+
+        return round($paid - self::refunded($from, $to), 2);
+    }
+
+    /** What was charged before any refund, for reconciling against the gateway. */
+    public static function grossCollected(?string $from = null, ?string $to = null): float
     {
         return (float) self::window(self::base(), $from, $to)
             ->where('payment_status', EventRegistration::PAYMENT_PAID)
@@ -59,12 +76,18 @@ class PaymentFigures
             ->sum('amount');
     }
 
-    /** What has been given back. */
+    /**
+     * What has been given back.
+     *
+     * Sums `refunded_amount`, not `amount`. Summing the charge reported a RM 10
+     * refund on a RM 100 entry as RM 100 returned, and selecting on the status
+     * missed partial refunds altogether, because those stay `paid`.
+     */
     public static function refunded(?string $from = null, ?string $to = null): float
     {
         return (float) self::window(self::base(), $from, $to)
-            ->where('payment_status', EventRegistration::PAYMENT_REFUNDED)
-            ->sum('amount');
+            ->where('refunded_amount', '>', 0)
+            ->sum('refunded_amount');
     }
 
     /**

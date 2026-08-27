@@ -7,6 +7,7 @@ use App\Support\PaymentSettings;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * CHIP (chip-in.asia) Purchases API.
@@ -166,6 +167,110 @@ class ChipGateway implements PaymentGateway
         $payment = $response->json();
 
         return is_array($payment) ? $payment : null;
+    }
+
+    /**
+     * Send money back for a purchase.
+     *
+     * `$minorAmount` is in cents, and null refunds everything still refundable.
+     *
+     * The response is NOT a purchase object, which is worth knowing before reading
+     * it: CHIP answers with the refund itself, carrying `payment.amount` for what
+     * went back and `related_to.id` pointing at the purchase it came from. CHIP's
+     * own PHP SDK casts this to a Purchase, and doing the same here would quietly
+     * read the wrong fields.
+     *
+     * Throws rather than returning null. Every other call in this class is drawing
+     * a page and should degrade quietly, but a refund is money leaving the account:
+     * the operator has to be told whether it happened.
+     *
+     * @return array{amount: float, id: string|null, is_test: bool, raw: array<string, mixed>}
+     *
+     * @throws PaymentGatewayException
+     */
+    public function refund(string $purchaseId, ?int $minorAmount = null): array
+    {
+        if (! $this->isConfigured()) {
+            throw new PaymentGatewayException(
+                'CHIP is not configured, so no refund can be sent.',
+                'Payments are not set up, so this refund cannot be sent. Please contact the organiser.',
+            );
+        }
+
+        if ($purchaseId === '') {
+            throw new PaymentGatewayException(
+                'A refund was attempted with no purchase reference.',
+                'This entry has no gateway reference, so there is nothing for the gateway to refund.',
+            );
+        }
+
+        try {
+            $request = Http::withToken(PaymentSettings::chipApiKey())
+                ->acceptJson()
+                ->asJson()
+                ->timeout(self::TIMEOUT_SECONDS);
+
+            $response = $minorAmount === null
+                ? $request->post(self::BASE_URL . '/purchases/' . urlencode($purchaseId) . '/refund/')
+                : $request->post(
+                    self::BASE_URL . '/purchases/' . urlencode($purchaseId) . '/refund/',
+                    ['amount' => $minorAmount],
+                );
+        } catch (ConnectionException $e) {
+            throw new PaymentGatewayException(
+                'Could not reach CHIP to send a refund: ' . $e->getMessage(),
+                'The payment gateway could not be reached, so nothing was refunded. Try again in a moment.',
+                previous: $e,
+            );
+        }
+
+        if ($response->failed()) {
+            /*
+             | A 400 is shaped {"__all__": {"message": ..., "code": ...}}. The message
+             | is genuinely useful here, unlike most gateway errors, because it says
+             | things like already refunded or amount too large. It is logged in full
+             | and a trimmed copy is shown, since it can also quote account details.
+             */
+            $reason = (string) data_get($response->json(), '__all__.message', '');
+            $code = (string) data_get($response->json(), '__all__.code', '');
+
+            Log::warning('CHIP refund failed.', [
+                'purchase_id' => $purchaseId,
+                'status' => $response->status(),
+                'code' => $code,
+                'message' => $reason,
+            ]);
+
+            throw new PaymentGatewayException(
+                sprintf('CHIP returned HTTP %d refunding %s: %s', $response->status(), $purchaseId, $reason),
+                $reason !== ''
+                    ? 'The gateway refused the refund: ' . Str::limit($reason, 160)
+                    : sprintf('The gateway refused the refund and returned HTTP %d.', $response->status()),
+            );
+        }
+
+        $body = $response->json();
+
+        if (! is_array($body)) {
+            throw new PaymentGatewayException(
+                'CHIP accepted the refund but the response could not be read.',
+                'The refund may have gone through but the gateway sent an answer we could not read. Check CHIP before trying again.',
+            );
+        }
+
+        /*
+         | Read the amount back from CHIP rather than trusting what was asked for.
+         | A gateway may refund less than requested, and recording the requested
+         | figure would leave our books claiming money moved that did not.
+         */
+        $returned = data_get($body, 'payment.amount');
+
+        return [
+            'amount' => is_numeric($returned) ? ((int) $returned) / 100 : (($minorAmount ?? 0) / 100),
+            'id' => is_string(data_get($body, 'id')) ? (string) data_get($body, 'id') : null,
+            'is_test' => (bool) data_get($body, 'is_test', false),
+            'raw' => $body,
+        ];
     }
 
     /**

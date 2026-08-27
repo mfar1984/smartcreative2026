@@ -102,6 +102,9 @@
                         <th scope="col" class="{{ $head }}">Payment</th>
                         <th scope="col" class="{{ $head }}">Gateway Ref</th>
                         <th scope="col" class="{{ $head }}">Registered</th>
+                        @if ($canRefund)
+                            <th scope="col" class="{{ $head }} text-center">Refund</th>
+                        @endif
                     </tr>
                 </thead>
 
@@ -128,6 +131,21 @@
                                 @if ($registration->addonLines->isNotEmpty())
                                     <span class="block text-xs text-gray-400">incl. {{ $registration->addonsTotalLabel() }} extras</span>
                                 @endif
+
+                                {{-- A partial refund keeps the entry paid, so the amount
+                                     column has to say what is actually left. Without this
+                                     the row would read as though nothing had been sent
+                                     back. --}}
+                                @if ($registration->isRefunded())
+                                    <span class="block text-xs text-purple-700">
+                                        &minus;{{ $registration->refundedAmountLabel() }} refunded
+                                    </span>
+                                    @if ($registration->isPartiallyRefunded())
+                                        <span class="block text-xs font-semibold text-gray-600">
+                                            {{ App\Support\PaymentFigures::money($registration->netAmount()) }} kept
+                                        </span>
+                                    @endif
+                                @endif
                             </td>
 
                             <td class="px-5 py-3 whitespace-nowrap">
@@ -147,10 +165,76 @@
                             <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
                                 {{ $registration->created_at?->format('d M Y, g:i a') }}
                             </td>
+
+                            @if ($canRefund)
+                                <td class="px-5 py-3 whitespace-nowrap text-center">
+                                    @php $refundable = $registration->refundableAmount(); @endphp
+
+                                    @if ($refundable > 0 && filled($registration->payment_reference))
+                                        {{-- <details> rather than a modal: the form is a real
+                                             form, it works without JavaScript, and the amount
+                                             cannot be submitted without being seen. --}}
+                                        <details class="inline-block text-left group">
+                                            <summary class="inline-flex items-center gap-1.5 cursor-pointer rounded-lg border border-purple-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50 transition list-none [&::-webkit-details-marker]:hidden">
+                                                <x-admin.icon name="cash" class="w-3.5 h-3.5" />
+                                                Refund
+                                            </summary>
+
+                                            <form action="{{ route('admin.payments.refund', $registration) }}"
+                                                  method="POST"
+                                                  onsubmit="return confirm('Send this refund through {{ addslashes($gatewayLabel) }}?\n\nThis moves real money out of the account and cannot be undone from here.');"
+                                                  class="mt-2 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg space-y-2">
+                                                @csrf
+
+                                                <p class="text-xs text-gray-500">
+                                                    Up to <span class="font-semibold text-gray-900">{{ App\Support\PaymentFigures::money($refundable) }}</span>
+                                                    can still be sent back.
+                                                </p>
+
+                                                <div>
+                                                    <label for="amount-{{ $registration->id }}" class="block text-xs font-semibold text-gray-700 mb-1">
+                                                        Amount (RM)
+                                                    </label>
+                                                    <input type="number" id="amount-{{ $registration->id }}" name="amount"
+                                                           step="0.01" min="0.01" max="{{ $refundable }}"
+                                                           value="{{ number_format($refundable, 2, '.', '') }}"
+                                                           required
+                                                           class="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm tabular-nums focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/40">
+                                                </div>
+
+                                                <div>
+                                                    <label for="reason-{{ $registration->id }}" class="block text-xs font-semibold text-gray-700 mb-1">
+                                                        Reason <span class="text-red-500" aria-hidden="true">*</span>
+                                                    </label>
+                                                    <input type="text" id="reason-{{ $registration->id }}" name="reason"
+                                                           required maxlength="255"
+                                                           placeholder="e.g. withdrew before the closing date"
+                                                           class="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/40">
+                                                </div>
+
+                                                <button type="submit"
+                                                        class="w-full rounded-lg border border-purple-600 bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 transition">
+                                                    Send Refund
+                                                </button>
+
+                                                <p class="text-xs text-gray-400">
+                                                    Nothing changes here until {{ $gatewayLabel }} confirms it.
+                                                </p>
+                                            </form>
+                                        </details>
+                                    @elseif ($registration->isFullyRefunded())
+                                        <span class="text-xs text-gray-400">Fully refunded</span>
+                                    @elseif (blank($registration->payment_reference))
+                                        <span class="text-xs text-gray-300" title="Settled outside the gateway, so there is nothing for it to refund">No gateway ref</span>
+                                    @else
+                                        <span class="text-xs text-gray-300">Not paid</span>
+                                    @endif
+                                </td>
+                            @endif
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="px-5 py-12 text-center text-sm text-gray-500">
+                            <td colspan="{{ $canRefund ? 8 : 7 }}" class="px-5 py-12 text-center text-sm text-gray-500">
                                 @if ($isFiltered)
                                     Nothing matches these filters.
                                 @else

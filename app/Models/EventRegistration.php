@@ -51,6 +51,9 @@ class EventRegistration extends Model
         'registration_fee',
         'addons_total',
         'amount',
+        'refunded_amount',
+        'refunded_at',
+        'refund_reason',
         'notes',
         'ip_address',
     ];
@@ -61,9 +64,60 @@ class EventRegistration extends Model
             'registration_fee' => 'decimal:2',
             'addons_total' => 'decimal:2',
             'amount' => 'decimal:2',
+            'refunded_amount' => 'decimal:2',
             'payment_details' => 'array',
             'payment_synced_at' => 'datetime',
+            'refunded_at' => 'datetime',
         ];
+    }
+
+    /* ---------------------------------------------------------------------
+     | Refunds
+     * ------------------------------------------------------------------ */
+
+    /** Anything at all came back. */
+    public function isRefunded(): bool
+    {
+        return (float) $this->refunded_amount > 0;
+    }
+
+    /**
+     * The whole charge came back.
+     *
+     * Compared with a tolerance because both sides are decimals and a half cent of
+     * float drift would otherwise leave a fully refunded entry looking partial.
+     */
+    public function isFullyRefunded(): bool
+    {
+        return (float) $this->refunded_amount >= ((float) $this->amount - 0.001);
+    }
+
+    public function isPartiallyRefunded(): bool
+    {
+        return $this->isRefunded() && ! $this->isFullyRefunded();
+    }
+
+    /** What is left of the charge after refunds. */
+    public function netAmount(): float
+    {
+        return max(0, (float) $this->amount - (float) $this->refunded_amount);
+    }
+
+    /**
+     * What could still be sent back, as far as our own records know.
+     *
+     * CHIP is the authority on this and reports `refundable_amount` on the purchase.
+     * This is the local guard, so a second refund cannot be submitted for more than
+     * the entry was ever worth even before CHIP is asked.
+     */
+    public function refundableAmount(): float
+    {
+        return $this->isPaid() || $this->isRefunded() ? $this->netAmount() : 0.0;
+    }
+
+    public function refundedAmountLabel(): string
+    {
+        return 'RM ' . number_format((float) $this->refunded_amount, 2);
     }
 
     public function event(): BelongsTo

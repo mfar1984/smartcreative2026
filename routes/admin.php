@@ -185,6 +185,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:payments.refunds.view')
                 ->name('refunds');
 
+            /*
+            | Sending money back carries its own permission, separate from every
+            | view above. This is the one button in the module that moves real money
+            | out of the account, and it cannot be undone from here: reversing a
+            | refund means talking to CHIP.
+            */
+            Route::post('refund/{registration}', [PaymentController::class, 'refund'])
+                ->middleware('permission:payments.refund')
+                ->name('refund');
+
             Route::get('unpaid', [PaymentController::class, 'failed'])
                 ->middleware('permission:payments.unpaid.view')
                 ->name('unpaid');

@@ -174,6 +174,10 @@ class RolesAndPermissionsSeeder extends Seeder
             ],
             'Refunds' => [
                 'view' => ['payments.refunds.view', 'View refunded entries'],
+                // Separate from viewing, and deliberately not granted to Viewer.
+                // This one sends money out of the account through CHIP, and undoing
+                // it means talking to the gateway rather than clicking anything here.
+                'update' => ['payments.refund', 'Send a refund through the gateway'],
             ],
             'Settlements' => [
                 'view' => ['payments.settlements.view', 'View settlements'],
@@ -282,6 +286,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'payments.settlements.view',
                 'payments.reports.view',
                 'payments.export',
+                'payments.refund',
 
                 'campaigns.view',
                 'campaigns.create',
