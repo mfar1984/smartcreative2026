@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Campaign\TrackingController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\LegalController;
 use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\Messaging\InfobipDeliveryController;
 use App\Http\Controllers\Payment\ChipWebhookController;
@@ -115,6 +116,23 @@ Route::get('/portfolio', [MaintenanceController::class, 'portfolio'])->name('por
 
 // Shop route
 Route::get('/shop', [MaintenanceController::class, 'shop'])->name('shop');
+
+/*
+| Policy pages.
+|
+| CHIP will not approve a live merchant account without a refund policy, a privacy
+| policy and a shipping policy, each reachable at its own address on our own domain.
+| The footer already listed three policies as links, but every one of them pointed at
+| "#", so the pages were advertised without existing.
+|
+| Single segment paths, so they cannot collide with the campaign tracking routes above,
+| which all sit under the "c" prefix and need two segments.
+*/
+Route::get('/privacy-policy', [LegalController::class, 'privacy'])->name('legal.privacy');
+Route::get('/terms-of-service', [LegalController::class, 'terms'])->name('legal.terms');
+Route::get('/cookie-policy', [LegalController::class, 'cookies'])->name('legal.cookies');
+Route::get('/refund-policy', [LegalController::class, 'refund'])->name('legal.refund');
+Route::get('/shipping-policy', [LegalController::class, 'shipping'])->name('legal.shipping');
 
 // Contact routes
 Route::get('/contact', [ContactController::class, 'index'])->name('contact');

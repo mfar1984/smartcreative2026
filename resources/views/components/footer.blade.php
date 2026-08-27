@@ -44,13 +44,19 @@
                 <h4 class="text-white text-lg font-bold mb-4">Legal</h4>
                 <ul class="space-y-2">
                     <li>
-                        <a href="#" class="text-sm hover:text-blue-400 transition">Privacy Policy</a>
+                        <a href="{{ route('legal.privacy') }}" class="text-sm hover:text-blue-400 transition">Privacy Policy</a>
                     </li>
                     <li>
-                        <a href="#" class="text-sm hover:text-blue-400 transition">Terms of Service</a>
+                        <a href="{{ route('legal.terms') }}" class="text-sm hover:text-blue-400 transition">Terms of Service</a>
                     </li>
                     <li>
-                        <a href="#" class="text-sm hover:text-blue-400 transition">Cookie Policy</a>
+                        <a href="{{ route('legal.refund') }}" class="text-sm hover:text-blue-400 transition">Refund Policy</a>
+                    </li>
+                    <li>
+                        <a href="{{ route('legal.shipping') }}" class="text-sm hover:text-blue-400 transition">Shipping Policy</a>
+                    </li>
+                    <li>
+                        <a href="{{ route('legal.cookies') }}" class="text-sm hover:text-blue-400 transition">Cookie Policy</a>
                     </li>
                 </ul>
             </div>
