@@ -49,9 +49,12 @@
                      Kept on the element rather than as `space-y` on the form,
                      because a hidden provider panel must take up no space at all,
                      and a parent driven gap would leave one behind. --}}
-                <div class="mb-5"
-                     @if ($panelProvider) data-provider-panel="{{ $panelProvider }}" @endif
-                     @class(['hidden' => $isHiddenPanel])>
+                {{-- One class attribute, not two. A literal class="mb-5" beside an
+                     @class directive emits the attribute twice, and a browser keeps
+                     the first and discards the rest, so the `hidden` never applied
+                     and every gateway's credentials showed at once. --}}
+                <div @class(['mb-5', 'hidden' => $isHiddenPanel])
+                     @if ($panelProvider) data-provider-panel="{{ $panelProvider }}" @endif>
                     <x-admin.panel :title="$panelTitle" :icon="$panel['icon']">
                         @foreach ($panel['fields'] as $key)
                             <x-admin.schema-field
@@ -68,8 +71,8 @@
             {{-- What to paste into the gateway portal. Read only, because these
                  URLs are decided by this application's routes. --}}
             @if ($callbackUrls)
-                <div class="mb-5" data-provider-panel="chip"
-                     @class(['hidden' => ($selectedProvider ?? null) !== 'chip'])>
+                <div @class(['mb-5', 'hidden' => ($selectedProvider ?? null) !== 'chip'])
+                     data-provider-panel="chip">
                     <x-admin.panel title="Register These In CHIP" icon="globe">
                         @foreach ($callbackUrls as $item)
                             <x-admin.field-row :label="$item['label']" :help="$item['help']">

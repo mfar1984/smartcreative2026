@@ -22,14 +22,20 @@
         :active-tab="$activeTab"
         route="admin.shop.settings">
 
+        {{-- Outside the form, because the Categories tab holds records with their own
+             forms and would otherwise be nested inside the settings form. --}}
+        <x-admin.section-intro
+            :title="$definition['intro']['title']"
+            :description="$definition['intro']['description']"
+            :icon="$definition['icon']" />
+
+        @if ($isCategoriesTab)
+            @include('admin.shop.partials.category-settings')
+        @else
+
         <form action="{{ route('admin.shop.settings.update', ['tab' => $activeTab]) }}" method="POST">
             @csrf
             @method('PUT')
-
-            <x-admin.section-intro
-                :title="$definition['intro']['title']"
-                :description="$definition['intro']['description']"
-                :icon="$definition['icon']" />
 
             {{-- Opening a shop with nothing in it puts an empty page on the live site,
                  so the count is stated next to the switch that does it rather than
@@ -126,5 +132,11 @@
             @endif
         </form>
 
+        @endif
+
     </x-admin.settings-shell>
 @endsection
+
+@if ($isCategoriesTab)
+    @include('admin.shop.partials.category-dialogs')
+@endif

@@ -451,10 +451,20 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:shop.products.delete')
                 ->name('products.destroy');
 
-            // Categories
-            Route::get('categories', [ShopCategoryController::class, 'index'])
+            /*
+            | Categories moved into Shop Settings as a tab, because they are part of
+            | how the shop is arranged rather than a screen of their own.
+            |
+            | The old address is kept as a redirect rather than removed: it was in the
+            | sidebar, so it is in bookmarks and in the browser history of everyone who
+            | used it.
+            */
+            Route::get('categories', fn () => redirect()->route('admin.shop.settings', [
+                'tab' => ShopSettingsController::TAB_CATEGORIES,
+            ]))
                 ->middleware('permission:shop.categories.view')
                 ->name('categories');
+
             Route::post('categories', [ShopCategoryController::class, 'store'])
                 ->middleware('permission:shop.categories.create')
                 ->name('categories.store');

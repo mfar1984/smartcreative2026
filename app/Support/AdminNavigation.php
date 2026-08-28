@@ -257,17 +257,18 @@ class AdminNavigation
                                 'active' => 'admin.shop.products*',
                                 'permission' => 'shop.products.view',
                             ],
-                            [
-                                'label' => 'Categories',
-                                'route' => 'admin.shop.categories',
-                                'active' => 'admin.shop.categories*',
-                                'permission' => 'shop.categories.view',
-                            ],
-                            // Configuration sits below the screens that use it.
+                            /*
+                            | Categories is not listed here. It lives as a tab inside
+                            | Settings, because it describes how the shop is arranged
+                            | rather than being a screen anybody visits on its own.
+                            |
+                            | The category routes are still matched below so that
+                            | arriving at one keeps Settings lit.
+                            */
                             [
                                 'label' => 'Settings',
                                 'route' => 'admin.shop.settings',
-                                'active' => 'admin.shop.settings*',
+                                'active' => ['admin.shop.settings*', 'admin.shop.categories*'],
                                 'permission' => 'shop.settings.view',
                             ],
                         ],

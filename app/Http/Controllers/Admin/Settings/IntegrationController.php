@@ -111,7 +111,7 @@ class IntegrationController extends Controller
             'icon' => 'credit-card',
             'intro' => [
                 'title' => 'Payments',
-                'description' => 'Payment gateway used to collect event registration fees.',
+                'description' => 'How money is collected: the online gateway, and the offline methods that sit beside it.',
                 'icon' => 'credit-card',
                 'accent' => 'green',
             ],
@@ -145,12 +145,95 @@ class IntegrationController extends Controller
                     'provider' => 'stripe',
                     'fields' => ['stripe_publishable_key', 'stripe_secret_key', 'stripe_webhook_secret'],
                 ],
+
+                /*
+                | Offline methods. No `provider` key, so they stay on screen whichever
+                | gateway is chosen: they sit alongside it rather than replacing it,
+                | and a shop order might use either.
+                |
+                | Neither collects money by itself. Cash on delivery is settled by
+                | whoever hands the parcel over, and a transfer has to be checked
+                | against the bank before an order is treated as paid.
+                */
+                'Cash on Delivery' => [
+                    'icon' => 'cash',
+                    'fields' => ['cod_enabled', 'cod_note'],
+                ],
+
+                'Manual Bank Transfer' => [
+                    'icon' => 'building',
+                    'fields' => [
+                        'bank_transfer_enabled',
+                        'bank_account_name',
+                        'bank_name',
+                        'bank_account_number',
+                        'bank_transfer_note',
+                    ],
+                ],
             ],
 
             'fields' => [
                 'provider' => ['label' => 'Provider', 'type' => 'select', 'options' => ['none' => 'Not configured', 'chip' => 'CHIP (chip-in.asia)', 'billplz' => 'Billplz', 'toyyibpay' => 'toyyibPay', 'stripe' => 'Stripe'], 'rules' => ['required', 'in:none,chip,billplz,toyyibpay,stripe'], 'help' => 'The credential fields below change to match this.'],
                 'mode' => ['label' => 'Mode', 'type' => 'select', 'options' => ['sandbox' => 'Sandbox / Test', 'live' => 'Live'], 'rules' => ['required', 'in:sandbox,live'], 'help' => 'CHIP issues separate keys for test and live, so switching mode means switching keys too.'],
                 'currency' => ['label' => 'Currency', 'type' => 'select', 'options' => ['MYR' => 'MYR', 'SGD' => 'SGD', 'USD' => 'USD'], 'rules' => ['required', 'in:MYR,SGD,USD'], 'help' => 'Event fees are entered in this currency.'],
+
+                /* ---- Cash on delivery ---- */
+
+                'cod_enabled' => [
+                    'label' => 'Accept cash on delivery',
+                    'type' => 'toggle',
+                    'rules' => ['nullable', 'boolean'],
+                    'help' => 'Offers cash on delivery at checkout. The money is collected by whoever hands the parcel over, so an order stays unpaid here until somebody marks it settled.',
+                ],
+                'cod_note' => [
+                    'label' => 'What The Buyer Is Told',
+                    'type' => 'textarea',
+                    'rules' => ['nullable', 'string', 'max:500'],
+                    'placeholder' => 'Have the exact amount ready. Our courier cannot give change.',
+                    'help' => 'Shown at checkout when cash on delivery is chosen. Say anything they need to have ready.',
+                ],
+
+                /* ---- Manual bank transfer ---- */
+
+                'bank_transfer_enabled' => [
+                    'label' => 'Accept manual bank transfer',
+                    'type' => 'toggle',
+                    'rules' => ['nullable', 'boolean'],
+                    'help' => 'Shows your account details at checkout. Nothing arrives automatically, so a transfer has to be checked against the bank before the order is treated as paid.',
+                ],
+                'bank_account_name' => [
+                    'label' => 'Account Name',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:190'],
+                    'placeholder' => 'Smart Digital Creative Management & Resources',
+                    'help' => 'Exactly as the bank holds it. A name that does not match is the usual reason a transfer is rejected.',
+                ],
+                'bank_name' => [
+                    'label' => 'Bank Name',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:190'],
+                    'placeholder' => 'Maybank',
+                    'help' => 'The bank the account is held with.',
+                ],
+                'bank_account_number' => [
+                    'label' => 'Account Number',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:60'],
+                    'placeholder' => '512345678901',
+                    /*
+                     | Deliberately not marked secret. An account number has to be
+                     | shown to a buyer to receive money, and storing it encrypted
+                     | would only mean it could not be displayed back.
+                     */
+                    'help' => 'Digits only, no spaces or dashes. This is published to buyers, so it is stored in the clear rather than encrypted.',
+                ],
+                'bank_transfer_note' => [
+                    'label' => 'What The Buyer Is Told',
+                    'type' => 'textarea',
+                    'rules' => ['nullable', 'string', 'max:500'],
+                    'placeholder' => 'Send the transfer receipt to event@smartcreative.my with your order reference. Orders are released once the payment shows in our account.',
+                    'help' => 'Shown at checkout beside the account details. Tell them how to send proof and how long confirmation takes.',
+                ],
 
                 // ---- CHIP ----
                 'chip_brand_id' => [

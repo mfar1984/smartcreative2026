@@ -99,6 +99,73 @@ class PaymentSettings
     }
 
     /* ---------------------------------------------------------------------
+     | Offline methods
+     |
+     | These sit beside the gateway rather than replacing it. Neither collects
+     | money by itself: cash on delivery is settled by whoever hands the parcel
+     | over, and a transfer has to be checked against the bank, so an order paid
+     | either way is not paid until somebody says so.
+     * ------------------------------------------------------------------ */
+
+    public static function codEnabled(): bool
+    {
+        return self::get('cod_enabled') === '1';
+    }
+
+    public static function codNote(): ?string
+    {
+        return self::get('cod_note');
+    }
+
+    /**
+     * True only when the switch is on and there is something to transfer to.
+     *
+     * Showing "pay by transfer" with no account details would strand a buyer at
+     * the last step, so an incomplete set counts as off.
+     */
+    public static function bankTransferEnabled(): bool
+    {
+        return self::get('bank_transfer_enabled') === '1'
+            && filled(self::get('bank_account_name'))
+            && filled(self::get('bank_name'))
+            && filled(self::get('bank_account_number'));
+    }
+
+    /**
+     * The account to pay into, or null when it is not fully filled in.
+     *
+     * @return array{name: string, bank: string, number: string}|null
+     */
+    public static function bankAccount(): ?array
+    {
+        if (! self::bankTransferEnabled()) {
+            return null;
+        }
+
+        return [
+            'name' => (string) self::get('bank_account_name'),
+            'bank' => (string) self::get('bank_name'),
+            'number' => (string) self::get('bank_account_number'),
+        ];
+    }
+
+    public static function bankTransferNote(): ?string
+    {
+        return self::get('bank_transfer_note');
+    }
+
+    /**
+     * Whether there is any way at all for a buyer to pay.
+     *
+     * Distinct from isReady(), which asks only about the online gateway. A shop
+     * can trade on cash on delivery alone.
+     */
+    public static function hasAnyMethod(): bool
+    {
+        return self::isReady() || self::codEnabled() || self::bankTransferEnabled();
+    }
+
+    /* ---------------------------------------------------------------------
      | Readiness
      * ------------------------------------------------------------------ */
 

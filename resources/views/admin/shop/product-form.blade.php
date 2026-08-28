@@ -338,7 +338,7 @@
                     @if ($categories->isEmpty())
                         <div class="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-center">
                             <p class="text-sm text-gray-600">No categories yet</p>
-                            <a href="{{ route('admin.shop.categories') }}"
+                            <a href="{{ route('admin.shop.settings', ['tab' => App\Http\Controllers\Admin\Shop\SettingsController::TAB_CATEGORIES]) }}"
                                class="inline-block text-sm font-semibold text-blue-600 hover:underline mt-1">
                                 Set some up
                             </a>

@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Admin\Shop;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\ShopCategoryRequest;
 use App\Models\Setting;
+use App\Models\ShopCategory;
 use App\Models\ShopProduct;
 use App\Services\AdminLogger;
 use App\Support\ShopSettings;
@@ -23,6 +25,12 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class SettingsController extends Controller
 {
+    /**
+     * The category tab, kept out of SCHEMA because it holds records rather than
+     * settings and is saved through its own routes.
+     */
+    public const TAB_CATEGORIES = 'categories';
+
     /**
      * Tab slug => label, icon, intro and its fields.
      *
@@ -99,24 +107,67 @@ class SettingsController extends Controller
 
     public function index(Request $request)
     {
-        $tab = $this->resolveTab($request->query('tab'));
+        $user = $request->user();
+        $canSeeCategories = $user->hasPermission('shop.categories.view');
 
-        return view('admin.shop.settings', [
-            'tabs' => collect(self::SCHEMA)
-                ->map(fn (array $definition) => [
-                    'label' => $definition['label'],
-                    'icon' => $definition['icon'],
-                ])
-                ->all(),
+        $tab = $this->resolveTab($request->query('tab'), $canSeeCategories);
+
+        /*
+         | Categories is a tab on this screen but not an entry in SCHEMA, because
+         | SCHEMA drives validation and saving for settings that are single values.
+         | Categories are records with their own create, edit and delete routes, so
+         | the tab only borrows the frame.
+         */
+        $tabs = collect(self::SCHEMA)
+            ->map(fn (array $definition) => [
+                'label' => $definition['label'],
+                'icon' => $definition['icon'],
+            ])
+            ->all();
+
+        if ($canSeeCategories) {
+            $tabs[self::TAB_CATEGORIES] = ['label' => 'Categories', 'icon' => 'tag'];
+        }
+
+        $data = [
+            'tabs' => $tabs,
             'activeTab' => $tab,
-            'definition' => self::SCHEMA[$tab],
+            'isCategoriesTab' => $tab === self::TAB_CATEGORIES,
             'values' => ShopSettings::all(),
 
             // Shown as context on the Storefront tab: opening a shop with nothing
             // active in it is worth a warning before it happens, not after.
             'activeProducts' => ShopProduct::query()->active()->count(),
 
-            'canUpdate' => $request->user()->hasPermission('shop.settings.update'),
+            'canUpdate' => $user->hasPermission('shop.settings.update'),
+        ];
+
+        if ($tab === self::TAB_CATEGORIES) {
+            return view('admin.shop.settings', $data + [
+                // No SCHEMA entry, so the view is given an equivalent intro block
+                // rather than being made to special case its own heading.
+                'definition' => [
+                    'label' => 'Categories',
+                    'icon' => 'tag',
+                    'intro' => [
+                        'title' => 'How the shop is grouped',
+                        'description' => 'Visitors use these as filters, so keep them few and obvious. A shop with no categories lists everything on one page, which is fine until there is a lot to look through.',
+                    ],
+                    'fields' => [],
+                ],
+                'categories' => ShopCategory::query()
+                    ->withCount('products')
+                    ->inDisplayOrder()
+                    ->get(),
+                'icons' => ShopCategoryRequest::ICONS,
+                'canCreateCategory' => $user->hasPermission('shop.categories.create'),
+                'canUpdateCategory' => $user->hasPermission('shop.categories.update'),
+                'canDeleteCategory' => $user->hasPermission('shop.categories.delete'),
+            ]);
+        }
+
+        return view('admin.shop.settings', $data + [
+            'definition' => self::SCHEMA[$tab],
         ]);
     }
 
@@ -173,8 +224,19 @@ class SettingsController extends Controller
      * An unknown tab falls back rather than 404ing, so a stale bookmark still
      * opens the screen.
      */
-    private function resolveTab(?string $tab): string
+    private function resolveTab(?string $tab, bool $canSeeCategories): string
     {
-        return array_key_exists((string) $tab, self::SCHEMA) ? (string) $tab : 'storefront';
+        $tab = (string) $tab;
+
+        /*
+         | Categories is accepted only when the account may see it. Without this an
+         | account holding shop.settings.view but not shop.categories.view could read
+         | the category list by editing the query string.
+         */
+        if ($tab === self::TAB_CATEGORIES) {
+            return $canSeeCategories ? self::TAB_CATEGORIES : 'storefront';
+        }
+
+        return array_key_exists($tab, self::SCHEMA) ? $tab : 'storefront';
     }
 }

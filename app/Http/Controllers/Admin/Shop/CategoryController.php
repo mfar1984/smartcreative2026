@@ -6,30 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ShopCategoryRequest;
 use App\Models\ShopCategory;
 use App\Services\AdminLogger;
-use Illuminate\Http\Request;
 
 /**
- * Categories are short records with six fields, so they are created and edited in
- * a dialog on the list rather than on their own page. That follows User Management,
- * which is the other screen in the project where a round trip to a separate form
- * would cost more than the record is worth.
+ * Categories are short records with six fields, so they are created and edited in a
+ * dialog rather than on their own page. That follows User Management, the other
+ * screen where a round trip to a separate form would cost more than the record is
+ * worth.
+ *
+ * There is no index method: the list is a tab on Shop Settings, rendered by
+ * SettingsController. This class only writes.
  */
 class CategoryController extends Controller
 {
-    public function index(Request $request)
-    {
-        return view('admin.shop.categories', [
-            'categories' => ShopCategory::query()
-                ->withCount('products')
-                ->inDisplayOrder()
-                ->get(),
-            'icons' => ShopCategoryRequest::ICONS,
-            'canCreate' => $request->user()->hasPermission('shop.categories.create'),
-            'canUpdate' => $request->user()->hasPermission('shop.categories.update'),
-            'canDelete' => $request->user()->hasPermission('shop.categories.delete'),
-        ]);
-    }
-
     public function store(ShopCategoryRequest $request)
     {
         $category = new ShopCategory($request->categoryAttributes());
@@ -43,7 +31,7 @@ class CategoryController extends Controller
         ]);
 
         return redirect()
-            ->route('admin.shop.categories')
+            ->route('admin.shop.settings', ['tab' => SettingsController::TAB_CATEGORIES])
             ->with('status', sprintf('Category %s added.', $category->name));
     }
 
@@ -71,7 +59,7 @@ class CategoryController extends Controller
         ]);
 
         return redirect()
-            ->route('admin.shop.categories')
+            ->route('admin.shop.settings', ['tab' => SettingsController::TAB_CATEGORIES])
             ->with('status', sprintf('Category %s saved.', $category->name));
     }
 
@@ -106,7 +94,7 @@ class CategoryController extends Controller
             );
 
         return redirect()
-            ->route('admin.shop.categories')
+            ->route('admin.shop.settings', ['tab' => SettingsController::TAB_CATEGORIES])
             ->with('status', $message);
     }
 
