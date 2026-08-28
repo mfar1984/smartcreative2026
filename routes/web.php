@@ -171,6 +171,23 @@ Route::get('/order/{reference}', [CheckoutController::class, 'confirmation'])
     ->middleware('signed')
     ->name('shop.order');
 
+/*
+| The buyer saying the parcel arrived, which is how a cash on delivery order is
+| settled: nobody here can observe the courier handing it over.
+|
+| Split in two on purpose, the same way the campaign unsubscribe is. Mail clients
+| prefetch links to build previews, so a GET that recorded the confirmation would
+| mark parcels received that nobody had touched. The GET shows a button; the POST
+| acts.
+*/
+Route::get('/order/{reference}/received', [CheckoutController::class, 'confirmReceiptForm'])
+    ->middleware('signed')
+    ->name('shop.order.received');
+
+Route::post('/order/{reference}/received', [CheckoutController::class, 'confirmReceipt'])
+    ->middleware(['signed', 'throttle:10,1'])
+    ->name('shop.order.received.confirm');
+
 
 
 /*

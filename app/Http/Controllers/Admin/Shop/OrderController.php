@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Admin\Shop;
 use App\Http\Controllers\Controller;
 use App\Models\ShopOrder;
 use App\Services\AdminLogger;
+use App\Services\Payment\PaymentGatewayManager;
 use App\Services\ShopOrderWriter;
+use App\Support\PaymentFigures;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -72,6 +74,7 @@ class OrderController extends Controller
 
             'canUpdate' => $request->user()->hasPermission('shop.orders.update'),
             'canConfirmPayment' => $request->user()->hasPermission('shop.orders.payment'),
+            'canRefund' => $request->user()->hasPermission('shop.orders.refund'),
         ]);
     }
 
@@ -177,5 +180,132 @@ class OrderController extends Controller
         return redirect()
             ->route('admin.shop.orders.show', $order)
             ->with('status', sprintf('Order %s marked paid. Stock has been taken off.', $order->reference));
+    }
+
+    /**
+     * Send money back.
+     *
+     * The order of operations is the point, and it matches the registration refund:
+     * the gateway is asked first and our records are written only once it confirms.
+     * Marking a refund locally and then calling out would leave the books claiming
+     * money moved whenever that call failed.
+     *
+     * An order settled by cash or bank transfer never went through a gateway, so
+     * there is nothing to call: it is recorded as returned by hand, and whoever
+     * presses it is asserting they sent the money.
+     */
+    public function refund(Request $request, ShopOrder $order, PaymentGatewayManager $gateways)
+    {
+        // Checked again here, not only on the route. This is the button that takes
+        // money out of the account.
+        if (! $request->user()->hasPermission('shop.orders.refund')) {
+            abort(403);
+        }
+
+        $refundable = $order->isPaid() ? $order->netAmount() : 0.0;
+
+        if ($refundable <= 0) {
+            return back()->withErrors([
+                'refund' => $order->isFullyRefunded()
+                    ? 'This order has already been refunded in full.'
+                    : 'Only a paid order can be refunded.',
+            ]);
+        }
+
+        $data = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0.01', 'max:' . $refundable],
+            'reason' => ['required', 'string', 'max:255'],
+        ], [
+            'amount.max' => sprintf(
+                'The most that can still be refunded on this order is %s.',
+                PaymentFigures::money($refundable),
+            ),
+            'reason.required' => 'A reason is required. A refund nobody can explain later is worse than no refund.',
+        ]);
+
+        $amount = round((float) $data['amount'], 2);
+        $throughGateway = $order->payment_method === ShopOrder::METHOD_GATEWAY
+            && filled($order->payment_reference);
+
+        if ($throughGateway) {
+            try {
+                /*
+                 | Resolving the gateway is inside the try on purpose: active() throws
+                 | when no provider is selected or its credentials are incomplete, and
+                 | leaving it outside turned an unconfigured gateway into a 500 rather
+                 | than telling the operator nothing was sent.
+                 */
+                $result = $gateways->active()->refund(
+                    $order->payment_reference,
+                    (int) round($amount * 100),
+                );
+            } catch (\Throwable $e) {
+                AdminLogger::activity(
+                    'shop.orders.refund-failed',
+                    sprintf('Refund of %s on order %s was refused: %s', PaymentFigures::money($amount), $order->reference, $e->getMessage()),
+                    level: AdminLogger::LEVEL_ERROR,
+                );
+
+                return back()->withErrors([
+                    'refund' => 'The gateway refused the refund, so nothing was sent and nothing was recorded here. ' . $e->getMessage(),
+                ]);
+            }
+
+            /*
+             | The amount the gateway says it returned, not the amount asked for. They
+             | can differ, and trusting our own figure would record a refund that never
+             | happened at that size.
+             */
+            $confirmed = isset($result['payment']['amount'])
+                ? round(((int) $result['payment']['amount']) / 100, 2)
+                : $amount;
+        } else {
+            $confirmed = $amount;
+        }
+
+        $order->refunded_amount = round((float) $order->refunded_amount + $confirmed, 2);
+        $order->refunded_at = now();
+        $order->refund_reason = $data['reason'];
+        $order->save();
+
+        /*
+         | Only a refund of the whole order closes it. A partial refund leaves the
+         | order where it was, because the buyer is still owed the rest of the parcel.
+         */
+        if ($order->isFullyRefunded() && $order->canMoveTo(ShopOrder::STATUS_REFUNDED)) {
+            $writer = app(ShopOrderWriter::class);
+            $writer->moveTo($order, ShopOrder::STATUS_REFUNDED, sprintf(
+                'Refunded in full: %s. %s',
+                PaymentFigures::money($confirmed),
+                $data['reason'],
+            ));
+        } else {
+            app(ShopOrderWriter::class)->note($order, sprintf(
+                'Refunded %s%s. %s',
+                PaymentFigures::money($confirmed),
+                $throughGateway ? '' : ' by hand',
+                $data['reason'],
+            ));
+        }
+
+        AdminLogger::activity(
+            'shop.orders.refund',
+            sprintf('Refunded %s on order %s. %s', PaymentFigures::money($confirmed), $order->reference, $data['reason']),
+        );
+        AdminLogger::audit($order, 'refunded', null, [
+            'reference' => $order->reference,
+            'amount' => $confirmed,
+            'through_gateway' => $throughGateway,
+            'reason' => $data['reason'],
+        ]);
+
+        return redirect()
+            ->route('admin.shop.orders.show', $order)
+            ->with('status', sprintf(
+                '%s refunded on order %s.%s',
+                PaymentFigures::money($confirmed),
+                $order->reference,
+                $throughGateway ? '' : ' Recorded as returned by hand, since this order never went through the gateway.',
+            ));
     }
 }

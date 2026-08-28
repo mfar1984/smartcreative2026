@@ -277,6 +277,81 @@
                     </x-admin.panel>
                 @endif
 
+                {{--
+                    Refund. Only on a paid order with something left to return, so the
+                    form never offers an action the controller would refuse.
+                --}}
+                @if ($canRefund && $order->isPaid() && $order->netAmount() > 0)
+                    @php
+                        $refundable = $order->netAmount();
+                        $viaGateway = $order->payment_method === ShopOrder::METHOD_GATEWAY
+                            && filled($order->payment_reference);
+                    @endphp
+
+                    <x-admin.panel title="Refund" icon="credit-card">
+                        <form action="{{ route('admin.shop.orders.refund', $order) }}" method="POST"
+                              onsubmit="return confirm('Refund this order?\n\nThis sends money back and cannot be undone from here.');"
+                              class="px-5 py-4 space-y-4">
+                            @csrf
+
+                            @error('refund')
+                                <p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ $message }}</p>
+                            @enderror
+
+                            <p class="text-sm text-gray-600">
+                                @if ($viaGateway)
+                                    This was paid through {{ $order->methodLabel() }}. The gateway is asked first,
+                                    and nothing is recorded here unless it agrees.
+                                @else
+                                    This was settled by {{ $order->methodLabel() }}, so there is no gateway to call.
+                                    Pressing this records a refund you are sending by hand.
+                                @endif
+                            </p>
+
+                            @if ($order->refunded_amount > 0)
+                                <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                    {{ $order->refundedLabel() }} has already gone back.
+                                    {{ $order->netLabel() }} is left.
+                                </p>
+                            @endif
+
+                            <div>
+                                <label for="amount" class="block text-sm font-semibold text-gray-700 mb-1.5">
+                                    Amount <span class="text-red-500">*</span>
+                                </label>
+                                <div class="relative">
+                                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">RM</span>
+                                    <input type="number" id="amount" name="amount" required
+                                           step="0.01" min="0.01" max="{{ number_format($refundable, 2, '.', '') }}"
+                                           value="{{ old('amount', number_format($refundable, 2, '.', '')) }}"
+                                           class="{{ $input }} pl-10 tabular-nums">
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Up to {{ $order->netLabel() }}. Lower it for a partial refund.
+                                </p>
+                            </div>
+
+                            <div>
+                                <label for="reason" class="block text-sm font-semibold text-gray-700 mb-1.5">
+                                    Reason <span class="text-red-500">*</span>
+                                </label>
+                                <textarea id="reason" name="reason" rows="2" required maxlength="255"
+                                          placeholder="Why is this being refunded?"
+                                          class="{{ $input }}">{{ old('reason') }}</textarea>
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Kept on the order. A refund nobody can explain later is worse than no refund.
+                                </p>
+                            </div>
+
+                            <button type="submit"
+                                    class="w-full inline-flex items-center justify-center gap-2 bg-red-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-red-700 transition shadow-sm">
+                                <x-admin.icon name="credit-card" class="w-4 h-4" />
+                                Refund
+                            </button>
+                        </form>
+                    </x-admin.panel>
+                @endif
+
                 <x-admin.panel title="Customer" icon="users">
                     <div class="px-5 py-4 text-sm space-y-1">
                         <p class="font-semibold text-gray-900">{{ $order->customer_name }}</p>

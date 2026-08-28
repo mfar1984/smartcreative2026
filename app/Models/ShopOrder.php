@@ -234,6 +234,16 @@ class ShopOrder extends Model
         return max(0, (float) $this->grand_total - (float) $this->refunded_amount);
     }
 
+    public function refundedLabel(): string
+    {
+        return PaymentFigures::money((float) $this->refunded_amount);
+    }
+
+    public function netLabel(): string
+    {
+        return PaymentFigures::money($this->netAmount());
+    }
+
     /* ---------------------------------------------------------------------
      | Delivery
      * ------------------------------------------------------------------ */

@@ -263,6 +263,12 @@ class AdminNavigation
                                 'active' => 'admin.shop.orders*',
                                 'permission' => 'shop.orders.view',
                             ],
+                            [
+                                'label' => 'Tracking',
+                                'route' => 'admin.shop.tracking',
+                                'active' => 'admin.shop.tracking*',
+                                'permission' => 'shop.orders.view',
+                            ],
                             /*
                             | Categories is not listed here. It lives as a tab inside
                             | Settings, because it describes how the shop is arranged

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ShopOrder;
 use App\Services\ShopOrderWriter;
 use App\Support\Cart;
+use App\Support\PaymentFigures;
 use App\Support\PaymentSettings;
 use App\Support\ShippingSettings;
 use App\Support\ShopSettings;
@@ -106,10 +107,7 @@ class CheckoutController extends Controller
 
     public function confirmation(string $reference)
     {
-        $order = ShopOrder::query()
-            ->with('items')
-            ->where('reference', $reference)
-            ->firstOrFail();
+        $order = $this->findOrder($reference);
 
         return view('pages.order-confirmation', [
             'pageTitle' => 'Order ' . $order->reference,
@@ -118,6 +116,72 @@ class CheckoutController extends Controller
             'bankNote' => PaymentSettings::bankTransferNote(),
             'codNote' => PaymentSettings::codNote(),
         ]);
+    }
+
+    /**
+     * The page the buyer lands on from the link we send when a parcel goes out.
+     *
+     * A GET so mail clients prefetching the link cannot confirm anything: previews
+     * and threat scanners follow links, and a GET that wrote would report parcels
+     * received that nobody had touched.
+     */
+    public function confirmReceiptForm(string $reference)
+    {
+        return view('pages.order-received', [
+            'pageTitle' => 'Confirm delivery',
+            'order' => $this->findOrder($reference),
+        ]);
+    }
+
+    public function confirmReceipt(Request $request, string $reference, ShopOrderWriter $writer)
+    {
+        $order = $this->findOrder($reference);
+
+        if ($order->isReceiptConfirmed()) {
+            // Pressing it twice is not an error; it just does nothing the second time.
+            return view('pages.order-received', [
+                'pageTitle' => 'Confirm delivery',
+                'order' => $order,
+            ]);
+        }
+
+        $order->received_confirmed_at = now();
+        $order->received_confirmed_ip = $request->ip();
+        $order->save();
+
+        /*
+         | A cash on delivery parcel that has been received has also been paid for, at
+         | the door. Both moves are recorded so the trail shows what the buyer said and
+         | what it meant, rather than one silently implying the other.
+         */
+        if ($order->awaitsManualPayment() && $order->payment_method === ShopOrder::METHOD_COD) {
+            $writer->moveTo($order, ShopOrder::STATUS_PAID, 'Buyer confirmed the parcel arrived and was paid for on delivery.');
+        }
+
+        if ($order->canMoveTo(ShopOrder::STATUS_DELIVERED)) {
+            $writer->moveTo($order, ShopOrder::STATUS_DELIVERED, 'Buyer confirmed the parcel arrived.');
+        } else {
+            $writer->note($order, 'Buyer confirmed the parcel arrived.');
+        }
+
+        return view('pages.order-received', [
+            'pageTitle' => 'Thank you',
+            'order' => $order->fresh(),
+        ]);
+    }
+
+    /**
+     * The order behind a signed reference.
+     *
+     * A 404 rather than a 403 for one that does not exist: there is nothing to tell a
+     * stranger about whether a reference is real.
+     */
+    private function findOrder(string $reference): ShopOrder
+    {
+        return ShopOrder::query()
+            ->with('items')
+            ->where('reference', $reference)
+            ->firstOrFail();
     }
 
     /* ---------------------------------------------------------------------

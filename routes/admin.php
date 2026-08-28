@@ -14,6 +14,7 @@ use App\Http\Controllers\Admin\Portfolio\GalleryController as PortfolioGalleryCo
 use App\Http\Controllers\Admin\Portfolio\ProjectController as PortfolioProjectController;
 use App\Http\Controllers\Admin\Shop\CategoryController as ShopCategoryController;
 use App\Http\Controllers\Admin\Shop\OrderController as ShopOrderController;
+use App\Http\Controllers\Admin\Shop\TrackingController as ShopTrackingController;
 use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
 use App\Http\Controllers\Admin\Shop\SettingsController as ShopSettingsController;
 use App\Http\Controllers\Admin\Event\RegistrationController as EventRegistrationController;
@@ -496,6 +497,27 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::put('orders/{order}/payment', [ShopOrderController::class, 'confirmPayment'])
                 ->middleware('permission:shop.orders.payment')
                 ->name('orders.payment');
+
+            /*
+            | Sending money back. Its own permission again, and separate from the event
+            | refund: somebody trusted with the shop is not automatically trusted with
+            | registration fees.
+            */
+            Route::post('orders/{order}/refund', [ShopOrderController::class, 'refund'])
+                ->middleware('permission:shop.orders.refund')
+                ->name('orders.refund');
+
+            /*
+            | Tracking. The same orders read from the delivery end rather than the money
+            | end, which is why it shares the orders permissions rather than inventing
+            | its own: there is nothing here somebody with the order list cannot see.
+            */
+            Route::get('tracking', [ShopTrackingController::class, 'index'])
+                ->middleware('permission:shop.orders.view')
+                ->name('tracking');
+            Route::put('tracking/{order}', [ShopTrackingController::class, 'update'])
+                ->middleware('permission:shop.orders.update')
+                ->name('tracking.update');
 
             // Shop Settings - tabs: Storefront, Inventory, Categories
             Route::get('settings', [ShopSettingsController::class, 'index'])
