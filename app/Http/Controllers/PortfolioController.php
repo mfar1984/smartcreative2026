@@ -28,6 +28,9 @@ class PortfolioController extends Controller
         }
 
         $projects = PortfolioProject::query()
+            // The lightbox reads these, so they are loaded up front rather than one
+            // query per card.
+            ->with('images')
             ->published()
             ->when($service !== '', fn (Builder $query) => $query->where('service', $service))
             ->inDisplayOrder()

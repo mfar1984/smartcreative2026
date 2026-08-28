@@ -230,6 +230,17 @@ class RolesAndPermissionsSeeder extends Seeder
                 'update' => ['portfolio.update', 'Edit portfolio projects'],
                 'delete' => ['portfolio.delete', 'Delete portfolio projects'],
             ],
+            /*
+            | Its own set rather than folded into Projects. Writing up a project and
+            | publishing photographs of it are different jobs, and a photographer
+            | handed the gallery has no business editing the copy or the client name.
+            */
+            'Gallery' => [
+                'view' => ['portfolio.gallery.view', 'View portfolio gallery'],
+                'create' => ['portfolio.gallery.create', 'Upload gallery photographs'],
+                'update' => ['portfolio.gallery.update', 'Edit gallery photographs'],
+                'delete' => ['portfolio.gallery.delete', 'Delete gallery photographs'],
+            ],
         ],
 
         'General Config' => [
@@ -381,6 +392,10 @@ class RolesAndPermissionsSeeder extends Seeder
                 'portfolio.create',
                 'portfolio.update',
                 'portfolio.delete',
+                'portfolio.gallery.view',
+                'portfolio.gallery.create',
+                'portfolio.gallery.update',
+                'portfolio.gallery.delete',
 
                 'settings.general.view',
                 'settings.general.update',
@@ -464,6 +479,7 @@ class RolesAndPermissionsSeeder extends Seeder
 
                 // Can read the portfolio, cannot publish anything to the website.
                 'portfolio.view',
+                'portfolio.gallery.view',
 
                 'settings.general.view',
                 'settings.integration.view',

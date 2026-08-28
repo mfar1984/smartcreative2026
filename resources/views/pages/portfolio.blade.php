@@ -1,12 +1,16 @@
 {{--
     Portfolio.
 
-    A card grid, filtered by service. Each card is one delivered project: image,
-    category, title, who it was for, when, a summary and its highlights.
+    A card grid, filtered by service, twelve at a time with a Load More control
+    underneath.
 
-    Cards with no uploaded image fall back to a lettered tile rather than a broken
-    image or a grey box, so a grid can be populated before the photographs are ready
-    without looking unfinished.
+    Load More is a real link to the next page. With JavaScript it fetches that page,
+    lifts the cards out and appends them; without it, it behaves as the pagination
+    link it already is. Either way nobody is stranded on page one.
+
+    Pressing a card that has photographs opens the lightbox included once at the
+    bottom. Cards without photographs do not react, because a popup with nothing in
+    it is worse than no popup.
 --}}
 @extends('layouts.master')
 
@@ -58,98 +62,53 @@
 
             {{-- ---------------- Grid ---------------- --}}
             @if ($projects->isNotEmpty())
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-7">
+                <div id="portfolio-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-7">
                     @foreach ($projects as $project)
-                        @php
-                            $image = $project->imageUrl();
-                            $highlights = $project->highlightLines();
-                        @endphp
-
-                        <article class="group flex flex-col rounded-lg border border-gray-200 shadow-sm overflow-hidden hover:shadow-xl hover:border-blue-200 transition">
-
-                            {{-- Image, or a lettered tile when there is none. --}}
-                            <div class="relative aspect-[4/3] overflow-hidden bg-gray-900">
-                                @if ($image)
-                                    <img src="{{ $image }}"
-                                         alt="{{ $project->title }}"
-                                         loading="lazy"
-                                         class="w-full h-full object-cover group-hover:scale-105 transition duration-500">
-                                @else
-                                    <div class="w-full h-full bg-gradient-to-br from-gray-900 via-gray-800 to-blue-900 flex items-center justify-center">
-                                        <span class="text-5xl font-bold text-white/25" aria-hidden="true">
-                                            {{ Str::upper(Str::substr($project->title, 0, 2)) }}
-                                        </span>
-                                    </div>
-                                @endif
-
-                                {{-- Category sits on the image so the card body starts with
-                                     the title rather than with a label. --}}
-                                <span class="absolute top-3 left-3 bg-white/95 backdrop-blur-sm text-gray-900 text-xs font-bold uppercase tracking-wide px-2.5 py-1.5 rounded">
-                                    {{ $project->category }}
-                                </span>
-
-                                @if ($project->is_featured)
-                                    <span class="absolute top-3 right-3 bg-amber-400 text-amber-900 text-xs font-bold uppercase tracking-wide px-2.5 py-1.5 rounded">
-                                        Featured
-                                    </span>
-                                @endif
-                            </div>
-
-                            {{-- Body --}}
-                            <div class="flex flex-col flex-1 p-5">
-                                <h2 class="text-lg font-bold text-gray-900 leading-snug mb-2">
-                                    {{ $project->title }}
-                                </h2>
-
-                                <p class="text-xs text-gray-500 mb-3">
-                                    {{ $project->clientLabel() }}
-                                    <span class="mx-1 text-gray-300" aria-hidden="true">&bull;</span>
-                                    {{ $project->deliveredLabel() }}
-                                    @if (filled($project->location))
-                                        <span class="mx-1 text-gray-300" aria-hidden="true">&bull;</span>
-                                        {{ $project->location }}
-                                    @endif
-                                </p>
-
-                                <p class="text-sm text-gray-600 leading-relaxed mb-4">
-                                    {{ $project->summary }}
-                                </p>
-
-                                @if ($highlights !== [])
-                                    <ul class="space-y-1.5 mb-4">
-                                        @foreach ($highlights as $line)
-                                            <li class="flex gap-2 text-sm text-gray-700">
-                                                <svg class="w-4 h-4 shrink-0 mt-0.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                                                </svg>
-                                                <span>{{ $line }}</span>
-                                            </li>
-                                        @endforeach
-                                    </ul>
-                                @endif
-
-                                {{-- Pushed to the bottom so every card in a row lines up
-                                     regardless of how much summary it carries. --}}
-                                <div class="mt-auto pt-3 border-t border-gray-100">
-                                    <span class="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                                        {{ $project->serviceLabel() }}
-                                    </span>
-                                </div>
-                            </div>
-
-                        </article>
+                        @include('components.portfolio-card', ['project' => $project])
                     @endforeach
                 </div>
 
-                @if ($projects->hasPages())
-                    <div class="mt-12">
-                        {{ $projects->links() }}
+                {{-- ---------------- Load More ---------------- --}}
+                {{-- Rendered whenever the set spans more than one page, not only when
+                     there is a next page. Without the second condition somebody who
+                     followed the link to the last page with JavaScript off would land
+                     on a bare grid with no count and no way back. --}}
+                @if ($projects->hasMorePages() || $projects->currentPage() > 1)
+                    <div id="portfolio-more" class="mt-12 text-center" data-total="{{ $projects->total() }}">
+                        @if ($projects->hasMorePages())
+                            <a href="{{ $projects->nextPageUrl() }}"
+                               id="portfolio-load-more"
+                               class="inline-flex items-center gap-2 rounded-lg border-2 border-gray-300 px-8 py-3.5 text-sm font-semibold text-gray-700 hover:border-blue-400 hover:text-blue-700 transition">
+                                <span data-load-more-label>Load More</span>
+
+                                {{-- Only shown while a fetch is in flight, so a slow
+                                     connection does not look like a dead button. --}}
+                                <svg data-load-more-spinner class="hidden w-4 h-4 motion-safe:animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                                </svg>
+                            </a>
+                        @endif
+
+                        {{-- A range rather than a count. On page two "3 of 15" would
+                             be read as three found, when it means the last three. --}}
+                        <p @class(['text-xs text-gray-500', 'mt-3' => $projects->hasMorePages()])>
+                            Showing {{ $projects->firstItem() }} to {{ $projects->lastItem() }}
+                            of {{ $projects->total() }}
+                        </p>
+
+                        @if ($projects->currentPage() > 1)
+                            <a href="{{ $projects->url(1) }}"
+                               class="inline-block text-xs font-semibold text-blue-600 hover:underline mt-2">
+                                Back to the start
+                            </a>
+                        @endif
                     </div>
                 @endif
 
             @else
-                {{-- Empty state. Two versions: nothing published at all, or a filter
-                     that matched nothing. They are different problems. --}}
+                {{-- Two versions, because a filter that matched nothing and a portfolio
+                     with nothing in it are different problems. --}}
                 <div class="max-w-xl mx-auto text-center py-16">
                     <svg class="w-16 h-16 mx-auto text-gray-300 mb-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
@@ -219,4 +178,276 @@
             </div>
         </section>
     @endif
+
+    @include('components.portfolio-lightbox')
 @endsection
+
+@push('scripts')
+<script>
+    /* ---------------------------------------------------------------------
+     | Lightbox
+     |
+     | One popup for the page, filled from the data attribute on whichever card
+     | was pressed. Listens on the grid rather than on each card, so cards
+     | appended by Load More work without being wired up again.
+     * ------------------------------------------------------------------ */
+    (function () {
+        const box = document.getElementById('portfolio-lightbox');
+        const grid = document.getElementById('portfolio-grid');
+
+        if (!box || !grid) {
+            return;
+        }
+
+        const picture = document.getElementById('portfolio-lightbox-image');
+        const title = document.getElementById('portfolio-lightbox-title');
+        const counter = document.getElementById('portfolio-lightbox-counter');
+        const caption = document.getElementById('portfolio-lightbox-caption');
+        const thumbs = document.getElementById('portfolio-lightbox-thumbs');
+        const prev = box.querySelector('[data-lightbox-prev]');
+        const next = box.querySelector('[data-lightbox-next]');
+        const closer = document.getElementById('portfolio-lightbox-close');
+
+        let images = [];
+        let index = 0;
+        let opener = null;
+
+        function show(i) {
+            if (images.length === 0) {
+                return;
+            }
+
+            // Wrap round, so the arrows never dead end on the first or last picture.
+            index = (i + images.length) % images.length;
+
+            const current = images[index];
+
+            picture.src = current.src;
+            picture.alt = current.caption || title.textContent;
+            caption.textContent = current.caption || '';
+            counter.textContent = (index + 1) + ' of ' + images.length;
+
+            thumbs.querySelectorAll('[data-thumb]').forEach(function (thumb, i) {
+                const on = i === index;
+                thumb.classList.toggle('border-blue-500', on);
+                thumb.classList.toggle('border-transparent', !on);
+                thumb.classList.toggle('opacity-100', on);
+                thumb.classList.toggle('opacity-50', !on);
+                thumb.setAttribute('aria-current', on ? 'true' : 'false');
+            });
+
+            // A single picture needs no arrows.
+            const many = images.length > 1;
+            prev.classList.toggle('hidden', !many);
+            next.classList.toggle('hidden', !many);
+            thumbs.classList.toggle('hidden', !many);
+        }
+
+        function buildThumbs() {
+            thumbs.innerHTML = '';
+
+            if (images.length < 2) {
+                return;
+            }
+
+            images.forEach(function (image, i) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.dataset.thumb = String(i);
+                button.className = 'shrink-0 w-16 h-16 rounded overflow-hidden border-2 border-transparent opacity-50 hover:opacity-100 transition';
+                button.setAttribute('aria-label', 'Show photograph ' + (i + 1));
+
+                const img = document.createElement('img');
+                img.src = image.src;
+                img.alt = '';
+                img.className = 'w-full h-full object-cover';
+
+                button.appendChild(img);
+                button.addEventListener('click', function () {
+                    show(i);
+                });
+
+                thumbs.appendChild(button);
+            });
+        }
+
+        function open(card, trigger) {
+            let parsed;
+
+            try {
+                parsed = JSON.parse(card.dataset.gallery || '[]');
+            } catch (error) {
+                // A malformed payload should do nothing rather than open an empty
+                // popup on top of the page.
+                return;
+            }
+
+            images = parsed.filter(function (image) {
+                return image && image.src;
+            });
+
+            if (images.length === 0) {
+                return;
+            }
+
+            opener = trigger;
+            title.textContent = card.dataset.galleryTitle || '';
+
+            buildThumbs();
+            show(0);
+
+            box.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+            closer?.focus();
+        }
+
+        function close() {
+            box.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+
+            // Drop the source so a large picture is not held in memory, and so the
+            // next open cannot flash the previous one.
+            picture.src = '';
+            images = [];
+
+            // Back to the card that was pressed, otherwise focus falls to the top of
+            // the document.
+            opener?.focus();
+            opener = null;
+        }
+
+        grid.addEventListener('click', function (event) {
+            const trigger = event.target.closest('[data-portfolio-open]');
+
+            if (!trigger) {
+                return;
+            }
+
+            const card = trigger.closest('[data-portfolio-card]');
+
+            if (card && card.dataset.gallery) {
+                open(card, trigger);
+            }
+        });
+
+        box.querySelectorAll('[data-lightbox-close]').forEach(function (trigger) {
+            trigger.addEventListener('click', close);
+        });
+
+        prev.addEventListener('click', function () {
+            show(index - 1);
+        });
+
+        next.addEventListener('click', function () {
+            show(index + 1);
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (box.classList.contains('hidden')) {
+                return;
+            }
+
+            if (event.key === 'Escape') {
+                close();
+            } else if (event.key === 'ArrowLeft') {
+                show(index - 1);
+            } else if (event.key === 'ArrowRight') {
+                show(index + 1);
+            }
+        });
+    })();
+
+    /* ---------------------------------------------------------------------
+     | Load More
+     |
+     | The control is already a link to the next page, so this only upgrades it:
+     | fetch that page, lift the cards out, append them. On any failure the
+     | default navigation is allowed through instead.
+     * ------------------------------------------------------------------ */
+    (function () {
+        const button = document.getElementById('portfolio-load-more');
+        const grid = document.getElementById('portfolio-grid');
+
+        if (!button || !grid) {
+            return;
+        }
+
+        const wrap = document.getElementById('portfolio-more');
+        const label = button.querySelector('[data-load-more-label]');
+        const spinner = button.querySelector('[data-load-more-spinner]');
+
+        let busy = false;
+
+        button.addEventListener('click', async function (event) {
+            // Let a modified click open the next page in a tab, as a link should.
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) {
+                return;
+            }
+
+            event.preventDefault();
+
+            if (busy) {
+                return;
+            }
+
+            busy = true;
+            spinner.classList.remove('hidden');
+            label.textContent = 'Loading';
+
+            try {
+                const response = await fetch(button.href, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+
+                if (!response.ok) {
+                    throw new Error('Request failed');
+                }
+
+                const parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
+                const cards = parsed.querySelectorAll('#portfolio-grid > [data-portfolio-card]');
+
+                if (cards.length === 0) {
+                    throw new Error('Nothing to append');
+                }
+
+                cards.forEach(function (card) {
+                    grid.appendChild(card);
+                });
+
+                // Move the button on to the page after this one, or retire it.
+                const nextButton = parsed.getElementById('portfolio-load-more');
+
+                if (nextButton) {
+                    button.href = nextButton.getAttribute('href');
+
+                    /*
+                     | Counted from the grid, not read from the response. Page two
+                     | describes its own slice, so copying its wording across would
+                     | report the last twelve rather than everything now on screen.
+                     */
+                    const shown = grid.querySelectorAll('[data-portfolio-card]').length;
+                    const total = wrap.dataset.total;
+                    const line = wrap.querySelector('p');
+
+                    if (line && total) {
+                        line.textContent = 'Showing 1 to ' + shown + ' of ' + total;
+                    }
+                } else {
+                    wrap.remove();
+                    return;
+                }
+            } catch (error) {
+                // Fall back to being a link. The next page still loads, just not in
+                // place.
+                window.location.href = button.href;
+
+                return;
+            } finally {
+                busy = false;
+                spinner.classList.add('hidden');
+                label.textContent = 'Load More';
+            }
+        });
+    })();
+</script>
+@endpush

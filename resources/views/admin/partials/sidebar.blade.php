@@ -43,8 +43,8 @@
             {{-- ---------- Top level link ---------- --}}
             @if ($node['kind'] === 'item')
                 <a href="{{ route($node['route']) }}"
-                   @class([$itemBase, request()->routeIs($node['active']) ? $itemActive : $itemIdle])
-                   @if (request()->routeIs($node['active'])) aria-current="page" @endif>
+                   @class([$itemBase, request()->routeIs(...(array) $node['active']) ? $itemActive : $itemIdle])
+                   @if (request()->routeIs(...(array) $node['active'])) aria-current="page" @endif>
                     <x-admin.icon :name="$node['icon']" class="w-5 h-5 shrink-0" />
                     {{ $node['label'] }}
                 </a>
@@ -69,8 +69,8 @@
                     {{-- Plain link inside a section --}}
                     @if ($child['kind'] === 'item')
                         <a href="{{ route($child['route']) }}"
-                           @class([$itemBase, request()->routeIs($child['active']) ? $itemActive : $itemIdle])
-                           @if (request()->routeIs($child['active'])) aria-current="page" @endif>
+                           @class([$itemBase, request()->routeIs(...(array) $child['active']) ? $itemActive : $itemIdle])
+                           @if (request()->routeIs(...(array) $child['active'])) aria-current="page" @endif>
                             <x-admin.icon :name="$child['icon']" class="w-5 h-5 shrink-0" />
                             {{ $child['label'] }}
                         </a>
@@ -80,8 +80,15 @@
                          without JavaScript and stays keyboard accessible. --}}
                     @if ($child['kind'] === 'group')
                         @php
+                            /*
+                             | `active` may be one pattern or several, so it is spread
+                             | either way. Several are needed where one item covers
+                             | routes that have no common prefix, such as Portfolio
+                             | Projects covering index, create and edit while its
+                             | sibling owns everything under gallery.
+                             */
                             $groupActive = collect($child['children'])
-                                ->contains(fn (array $link) => request()->routeIs($link['active']));
+                                ->contains(fn (array $link) => request()->routeIs(...(array) $link['active']));
                         @endphp
 
                         <details class="group" data-nav-group="{{ $child['key'] }}" @if ($groupActive) open @endif>
@@ -97,7 +104,7 @@
                                 <span class="absolute left-0 top-0 bottom-0 w-px bg-gray-200" aria-hidden="true"></span>
 
                                 @foreach ($child['children'] as $link)
-                                    @php $isActive = request()->routeIs($link['active']); @endphp
+                                    @php $isActive = request()->routeIs(...(array) $link['active']); @endphp
 
                                     <div class="relative">
                                         {{-- Connector from the tree line to the row --}}

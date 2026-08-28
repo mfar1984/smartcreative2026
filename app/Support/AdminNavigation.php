@@ -291,9 +291,23 @@ class AdminNavigation
                             [
                                 'label' => 'Projects',
                                 'route' => 'admin.portfolio.index',
-                                // Wildcard so create and edit keep this item lit.
-                                'active' => 'admin.portfolio.*',
+                                /*
+                                | Listed rather than wildcarded. `admin.portfolio.*`
+                                | would also match the gallery routes and light both
+                                | children at once.
+                                */
+                                'active' => [
+                                    'admin.portfolio.index',
+                                    'admin.portfolio.create',
+                                    'admin.portfolio.edit',
+                                ],
                                 'permission' => 'portfolio.view',
+                            ],
+                            [
+                                'label' => 'Gallery',
+                                'route' => 'admin.portfolio.gallery',
+                                'active' => 'admin.portfolio.gallery*',
+                                'permission' => 'portfolio.gallery.view',
                             ],
                         ],
                     ],

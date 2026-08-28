@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\Campaign\CampaignReportController;
 use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
 use App\Http\Controllers\Admin\Event\ParticipantController;
 use App\Http\Controllers\Admin\Payment\PaymentController;
+use App\Http\Controllers\Admin\Portfolio\GalleryController as PortfolioGalleryController;
 use App\Http\Controllers\Admin\Portfolio\ProjectController as PortfolioProjectController;
 use App\Http\Controllers\Admin\Shop\CategoryController as ShopCategoryController;
 use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
@@ -499,6 +500,26 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::post('/', [PortfolioProjectController::class, 'store'])
                 ->middleware('permission:portfolio.create')
                 ->name('store');
+            /*
+            | Gallery. Declared before {project} so "gallery" is never read as a
+            | project id.
+            |
+            | An image is always tagged to a project on upload, so there is no route
+            | for a loose image library: one could not be reached from the site.
+            */
+            Route::get('gallery', [PortfolioGalleryController::class, 'index'])
+                ->middleware('permission:portfolio.gallery.view')
+                ->name('gallery');
+            Route::post('gallery', [PortfolioGalleryController::class, 'store'])
+                ->middleware('permission:portfolio.gallery.create')
+                ->name('gallery.store');
+            Route::put('gallery/{image}', [PortfolioGalleryController::class, 'update'])
+                ->middleware('permission:portfolio.gallery.update')
+                ->name('gallery.update');
+            Route::delete('gallery/{image}', [PortfolioGalleryController::class, 'destroy'])
+                ->middleware('permission:portfolio.gallery.delete')
+                ->name('gallery.destroy');
+
             Route::get('{project}/edit', [PortfolioProjectController::class, 'edit'])
                 ->middleware('permission:portfolio.update')
                 ->name('edit');

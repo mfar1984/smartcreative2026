@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -60,6 +61,48 @@ class PortfolioProject extends Model
             'is_featured' => 'boolean',
             'sort_order' => 'integer',
         ];
+    }
+
+    /* ---------------------------------------------------------------------
+     | Relations
+     * ------------------------------------------------------------------ */
+
+    /**
+     * The gallery shown in the lightbox. Ordered inside the relation so every
+     * caller gets the same sequence.
+     */
+    public function images(): HasMany
+    {
+        return $this->hasMany(PortfolioImage::class)
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
+    /* ---------------------------------------------------------------------
+     | Gallery
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Only the images whose file is still on disk.
+     *
+     * A row pointing at a deleted file would otherwise put a broken frame in the
+     * middle of the lightbox, and the count on the card would promise more than
+     * the popup delivers.
+     *
+     * @return \Illuminate\Support\Collection<int, PortfolioImage>
+     */
+    public function galleryImages()
+    {
+        return $this->images->filter(fn (PortfolioImage $image) => $image->url() !== null)->values();
+    }
+
+    /**
+     * Whether pressing the card should open anything. A popup with nothing in it
+     * is worse than a card that does not react.
+     */
+    public function hasGallery(): bool
+    {
+        return $this->galleryImages()->isNotEmpty();
     }
 
     /* ---------------------------------------------------------------------
