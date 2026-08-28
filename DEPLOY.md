@@ -127,6 +127,26 @@ php artisan down
 git pull
 composer install --no-dev --optimize-autoloader
 php artisan migrate --force
+php artisan db:seed --class=RolesAndPermissionsSeeder --force
 php artisan config:cache && php artisan route:cache && php artisan view:cache
 php artisan up
 ```
+
+The seeder line is not optional, and leaving it out fails in a way that looks like
+missing work rather than a missing step.
+
+A release that adds a screen also adds the permission that screen is gated on. The
+sidebar hides any item whose permission does not exist, so without re-seeding the
+new screens are simply absent: no error, no empty page, nothing to suggest the code
+arrived.
+
+It expects to be run on every deployment. Two things it does are worth knowing:
+
+- It resets the permissions of the four roles it declares (`super-admin`,
+  `administrator`, `viewer`, `referee`) to the set in the seeder. If you granted one
+  of them something extra by hand on the roles matrix, that grant is reverted. Roles
+  you created yourself are never touched.
+- It deletes permissions no longer declared in the seeder, so a withdrawn permission
+  stops appearing on the matrix as a checkbox that grants nothing.
+
+Accounts, passwords and role assignments are left alone.
