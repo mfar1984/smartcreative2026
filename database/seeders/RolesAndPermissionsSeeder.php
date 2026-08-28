@@ -191,6 +191,33 @@ class RolesAndPermissionsSeeder extends Seeder
         ],
 
         /*
+        | Shop. Three screens, each with its own actions.
+        |
+        | Settings is separated from Products because the switch that opens the shop
+        | to the public is a different responsibility from writing a product
+        | description, and the person who does one is often not the person who
+        | decides the other.
+        */
+        'Shop' => [
+            'Products' => [
+                'view' => ['shop.products.view', 'View products'],
+                'create' => ['shop.products.create', 'Add products'],
+                'update' => ['shop.products.update', 'Edit products'],
+                'delete' => ['shop.products.delete', 'Delete products'],
+            ],
+            'Categories' => [
+                'view' => ['shop.categories.view', 'View shop categories'],
+                'create' => ['shop.categories.create', 'Add shop categories'],
+                'update' => ['shop.categories.update', 'Edit shop categories'],
+                'delete' => ['shop.categories.delete', 'Delete shop categories'],
+            ],
+            'Shop Settings' => [
+                'view' => ['shop.settings.view', 'View shop settings'],
+                'update' => ['shop.settings.update', 'Change shop settings'],
+            ],
+        ],
+
+        /*
         | Portfolio. Website content rather than operations: nothing here touches a
         | participant, a payment or a result, so the four actions are the plain set
         | with no separate publish permission. Publishing is a status on the form,
@@ -339,6 +366,17 @@ class RolesAndPermissionsSeeder extends Seeder
                 'tournaments.settings.view',
                 'tournaments.settings.update',
 
+                'shop.products.view',
+                'shop.products.create',
+                'shop.products.update',
+                'shop.products.delete',
+                'shop.categories.view',
+                'shop.categories.create',
+                'shop.categories.update',
+                'shop.categories.delete',
+                'shop.settings.view',
+                'shop.settings.update',
+
                 'portfolio.view',
                 'portfolio.create',
                 'portfolio.update',
@@ -415,6 +453,14 @@ class RolesAndPermissionsSeeder extends Seeder
                 'tournaments.rules.view',
                 'tournaments.halloffame.view',
                 'tournaments.settings.view',
+
+                /*
+                | Can read the catalogue, cannot price anything, publish anything or
+                | open the shop.
+                */
+                'shop.products.view',
+                'shop.categories.view',
+                'shop.settings.view',
 
                 // Can read the portfolio, cannot publish anything to the website.
                 'portfolio.view',

@@ -13,6 +13,7 @@ use App\Http\Controllers\Payment\RegistrationPaymentController;
 use App\Http\Controllers\Public\TournamentPublicController;
 use App\Http\Controllers\RegistrationController;
 use App\Http\Controllers\ServiceController;
+use App\Http\Controllers\ShopController;
 
 // Home route
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -125,8 +126,16 @@ Route::post('/payments/chip/webhook', ChipWebhookController::class)->name('payme
 */
 Route::get('/portfolio', [PortfolioController::class, 'index'])->name('portfolio');
 
-// Shop route
-Route::get('/shop', [MaintenanceController::class, 'shop'])->name('shop');
+/*
+| Shop. Active products only, and only once the shop has been opened in settings.
+|
+| There is no cart or checkout: products carry an enquiry route instead. The listing
+| is declared above the product route so "shop" itself is never read as a slug.
+*/
+Route::get('/shop', [ShopController::class, 'index'])->name('shop');
+Route::get('/shop/{slug}', [ShopController::class, 'show'])->name('shop.product');
+
+
 
 /*
 | Policy pages.

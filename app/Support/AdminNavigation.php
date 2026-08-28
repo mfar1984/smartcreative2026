@@ -240,6 +240,40 @@ class AdminNavigation
                     ],
 
                     /*
+                    | Shop. Sits after Payments because it is operational, and its
+                    | three children are the three things a shop is made of: what is
+                    | for sale, how it is grouped, and whether the doors are open.
+                    */
+                    [
+                        'kind' => 'group',
+                        'key' => 'shop',
+                        'label' => 'Shop',
+                        'icon' => 'bag',
+                        'children' => [
+                            [
+                                'label' => 'Products',
+                                'route' => 'admin.shop.products',
+                                // Wildcard so create and edit keep this item lit.
+                                'active' => 'admin.shop.products*',
+                                'permission' => 'shop.products.view',
+                            ],
+                            [
+                                'label' => 'Categories',
+                                'route' => 'admin.shop.categories',
+                                'active' => 'admin.shop.categories*',
+                                'permission' => 'shop.categories.view',
+                            ],
+                            // Configuration sits below the screens that use it.
+                            [
+                                'label' => 'Settings',
+                                'route' => 'admin.shop.settings',
+                                'active' => 'admin.shop.settings*',
+                                'permission' => 'shop.settings.view',
+                            ],
+                        ],
+                    ],
+
+                    /*
                     | Portfolio. Website content rather than operations, so it sits
                     | last in Modules: nothing here touches a participant, a payment
                     | or a result.

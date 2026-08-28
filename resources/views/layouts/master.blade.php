@@ -8,6 +8,11 @@
 
     @include('partials.favicon')
 
+    {{-- For meta tags a page needs in the head, such as a product's search
+         description. Kept separate from `styles` so a meta tag is not pushed into a
+         stack named after stylesheets. --}}
+    @stack('head')
+
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @stack('styles')
 </head>

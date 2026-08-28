@@ -11,6 +11,9 @@ use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
 use App\Http\Controllers\Admin\Event\ParticipantController;
 use App\Http\Controllers\Admin\Payment\PaymentController;
 use App\Http\Controllers\Admin\Portfolio\ProjectController as PortfolioProjectController;
+use App\Http\Controllers\Admin\Shop\CategoryController as ShopCategoryController;
+use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
+use App\Http\Controllers\Admin\Shop\SettingsController as ShopSettingsController;
 use App\Http\Controllers\Admin\Event\RegistrationController as EventRegistrationController;
 use App\Http\Controllers\Admin\Event\SettingsController as EventSettingsController;
 use App\Http\Controllers\Admin\Settings\GeneralConfigController;
@@ -408,6 +411,66 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:tournaments.matches.generate')->name('stages.generate');
             Route::delete('{tournament}/stages/{stage}/draw', [StageController::class, 'discard'])
                 ->middleware('permission:tournaments.matches.generate')->name('stages.discard');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Shop
+        |----------------------------------------------------------------------
+        |
+        | The merchandise catalogue: medals, apparel and event goods. Sits after
+        | Payments because it is operational rather than content, and before
+        | Portfolio for the same reason.
+        |
+        | Categories have no create or edit page: they are six field records edited
+        | in a dialog on the list, the way User Management does it, so there are no
+        | routes for forms that do not exist.
+        |
+        */
+        Route::prefix('shop')->name('shop.')->group(function () {
+
+            // Products. `create` is declared before `{product}` so it is not
+            // swallowed as a route parameter.
+            Route::get('products', [ShopProductController::class, 'index'])
+                ->middleware('permission:shop.products.view')
+                ->name('products');
+            Route::get('products/create', [ShopProductController::class, 'create'])
+                ->middleware('permission:shop.products.create')
+                ->name('products.create');
+            Route::post('products', [ShopProductController::class, 'store'])
+                ->middleware('permission:shop.products.create')
+                ->name('products.store');
+            Route::get('products/{product}/edit', [ShopProductController::class, 'edit'])
+                ->middleware('permission:shop.products.update')
+                ->name('products.edit');
+            Route::put('products/{product}', [ShopProductController::class, 'update'])
+                ->middleware('permission:shop.products.update')
+                ->name('products.update');
+            Route::delete('products/{product}', [ShopProductController::class, 'destroy'])
+                ->middleware('permission:shop.products.delete')
+                ->name('products.destroy');
+
+            // Categories
+            Route::get('categories', [ShopCategoryController::class, 'index'])
+                ->middleware('permission:shop.categories.view')
+                ->name('categories');
+            Route::post('categories', [ShopCategoryController::class, 'store'])
+                ->middleware('permission:shop.categories.create')
+                ->name('categories.store');
+            Route::put('categories/{category}', [ShopCategoryController::class, 'update'])
+                ->middleware('permission:shop.categories.update')
+                ->name('categories.update');
+            Route::delete('categories/{category}', [ShopCategoryController::class, 'destroy'])
+                ->middleware('permission:shop.categories.delete')
+                ->name('categories.destroy');
+
+            // Shop Settings - tabs: Storefront, Inventory
+            Route::get('settings', [ShopSettingsController::class, 'index'])
+                ->middleware('permission:shop.settings.view')
+                ->name('settings');
+            Route::put('settings/{tab}', [ShopSettingsController::class, 'update'])
+                ->middleware('permission:shop.settings.update')
+                ->name('settings.update');
         });
 
         /*

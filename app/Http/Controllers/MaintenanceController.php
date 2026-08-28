@@ -2,25 +2,18 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-
 /**
- * Placeholder pages for sections that are not built yet.
+ * Placeholder page for the one section that is not built yet.
  *
- * The three service pages moved to ServiceController and Portfolio moved to
- * PortfolioController, so their placeholder methods have gone with them. Services
- * and Shop are the only two left unbuilt.
+ * The three service pages moved to ServiceController, Portfolio to
+ * PortfolioController and Shop to ShopController, so their placeholder methods went
+ * with them. Only the Services landing page is left.
  */
 class MaintenanceController extends Controller
 {
     public function services()
     {
         return $this->renderMaintenancePage('Services');
-    }
-
-    public function shop()
-    {
-        return $this->renderMaintenancePage('Shop');
     }
 
     private function renderMaintenancePage(string $pageName)
