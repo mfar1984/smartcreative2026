@@ -228,20 +228,92 @@
                         </ul>
                     @endif
 
-                    {{-- ==================== How to order ==================== --}}
-                    <div class="rounded-lg border border-blue-200 bg-blue-50 p-5 mb-6">
-                        <h2 class="text-base font-bold text-blue-900 mb-2">How to order</h2>
+                    {{-- ==================== Buy, or enquire ==================== --}}
+                    @if ($canBuy && ! $soldOut)
+                        {{-- The option chooser is a radio group rather than a select, so
+                             a sold out size can be shown, struck through and disabled
+                             instead of quietly missing from a dropdown. --}}
+                        <form action="{{ route('cart.store') }}" method="POST" class="rounded-lg border border-gray-200 p-5 mb-6">
+                            @csrf
+                            <input type="hidden" name="product_id" value="{{ $product->id }}">
 
-                        <p class="text-sm text-blue-800 leading-relaxed mb-4">{{ $enquiryNote }}</p>
+                            @error('cart')
+                                <p class="text-sm text-red-600 mb-4">{{ $message }}</p>
+                            @enderror
 
-                        <a href="{{ route('contact') }}"
-                           class="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
-                            Enquire about this
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
-                            </svg>
-                        </a>
-                    </div>
+                            @if ($product->hasVariants())
+                                <fieldset class="mb-5">
+                                    <legend class="text-sm font-bold text-gray-900 mb-2.5">
+                                        Choose a {{ Str::lower($product->option_name) }}
+                                    </legend>
+
+                                    <div class="flex flex-wrap gap-2">
+                                        @foreach ($product->variants as $variant)
+                                            @php $variantSoldOut = $variant->isSoldOut(); @endphp
+
+                                            <label @class([
+                                                'relative inline-flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition',
+                                                'border-gray-300 cursor-pointer hover:border-blue-400 has-checked:border-blue-600 has-checked:bg-blue-50 has-checked:font-semibold' => ! $variantSoldOut,
+                                                'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed' => $variantSoldOut,
+                                            ])>
+                                                <input type="radio" name="variant_id" value="{{ $variant->id }}"
+                                                       @disabled($variantSoldOut)
+                                                       @checked(! $variantSoldOut && $loop->first)
+                                                       class="text-blue-600 focus:ring-blue-500/40 disabled:opacity-40">
+
+                                                <span @class(['line-through' => $variantSoldOut])>{{ $variant->label }}</span>
+
+                                                <span class="text-xs tabular-nums {{ $variantSoldOut ? 'text-gray-400' : 'text-gray-500' }}">
+                                                    {{ App\Support\PaymentFigures::money($variant->unitPrice()) }}
+                                                </span>
+                                            </label>
+                                        @endforeach
+                                    </div>
+
+                                    @error('variant_id')
+                                        <p class="text-xs text-red-600 mt-2">{{ $message }}</p>
+                                    @enderror
+                                </fieldset>
+                            @endif
+
+                            <div class="flex flex-wrap items-end gap-3">
+                                <div>
+                                    <label for="quantity" class="block text-sm font-bold text-gray-900 mb-1.5">Quantity</label>
+                                    <input type="number" id="quantity" name="quantity" value="1" min="1" max="{{ App\Support\Cart::MAX_PER_LINE }}"
+                                           class="w-24 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-right tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40">
+                                </div>
+
+                                <button type="submit"
+                                        class="inline-flex items-center gap-2 bg-blue-600 text-white px-7 py-3 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/>
+                                    </svg>
+                                    Add to Basket
+                                </button>
+                            </div>
+                        </form>
+                    @else
+                        {{-- Nothing can take money, or there is nothing left to sell. Either
+                             way an Add to Basket button would lead nowhere, so the enquiry
+                             route is offered instead. --}}
+                        <div class="rounded-lg border border-blue-200 bg-blue-50 p-5 mb-6">
+                            <h2 class="text-base font-bold text-blue-900 mb-2">
+                                {{ $soldOut ? 'Out of stock' : 'How to order' }}
+                            </h2>
+
+                            <p class="text-sm text-blue-800 leading-relaxed mb-4">
+                                {{ $soldOut ? 'This has sold out. Tell us what you need and we will let you know when it is back, or quote for a batch made to order.' : $enquiryNote }}
+                            </p>
+
+                            <a href="{{ route('contact') }}"
+                               class="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
+                                Enquire about this
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
+                                </svg>
+                            </a>
+                        </div>
+                    @endif
 
                     {{-- ==================== Included ==================== --}}
                     @if ($included !== [])

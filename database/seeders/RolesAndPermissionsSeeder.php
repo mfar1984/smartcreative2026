@@ -205,6 +205,17 @@ class RolesAndPermissionsSeeder extends Seeder
                 'update' => ['shop.products.update', 'Edit products'],
                 'delete' => ['shop.products.delete', 'Delete products'],
             ],
+            /*
+            | Orders. Confirming payment is separate from moving an order along,
+            | because cash on delivery and bank transfers settle outside this system:
+            | pressing it asserts that real money was received, which is a different
+            | trust level from ticking an order as packed.
+            */
+            'Orders' => [
+                'view' => ['shop.orders.view', 'View orders'],
+                'update' => ['shop.orders.update', 'Move orders along'],
+                'send' => ['shop.orders.payment', 'Confirm order payment received'],
+            ],
             'Categories' => [
                 'view' => ['shop.categories.view', 'View shop categories'],
                 'create' => ['shop.categories.create', 'Add shop categories'],
@@ -381,6 +392,9 @@ class RolesAndPermissionsSeeder extends Seeder
                 'shop.products.create',
                 'shop.products.update',
                 'shop.products.delete',
+                'shop.orders.view',
+                'shop.orders.update',
+                'shop.orders.payment',
                 'shop.categories.view',
                 'shop.categories.create',
                 'shop.categories.update',
@@ -474,6 +488,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 | open the shop.
                 */
                 'shop.products.view',
+                'shop.orders.view',
                 'shop.categories.view',
                 'shop.settings.view',
 

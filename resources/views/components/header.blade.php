@@ -51,6 +51,21 @@
                 <a href="{{ route('contact') }}" data-nav-link class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('contact') ? 'text-blue-300' : '' }}">
                     Contact
                 </a>
+
+                {{-- Only shown once something is in it. An empty basket icon on every
+                     page is a permanent invitation to a page that says nothing. --}}
+                @unless (App\Support\Cart::isEmpty())
+                    <a href="{{ route('cart') }}" data-nav-link
+                       class="relative inline-flex items-center gap-2 text-white hover:text-blue-300 font-medium transition"
+                       aria-label="Your basket">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/>
+                        </svg>
+                        <span class="inline-flex items-center justify-center min-w-5 h-5 rounded-full bg-blue-600 px-1.5 text-xs font-bold text-white tabular-nums">
+                            {{ App\Support\Cart::count() }}
+                        </span>
+                    </a>
+                @endunless
             </nav>
             
             <!-- Mobile Menu Toggle -->
@@ -103,6 +118,19 @@
                 <a href="{{ route('contact') }}" data-nav-link class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('contact') ? 'text-blue-300' : '' }}">
                     Contact
                 </a>
+
+                @unless (App\Support\Cart::isEmpty())
+                    <a href="{{ route('cart') }}" data-nav-link
+                       class="inline-flex items-center gap-2 text-white hover:text-blue-300 font-medium transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/>
+                        </svg>
+                        Basket
+                        <span class="inline-flex items-center justify-center min-w-5 h-5 rounded-full bg-blue-600 px-1.5 text-xs font-bold text-white tabular-nums">
+                            {{ App\Support\Cart::count() }}
+                        </span>
+                    </a>
+                @endunless
             </div>
         </div>
     </div>

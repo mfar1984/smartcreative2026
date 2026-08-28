@@ -7,6 +7,8 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LegalController;
 use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\Messaging\InfobipDeliveryController;
+use App\Http\Controllers\CartController;
+use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\Payment\ChipWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\Payment\RegistrationPaymentController;
@@ -134,6 +136,40 @@ Route::get('/portfolio', [PortfolioController::class, 'index'])->name('portfolio
 */
 Route::get('/shop', [ShopController::class, 'index'])->name('shop');
 Route::get('/shop/{slug}', [ShopController::class, 'show'])->name('shop.product');
+
+/*
+| Basket and checkout.
+|
+| At the root rather than under /shop, because /shop/{slug} would otherwise shadow
+| them and a product whose slug happened to be "cart" could never be reached.
+|
+| Adding and changing the basket is throttled: it writes to the session on every
+| call and is reachable without a login.
+*/
+Route::post('/cart', [CartController::class, 'store'])
+    ->middleware('throttle:60,1')
+    ->name('cart.store');
+Route::get('/cart', [CartController::class, 'index'])->name('cart');
+Route::put('/cart', [CartController::class, 'update'])
+    ->middleware('throttle:60,1')
+    ->name('cart.update');
+Route::delete('/cart', [CartController::class, 'destroy'])
+    ->middleware('throttle:60,1')
+    ->name('cart.clear');
+
+Route::get('/checkout', [CheckoutController::class, 'show'])->name('checkout');
+Route::post('/checkout', [CheckoutController::class, 'place'])
+    ->middleware('throttle:10,1')
+    ->name('checkout.place');
+
+/*
+| Order confirmation. Signed, because references run in sequence: without a
+| signature anybody could count upwards and read a stranger's name, address and
+| phone number.
+*/
+Route::get('/order/{reference}', [CheckoutController::class, 'confirmation'])
+    ->middleware('signed')
+    ->name('shop.order');
 
 
 

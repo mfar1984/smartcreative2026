@@ -13,6 +13,7 @@ use App\Support\ChipBalance;
 use App\Support\MailSettings;
 use App\Support\PhoneNumber;
 use App\Support\PaymentSettings;
+use App\Support\ShippingSettings;
 use App\Support\SmsSettings;
 use App\Support\TelegramSettings;
 use Illuminate\Http\Request;
@@ -363,6 +364,167 @@ class IntegrationController extends Controller
                     'help' => 'Sent from the Participants screen, alongside the email reminder.',
                 ],
 
+            ],
+        ],
+
+        /*
+        | Shipping. Postage for shop orders.
+        |
+        | EasyParcel quotes live rates, but a checkout cannot depend on somebody
+        | else's API answering: if the call fails or the key is not set up, the flat
+        | rates below are used instead. That is why they are not optional extras but
+        | part of the configuration.
+        |
+        | The sender address is here rather than on each order because rate checking
+        | needs a origin, and it is the same warehouse every time.
+        */
+        'shipping' => [
+            'label' => 'Shipping',
+            'icon' => 'archive',
+            'intro' => [
+                'title' => 'Shipping',
+                'description' => 'What postage costs a shop buyer. EasyParcel quotes it live where it can, and the flat rates are what is charged when it cannot.',
+                'icon' => 'archive',
+                'accent' => 'blue',
+            ],
+            'panels' => [
+                'EasyParcel' => [
+                    'icon' => 'plug',
+                    'fields' => ['easyparcel_enabled', 'easyparcel_mode', 'easyparcel_api_key'],
+                ],
+                'Collection Address' => [
+                    'icon' => 'building',
+                    'fields' => [
+                        'sender_name',
+                        'sender_phone',
+                        'sender_address_1',
+                        'sender_address_2',
+                        'sender_postcode',
+                        'sender_city',
+                        'sender_state',
+                    ],
+                ],
+                'Flat Rates' => [
+                    'icon' => 'cash',
+                    'fields' => [
+                        'flat_rate_west',
+                        'flat_rate_east',
+                        'free_shipping_threshold',
+                        'shipping_note',
+                    ],
+                ],
+            ],
+
+            'fields' => [
+                'easyparcel_enabled' => [
+                    'label' => 'Quote rates through EasyParcel',
+                    'type' => 'toggle',
+                    'rules' => ['nullable', 'boolean'],
+                    'help' => 'Off means every order is charged the flat rate below. On means EasyParcel is asked first, and the flat rate is still used if it cannot answer.',
+                ],
+                'easyparcel_mode' => [
+                    'label' => 'Mode',
+                    'type' => 'select',
+                    'options' => ['demo' => 'Demo / Test', 'live' => 'Live'],
+                    'rules' => ['required', 'in:demo,live'],
+                    'help' => 'Demo books nothing real. Note that EasyParcel serves its demo endpoint over plain HTTP, so do not put a live key against Demo.',
+                ],
+                'easyparcel_api_key' => [
+                    'label' => 'API Key',
+                    'type' => 'password',
+                    'secret' => true,
+                    'rules' => ['nullable', 'string', 'max:255'],
+                    'help' => 'Registered under Integrations in your EasyParcel account. The account has to be verified before a key can be issued.',
+                ],
+
+                /* ---- Where parcels are collected from ---- */
+
+                'sender_name' => [
+                    'label' => 'Contact Name',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:190'],
+                    'placeholder' => 'Smart Digital Creative',
+                    'help' => 'Who the courier asks for at pickup.',
+                ],
+                'sender_phone' => [
+                    'label' => 'Contact Phone',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:40'],
+                    'placeholder' => '0198666898',
+                    'help' => 'Digits only. The courier calls this if they cannot find the address.',
+                ],
+                'sender_address_1' => [
+                    'label' => 'Address Line 1',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:190'],
+                    'placeholder' => 'Suite 33-01, 33rd Floor, Menara Keck Seng',
+                ],
+                'sender_address_2' => [
+                    'label' => 'Address Line 2',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:190'],
+                    'placeholder' => '203 Jalan Bukit Bintang',
+                ],
+                'sender_postcode' => [
+                    'label' => 'Postcode',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:10'],
+                    'placeholder' => '55100',
+                    'help' => 'Rate checking works off the postcode, so this one matters more than the street.',
+                ],
+                'sender_city' => [
+                    'label' => 'City',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:120'],
+                    'placeholder' => 'Kuala Lumpur',
+                ],
+                'sender_state' => [
+                    'label' => 'State',
+                    'type' => 'select',
+                    'options' => ShippingSettings::STATES,
+                    /*
+                     | A plain string rule rather than in:..., because SCHEMA is a
+                     | class constant and PHP will not evaluate implode() in one. The
+                     | dropdown is built from ShippingSettings::STATES, which stays
+                     | the single source of truth, and this field is only ever set by
+                     | an admin editing their own collection address. A value outside
+                     | the list would simply not match East Malaysia when banding the
+                     | flat rate, which is visible on this form.
+                     */
+                    'rules' => ['nullable', 'string', 'max:120'],
+                    'help' => 'Stored as the full name. The courier code it maps to is worked out when a rate is requested, so the stored value does not depend on which EasyParcel API generation is in use.',
+                ],
+
+                /* ---- What is charged when EasyParcel cannot be asked ---- */
+
+                'flat_rate_west' => [
+                    'label' => 'Peninsular Malaysia (RM)',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'numeric', 'min:0', 'max:9999.99'],
+                    'placeholder' => '8.00',
+                    'help' => 'Charged per order, not per item.',
+                ],
+                'flat_rate_east' => [
+                    'label' => 'Sabah & Sarawak (RM)',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'numeric', 'min:0', 'max:9999.99'],
+                    'placeholder' => '15.00',
+                    'help' => 'East Malaysia costs more, so it is asked for separately rather than averaged into one rate.',
+                ],
+                'free_shipping_threshold' => [
+                    'label' => 'Free Shipping Over (RM)',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
+                    'placeholder' => '150.00',
+                    'help' => 'Leave blank for no free shipping. Compared against the goods total, before postage.',
+                ],
+                'shipping_note' => [
+                    'label' => 'What The Buyer Is Told',
+                    'type' => 'textarea',
+                    'rules' => ['nullable', 'string', 'max:500'],
+                    'placeholder' => 'Orders are dispatched within 3 working days. Allow 3 to 5 working days for Peninsular Malaysia and up to 10 for Sabah and Sarawak.',
+                    'help' => 'Shown at checkout beside the postage line.',
+                ],
             ],
         ],
 

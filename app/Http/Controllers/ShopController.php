@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ShopCategory;
 use App\Models\ShopProduct;
+use App\Support\PaymentSettings;
 use App\Support\ShopSettings;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -98,6 +99,14 @@ class ShopController extends Controller
             'related' => $this->related($product),
             'showsStockCount' => ShopSettings::showsStockCount(),
             'enquiryNote' => ShopSettings::enquiryNote(),
+
+            /*
+             | Whether there is any way to take money at all. With nothing configured
+             | the page falls back to the enquiry note, because an Add to Basket button
+             | that leads to a checkout with no payment method would waste the sale at
+             | the last step.
+             */
+            'canBuy' => PaymentSettings::hasAnyMethod(),
         ]);
     }
 

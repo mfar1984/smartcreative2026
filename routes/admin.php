@@ -13,6 +13,7 @@ use App\Http\Controllers\Admin\Payment\PaymentController;
 use App\Http\Controllers\Admin\Portfolio\GalleryController as PortfolioGalleryController;
 use App\Http\Controllers\Admin\Portfolio\ProjectController as PortfolioProjectController;
 use App\Http\Controllers\Admin\Shop\CategoryController as ShopCategoryController;
+use App\Http\Controllers\Admin\Shop\OrderController as ShopOrderController;
 use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
 use App\Http\Controllers\Admin\Shop\SettingsController as ShopSettingsController;
 use App\Http\Controllers\Admin\Event\RegistrationController as EventRegistrationController;
@@ -475,7 +476,28 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:shop.categories.delete')
                 ->name('categories.destroy');
 
-            // Shop Settings - tabs: Storefront, Inventory
+            /*
+            | Orders. Read, then the two things staff actually do to one: move it
+            | along, and say the money arrived.
+            |
+            | Confirming payment carries its own permission because cash on delivery
+            | and a bank transfer are settled outside this system, so pressing it is
+            | a statement that real money was received rather than a status change.
+            */
+            Route::get('orders', [ShopOrderController::class, 'index'])
+                ->middleware('permission:shop.orders.view')
+                ->name('orders');
+            Route::get('orders/{order}', [ShopOrderController::class, 'show'])
+                ->middleware('permission:shop.orders.view')
+                ->name('orders.show');
+            Route::put('orders/{order}/status', [ShopOrderController::class, 'updateStatus'])
+                ->middleware('permission:shop.orders.update')
+                ->name('orders.status');
+            Route::put('orders/{order}/payment', [ShopOrderController::class, 'confirmPayment'])
+                ->middleware('permission:shop.orders.payment')
+                ->name('orders.payment');
+
+            // Shop Settings - tabs: Storefront, Inventory, Categories
             Route::get('settings', [ShopSettingsController::class, 'index'])
                 ->middleware('permission:shop.settings.view')
                 ->name('settings');
