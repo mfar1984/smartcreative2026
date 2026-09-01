@@ -73,6 +73,28 @@ mysql_config --socket        # or: mysqladmin variables | grep socket
 DB_SOCKET=/var/lib/mysql/mysql.sock
 ```
 
+`APP_URL` has to be the canonical host exactly, with no `www.` and no trailing slash:
+
+```
+APP_URL=https://smartcreative.my
+```
+
+It is not cosmetic. Signed links carry a signature computed over the whole URL
+including the host, so if `APP_URL` says `www.` and the visitor is on the bare
+domain, or the other way round, the signature will not validate and the link
+answers 403. The order confirmation, the cash on delivery receipt and the
+registration payment links are all signed. CHIP is also registered against the bare
+domain, and it refuses a callback on any port other than 80 or 443.
+
+`public/.htaccess` sends `www.smartcreative.my` to the bare domain with a 301 so a
+visitor who types www still lands somewhere the signatures hold.
+
+Forcing plain HTTP to HTTPS is deliberately not in `.htaccess`. Use the **Force HTTPS
+Redirect** toggle in cPanel's Domains screen instead. Doing it with a
+`RewriteCond %{HTTPS} off` rule loops forever behind a proxy that terminates TLS,
+such as Cloudflare, because `%{HTTPS}` reads `off` on a connection the visitor sees
+as secure, and this application does not configure trusted proxies.
+
 ## Schema and the first account
 
 ```bash
