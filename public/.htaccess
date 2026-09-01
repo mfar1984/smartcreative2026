@@ -5,23 +5,11 @@
 
     RewriteEngine On
 
-    # Canonical host: smartcreative.my, never www.
-    #
-    # This is not only tidiness. Signed links (the order confirmation, the cash on
-    # delivery receipt, the payment links) carry a signature computed over the whole
-    # URL including the host, so a buyer who opens one on www.smartcreative.my fails
-    # the check and gets a 403. The CHIP webhook is registered against the bare
-    # domain too. Sending www here first means both keep working.
-    #
-    # Placed before everything else so a www request leaves in one hop rather than
-    # being rewritten and then redirected. Apache re-appends the original query
-    # string, which is what keeps ?signature=... intact.
-    #
-    # Left as a 301 on purpose. Nothing should ever POST to www, and a 301 turns a
-    # POST into a GET and drops the body, so a webhook aimed at www would fail
-    # quietly rather than be silently repaired here.
+    # Send www to the bare domain. The target uses $1, not %{REQUEST_URI}: when the
+    # app is cloned into the web root, the .htaccess above has already rewritten the
+    # path to public/..., and %{REQUEST_URI} would redirect to /public/.
     RewriteCond %{HTTP_HOST} ^www\.smartcreative\.my$ [NC]
-    RewriteRule ^ https://smartcreative.my%{REQUEST_URI} [L,R=301]
+    RewriteRule ^(.*)$ https://smartcreative.my/$1 [L,R=301]
 
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
