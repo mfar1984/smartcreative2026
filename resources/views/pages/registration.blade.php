@@ -213,46 +213,52 @@
                             <aside class="lg:order-2 lg:w-80 shrink-0 border-b lg:border-b-0 lg:border-l border-gray-200 bg-gray-50 lg:rounded-br-xl"
                                    aria-labelledby="rules-title-{{ $event->slug }}">
 
-                                {{-- Sticky under the modal header on desktop, with
-                                     its own scroll, so a long rule set never
-                                     stretches the dialog. --}}
-                                <div class="p-5 lg:sticky lg:top-20 max-h-72 lg:max-h-[60vh] overflow-y-auto">
-                                    <h3 id="rules-title-{{ $event->slug }}" class="flex items-center gap-2 text-sm font-bold text-gray-900 mb-3">
-                                        <svg class="w-4 h-4 shrink-0 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                                        </svg>
-                                        Rules
-                                    </h3>
+                                {{-- Sticky under the modal header on desktop. Only
+                                     the rule list scrolls, so a long set never
+                                     stretches the dialog, while the rulebook
+                                     download below sits outside that scroll and
+                                     stays in view however far the list is read. --}}
+                                <div class="p-5 lg:sticky lg:top-20">
 
-                                    {{-- Typed lines and the attachment are
-                                         independent, so each is guarded on its
-                                         own. An event may carry only a rulebook
-                                         PDF and no typed rules at all. --}}
-                                    @if ($event->hasRules())
-                                        <ul class="space-y-2">
-                                            @foreach ($event->ruleLines() as $rule)
-                                                <li class="flex items-start gap-2 text-xs text-gray-700 leading-relaxed">
-                                                    <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden="true"></span>
-                                                    <span>{{ $rule }}</span>
-                                                </li>
-                                            @endforeach
-                                        </ul>
-                                    @endif
+                                    <div class="max-h-72 lg:max-h-[50vh] overflow-y-auto">
+                                        <h3 id="rules-title-{{ $event->slug }}" class="flex items-center gap-2 text-sm font-bold text-gray-900 mb-3">
+                                            <svg class="w-4 h-4 shrink-0 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                            </svg>
+                                            Rules
+                                        </h3>
+
+                                        {{-- Typed lines and the attachment are
+                                             independent, so each is guarded on its
+                                             own. An event may carry only a rulebook
+                                             PDF and no typed rules at all. --}}
+                                        @if ($event->hasRules())
+                                            <ul class="space-y-2">
+                                                @foreach ($event->ruleLines() as $rule)
+                                                    <li class="flex items-start gap-2 text-xs text-gray-700 leading-relaxed">
+                                                        <span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden="true"></span>
+                                                        <span>{{ $rule }}</span>
+                                                    </li>
+                                                @endforeach
+                                            </ul>
+                                        @endif
+                                    </div>
 
                                     @if ($event->hasRulesFile())
-                                        {{-- download rather than a plain link so the
+                                        {{-- Outside the scrolling list on purpose: a
+                                             download that scrolls out of sight is one
+                                             nobody finds.
+
+                                             download rather than a plain link so the
                                              PDF is saved under the name it was
-                                             uploaded with instead of the hashed
-                                             one on disk. target keeps the
-                                             half-filled form behind it alive in
-                                             browsers that preview inline. --}}
+                                             uploaded with instead of the hashed one
+                                             on disk. target keeps the half-filled
+                                             form behind it alive in browsers that
+                                             preview inline. --}}
                                         <a href="{{ $event->rulesFileUrl() }}"
                                            download="{{ $event->rulesFileName() }}"
                                            target="_blank" rel="noopener"
-                                           @class([
-                                               'group flex items-start gap-2.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 transition hover:border-blue-300 hover:bg-blue-50',
-                                               'mt-4' => $event->hasRules(),
-                                           ])>
+                                           class="group mt-4 flex items-start gap-2.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 transition hover:border-blue-300 hover:bg-blue-50">
                                             <svg class="w-5 h-5 shrink-0 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                             </svg>
