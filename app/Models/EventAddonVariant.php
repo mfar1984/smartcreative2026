@@ -34,24 +34,24 @@ class EventAddonVariant extends Model
     /**
      * Price actually charged for this variant.
      *
-     * A blank variant price means "same as the add-on", which keeps the common
-     * case of one price across all sizes from having to be repeated.
+     * Blank means "same as the add-on", which keeps the common case of one price
+     * across every size from having to be repeated. Zero means zero.
      *
-     * Zero is read the same way, not as free. The field is an override, and the
-     * number input offers a spinner that lands on 0 at the first click, so a
-     * shirt priced at RM50 was being given away by four sizes that nobody meant
-     * to change. An add-on that costs money with every option at zero is a
-     * typo, not an offer.
+     * The two are deliberately different, and an earlier version of this method
+     * collapsed them by treating zero as blank. That was wrong: a shirt whose cost
+     * is already inside the event fee is priced at zero on purpose, and the add-on
+     * exists only to collect a size. Reading that as "charge the add-on price"
+     * billed people twice for the same shirt.
      *
-     * To give something away, price the add-on itself at zero and leave the
-     * options blank. That says it once instead of repeating it on every size.
+     * What actually caused the original confusion was not the zero, it was that
+     * nothing on the form said what would be charged. The form now prints the
+     * resolved figure beside every option, so blank and zero can be told apart at
+     * a glance.
      */
     public function unitPrice(): float
     {
-        $override = $this->price === null ? null : (float) $this->price;
-
-        return $override !== null && $override > 0
-            ? $override
+        return $this->price !== null
+            ? (float) $this->price
             : (float) ($this->addon?->price ?? 0);
     }
 

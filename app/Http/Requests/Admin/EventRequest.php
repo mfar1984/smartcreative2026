@@ -262,25 +262,15 @@ class EventRequest extends FormRequest
                 continue;
             }
 
-            /*
-            | A zero override is stored as blank, because that is what it means:
-            | charge the add-on price. Keeping the 0 would leave the form showing
-            | a figure that is not the one charged, which is how the RM50 shirt
-            | came to read RM0.00 on the public form.
-            |
-            | EventAddonVariant::unitPrice() applies the same rule when reading,
-            | so rows saved before this still price correctly.
-            */
-            $price = ($variant['price'] ?? '') === '' ? null : $variant['price'];
-
-            if ($price !== null && (float) $price <= 0) {
-                $price = null;
-            }
-
             $clean[] = [
                 'id' => $id,
                 'label' => $label,
-                'price' => $price,
+
+                // Blank stays null, which means "same as the add-on". A typed zero
+                // stays zero, which means free. Collapsing the two would take away
+                // the only way to say an option costs nothing while the add-on it
+                // belongs to has a price.
+                'price' => ($variant['price'] ?? '') === '' ? null : $variant['price'],
                 'stock' => ($variant['stock'] ?? '') === '' ? null : $variant['stock'],
             ];
         }

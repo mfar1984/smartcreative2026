@@ -56,9 +56,14 @@
         <p class="text-sm text-gray-600">
             Extras a registrant may buy on top of the event price. Give an add-on options when
             it comes in choices, for example a shirt in S, M and L. Each option can carry its
-            own price and stock. Leave an option's price blank, or at zero, to charge the
-            add-on price &mdash; only fill it in when that size really costs something
-            different. To give an add-on away, set its own price to zero.
+            own price and stock.
+            <span class="block mt-1">
+                An option's price left <strong>blank</strong> charges the add-on price above.
+                Set it to <strong>0</strong> when that option costs nothing, for a shirt whose
+                cost already sits in the event fee. Each option says which it is doing
+                underneath, so the two are never a guess. When nothing at all is charged, the
+                registration form shows "Included" and asks only for the size.
+            </span>
         </p>
 
         {{-- The block above the list, so an error on a row the operator has

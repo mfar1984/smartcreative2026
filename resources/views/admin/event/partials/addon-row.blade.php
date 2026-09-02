@@ -73,6 +73,7 @@
                 <input type="number" name="{{ $name }}[price]" step="0.01" min="0" max="999999.99"
                        value="{{ $row['price'] ?? '' }}"
                        placeholder="0.00"
+                       data-addon-price
                        class="{{ $miniInput }}">
             </div>
         </div>

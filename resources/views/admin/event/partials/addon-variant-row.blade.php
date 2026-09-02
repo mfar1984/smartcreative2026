@@ -29,15 +29,19 @@
 
     <div>
         <label class="sm:hidden block text-[11px] font-semibold text-gray-500 mb-1">Price override ({{ $currency }})</label>
-        {{-- step and min start at 0.01 rather than 0. The spinner used to land on
-             0 at the first click, which reads as "free" and quietly gave away a
-             paid shirt on every size. Both blank and 0 now mean "same as the
-             add-on", and the placeholder says so. --}}
-        <input type="number" name="{{ $name }}[price]" step="0.01" min="0.01" max="999999.99"
+        {{-- min is 0, because zero is a real answer: a shirt already paid for in
+             the event fee costs nothing here, and the add-on exists only to collect
+             a size. Blank and zero mean different things, so the note underneath
+             prints the figure that will actually be charged rather than leaving the
+             difference to be guessed at. --}}
+        <input type="number" name="{{ $name }}[price]" step="0.01" min="0" max="999999.99"
                value="{{ $row['price'] ?? '' }}"
                placeholder="Same as add-on"
-               title="Leave blank to charge the add-on price."
+               data-variant-price
+               title="Blank charges the add-on price. Zero charges nothing."
                class="{{ $miniInput }} bg-white">
+
+        <p class="mt-1 text-[11px] text-gray-500" data-variant-charge></p>
     </div>
 
     <div>

@@ -676,6 +676,10 @@
 
                 row.querySelector('[data-variant-list]').appendChild(variantRow);
                 syncVariantChrome(row);
+
+                // A fresh option starts blank, so say straight away that it will
+                // charge the add-on price rather than leaving the note empty.
+                syncVariantCharges(row);
                 variantRow.querySelector('input[type="text"]')?.focus();
 
                 return;
@@ -754,11 +758,64 @@
             syncAddonStates(event.target.closest('[data-addon-row]'));
         });
 
+        /*
+         | Print what each option will actually be charged.
+         |
+         | Blank and zero mean different things here, and telling them apart used to
+         | be guesswork: the spinner lands on zero at the first click, and a shirt
+         | already covered by the event fee is priced at zero deliberately. Rather
+         | than forbidding one of the two, the resolved figure is shown, so the
+         | difference is visible while it is being typed.
+         */
+        function syncVariantCharges(row) {
+            const addonPrice = parseFloat(row.querySelector('[data-addon-price]')?.value ?? '');
+
+            row.querySelectorAll('[data-variant-row]').forEach(function (variant) {
+                const input = variant.querySelector('[data-variant-price]');
+                const note = variant.querySelector('[data-variant-charge]');
+
+                if (!input || !note) {
+                    return;
+                }
+
+                if (input.value.trim() === '') {
+                    note.textContent = Number.isFinite(addonPrice)
+                        ? 'Charges the add-on price, RM ' + addonPrice.toFixed(2)
+                        : 'Charges the add-on price';
+
+                    return;
+                }
+
+                const own = parseFloat(input.value);
+
+                if (!Number.isFinite(own)) {
+                    note.textContent = '';
+
+                    return;
+                }
+
+                note.textContent = own === 0
+                    ? 'Free, nothing is charged'
+                    : 'Charges RM ' + own.toFixed(2);
+            });
+        }
+
+        // Delegated so options added later, and the add-on price above them, both
+        // keep the notes in step.
+        list.addEventListener('input', function (event) {
+            if (!event.target.matches('[data-variant-price], [data-addon-price]')) {
+                return;
+            }
+
+            syncVariantCharges(event.target.closest('[data-addon-row]'));
+        });
+
         // A row rendered from old() may already have options, so the chrome has
         // to be brought in line on load rather than only on change.
         list.querySelectorAll('[data-addon-row]').forEach(function (row) {
             syncVariantChrome(row);
             syncAddonStates(row);
+            syncVariantCharges(row);
         });
         renumber();
     })();

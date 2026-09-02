@@ -135,6 +135,10 @@ class EventAddon extends Model
      */
     public function priceSummaryLabel(): string
     {
+        if ($this->costsNothing()) {
+            return 'Included';
+        }
+
         [$low, $high] = $this->priceRange();
 
         if (abs($high - $low) < 0.01) {
@@ -142,6 +146,21 @@ class EventAddon extends Model
         }
 
         return 'From RM ' . number_format($low, 2);
+    }
+
+    /**
+     * Whether choosing this add-on adds nothing to the amount due.
+     *
+     * Derived rather than a setting, so it cannot be misconfigured into hiding a
+     * charge that is really being made. An add-on whose every option resolves to
+     * zero is one whose cost already sits in the event fee, and the form should be
+     * collecting a size rather than repeating "RM 0.00" on every line.
+     */
+    public function costsNothing(): bool
+    {
+        [$low, $high] = $this->priceRange();
+
+        return abs($low) < 0.01 && abs($high) < 0.01;
     }
 
     /* ---------------------------------------------------------------------

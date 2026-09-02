@@ -169,7 +169,15 @@
                                             @endif
                                         </label>
 
-                                        <span class="{{ $priceCell }}">RM {{ number_format($variant->unitPrice(), 2) }}</span>
+                                        {{-- Nothing is charged for this add-on, so the
+                                             column is left empty rather than printing
+                                             RM 0.00 against every size. The header
+                                             already says "Included". --}}
+                                        <span class="{{ $priceCell }}">
+                                            @unless ($addon->costsNothing())
+                                                RM {{ number_format($variant->unitPrice(), 2) }}
+                                            @endunless
+                                        </span>
 
                                         <input type="number"
                                                id="{{ $inputId }}"
