@@ -35,7 +35,7 @@
                     ->map(fn ($variant) => [
                         'id' => $variant->id,
                         'label' => $variant->label,
-                        'price_extra' => $variant->price_extra,
+                        'price' => $variant->price,
                         'stock' => $variant->stock,
                         'stock_taken' => $variant->stock_taken,
                     ])
@@ -58,12 +58,12 @@
             it comes in choices, for example a shirt in S, M and L. Each option can carry its
             own price and stock.
             <span class="block mt-1">
-                The price above is the price of the thing. An option's <strong>Extra</strong> is
-                only for a size that genuinely costs more, such as a 5XL taking more cloth:
-                a RM50 shirt with a RM5 extra on 5XL charges RM55, and every other size charges
-                RM50 without repeating it. Leave it blank for no extra. Each option prints what
-                it will charge underneath. To include something in the event fee, price the
-                add-on itself at 0 and the form will show "Included" and ask only for the size.
+                An option's <strong>Price</strong> is the figure charged for that option.
+                Leave it <strong>blank</strong> to use the add-on price above, so one price does
+                not have to be repeated across four sizes. Set it to <strong>0</strong> and that
+                option is free: no money is shown against it on the registration form at all.
+                A size that costs more, such as a 5XL, carries its own figure. Each option
+                prints what it will do underneath.
             </span>
         </p>
 

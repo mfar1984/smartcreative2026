@@ -165,7 +165,7 @@
                 'hidden' => count($variants) === 0,
             ]) data-variant-head>
                 <span class="text-[11px] font-semibold text-gray-500">Label</span>
-                <span class="text-[11px] font-semibold text-gray-500">Extra ({{ $currency }})</span>
+                <span class="text-[11px] font-semibold text-gray-500">Price ({{ $currency }})</span>
                 <span class="text-[11px] font-semibold text-gray-500">Stock</span>
                 <span></span>
             </div>

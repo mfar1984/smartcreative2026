@@ -10,7 +10,7 @@ class EventAddonVariant extends Model
     protected $fillable = [
         'event_addon_id',
         'label',
-        'price_extra',
+        'price',
         'stock',
         'stock_taken',
         'sort_order',
@@ -19,7 +19,7 @@ class EventAddonVariant extends Model
     protected function casts(): array
     {
         return [
-            'price_extra' => 'decimal:2',
+            'price' => 'decimal:2',
             'stock' => 'integer',
             'stock_taken' => 'integer',
             'sort_order' => 'integer',
@@ -32,27 +32,29 @@ class EventAddonVariant extends Model
     }
 
     /**
-     * What this option adds to the add-on price, never a price of its own.
+     * Price charged for this option.
      *
-     * Blank and zero mean the same thing, and that is the point: an option only
-     * needs a figure when it genuinely costs more, such as a 5XL taking more
-     * cloth. Everything else inherits the add-on price by saying nothing.
-     */
-    public function priceExtra(): float
-    {
-        return (float) ($this->price_extra ?? 0);
-    }
-
-    /**
-     * Price actually charged for this option.
+     * Blank means "same as the add-on", so one price does not have to be repeated
+     * across four sizes. Zero means zero: a size costing nothing is a shirt whose
+     * cost already sits in the event fee, and nothing about it should be charged or
+     * shown as money.
      *
-     * The add-on carries the price of the thing; this adds the difference. So a
-     * RM50 shirt with a RM5 extra on 5XL charges RM55, and every other size
-     * charges RM50 without repeating it.
+     * This is the figure itself, not a difference from the add-on. A 5XL that costs
+     * more carries its own full figure. Typing it out once is worth more than the
+     * convenience of a surcharge, because a surcharge made zero mean "no extra" and
+     * quietly charged the add-on price for a size that was meant to be free.
      */
     public function unitPrice(): float
     {
-        return round((float) ($this->addon?->price ?? 0) + $this->priceExtra(), 2);
+        return $this->price !== null
+            ? (float) $this->price
+            : (float) ($this->addon?->price ?? 0);
+    }
+
+    /** Whether this option adds nothing to the amount due. */
+    public function isFree(): bool
+    {
+        return abs($this->unitPrice()) < 0.01;
     }
 
     public function hasStockLimit(): bool

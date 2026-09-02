@@ -169,14 +169,19 @@
                                             @endif
                                         </label>
 
-                                        {{-- Nothing is charged for this add-on, so the
-                                             column is left empty rather than printing
-                                             RM 0.00 against every size. The header
-                                             already says "Included". --}}
+                                        {{-- A free option shows no money at all. Printing
+                                             "RM 0.00" against a size that was deliberately
+                                             set to zero is noise, and it reads as though
+                                             something is still being charged. When only
+                                             some options are free the word says so, since
+                                             an empty cell beside a priced one looks like a
+                                             rendering fault. --}}
                                         <span class="{{ $priceCell }}">
-                                            @unless ($addon->costsNothing())
+                                            @if (! $variant->isFree())
                                                 RM {{ number_format($variant->unitPrice(), 2) }}
-                                            @endunless
+                                            @elseif (! $addon->costsNothing())
+                                                <span class="text-gray-400">Free</span>
+                                            @endif
                                         </span>
 
                                         <input type="number"

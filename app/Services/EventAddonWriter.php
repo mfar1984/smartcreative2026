@@ -91,9 +91,7 @@ class EventAddonWriter
 
                 // Null is meaningful here: it means "charge the add-on price",
                 // so a blank box must not be coerced to zero.
-                'price_extra' => $variant['price_extra'] === null
-                ? null
-                : round((float) $variant['price_extra'], 2),
+                'price' => $variant['price'] === null ? null : round((float) $variant['price'], 2),
                 'stock' => $variant['stock'] === null ? null : (int) $variant['stock'],
                 'sort_order' => $position,
             ];

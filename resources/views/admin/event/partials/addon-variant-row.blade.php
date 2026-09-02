@@ -28,16 +28,16 @@
     </div>
 
     <div>
-        <label class="sm:hidden block text-[11px] font-semibold text-gray-500 mb-1">Extra ({{ $currency }})</label>
-        {{-- An extra, not a price. Only filled in when this option genuinely costs
-             more, such as a 5XL taking more cloth. Left blank it adds nothing, so
-             the option charges whatever the add-on charges, and the note underneath
-             prints that figure so it never has to be worked out. --}}
-        <input type="number" name="{{ $name }}[price_extra]" step="0.01" min="0" max="999999.99"
-               value="{{ $row['price_extra'] ?? '' }}"
-               placeholder="No extra"
+        <label class="sm:hidden block text-[11px] font-semibold text-gray-500 mb-1">Price ({{ $currency }})</label>
+        {{-- The figure charged for this option. Blank uses the add-on price above,
+             so one price does not have to be repeated across four sizes. Zero means
+             free, and a free option shows no money on the public form at all. The
+             note underneath says which of the three is in force. --}}
+        <input type="number" name="{{ $name }}[price]" step="0.01" min="0" max="999999.99"
+               value="{{ $row['price'] ?? '' }}"
+               placeholder="Same as add-on"
                data-variant-price
-               title="Only for an option that costs more. Leave blank for no extra."
+               title="Blank uses the add-on price. 0 means free."
                class="{{ $miniInput }} bg-white">
 
         <p class="mt-1 text-[11px] text-gray-500" data-variant-charge></p>

@@ -778,22 +778,28 @@
                     return;
                 }
 
-                const base = Number.isFinite(addonPrice) ? addonPrice : 0;
-                const extra = input.value.trim() === '' ? 0 : parseFloat(input.value);
+                // Blank inherits the add-on price; a typed figure is the price, and
+                // zero is free. Printed rather than explained, because this is the
+                // distinction that has been misread twice.
+                if (input.value.trim() === '') {
+                    note.textContent = Number.isFinite(addonPrice)
+                        ? 'Same as the add-on, RM ' + addonPrice.toFixed(2)
+                        : 'Same as the add-on';
 
-                if (!Number.isFinite(extra)) {
+                    return;
+                }
+
+                const own = parseFloat(input.value);
+
+                if (!Number.isFinite(own)) {
                     note.textContent = '';
 
                     return;
                 }
 
-                // Always the figure the buyer pays, so an extra never has to be
-                // added up in somebody's head.
-                const charged = 'Charges RM ' + (base + extra).toFixed(2);
-
-                note.textContent = extra > 0
-                    ? charged + ', RM ' + extra.toFixed(2) + ' extra'
-                    : charged;
+                note.textContent = own === 0
+                    ? 'Free, and no price is shown on the form'
+                    : 'Charges RM ' + own.toFixed(2);
             });
         }
 

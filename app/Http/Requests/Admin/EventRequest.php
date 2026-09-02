@@ -100,9 +100,8 @@ class EventRequest extends FormRequest
             'addons.*.variants' => ['array', 'max:' . self::MAX_VARIANTS],
             'addons.*.variants.*.id' => ['nullable', 'integer'],
             'addons.*.variants.*.label' => ['required', 'string', 'max:60'],
-            // An extra, so it can only add. A negative would be a discount, which
-            // is a different feature and not one anybody has asked for.
-            'addons.*.variants.*.price_extra' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
+            // Zero is allowed and means free. Blank means "same as the add-on".
+            'addons.*.variants.*.price' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
             'addons.*.variants.*.stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
         ];
     }
@@ -124,8 +123,7 @@ class EventRequest extends FormRequest
             'addons.*.price.numeric' => 'The add-on price must be a number.',
             'addons.*.variants.max' => 'An add-on can carry at most ' . self::MAX_VARIANTS . ' options.',
             'addons.*.variants.*.label.required' => 'Every option needs a label, for example "Size M".',
-            'addons.*.variants.*.price_extra.numeric' => 'An option extra must be a number, or blank for no extra.',
-            'addons.*.variants.*.price_extra.min' => 'An option extra can only add to the price, so it cannot be negative.',
+            'addons.*.variants.*.price.numeric' => 'An option price must be a number, 0 for free, or blank to use the add-on price.',
             'addons.*.variants.*.stock.integer' => 'Stock must be a whole number, or blank for unlimited.',
         ];
     }
@@ -269,9 +267,9 @@ class EventRequest extends FormRequest
                 'id' => $id,
                 'label' => $label,
 
-                // Blank and zero both mean "no extra", so blank is stored as null
-                // and nothing has to tell the two apart later.
-                'price_extra' => ($variant['price_extra'] ?? '') === '' ? null : $variant['price_extra'],
+                // Blank stays null, which means "same as the add-on". A typed zero
+                // stays zero, which means free.
+                'price' => ($variant['price'] ?? '') === '' ? null : $variant['price'],
                 'stock' => ($variant['stock'] ?? '') === '' ? null : $variant['stock'],
             ];
         }
