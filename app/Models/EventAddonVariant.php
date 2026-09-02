@@ -10,7 +10,7 @@ class EventAddonVariant extends Model
     protected $fillable = [
         'event_addon_id',
         'label',
-        'price',
+        'price_extra',
         'stock',
         'stock_taken',
         'sort_order',
@@ -19,7 +19,7 @@ class EventAddonVariant extends Model
     protected function casts(): array
     {
         return [
-            'price' => 'decimal:2',
+            'price_extra' => 'decimal:2',
             'stock' => 'integer',
             'stock_taken' => 'integer',
             'sort_order' => 'integer',
@@ -32,27 +32,27 @@ class EventAddonVariant extends Model
     }
 
     /**
-     * Price actually charged for this variant.
+     * What this option adds to the add-on price, never a price of its own.
      *
-     * Blank means "same as the add-on", which keeps the common case of one price
-     * across every size from having to be repeated. Zero means zero.
+     * Blank and zero mean the same thing, and that is the point: an option only
+     * needs a figure when it genuinely costs more, such as a 5XL taking more
+     * cloth. Everything else inherits the add-on price by saying nothing.
+     */
+    public function priceExtra(): float
+    {
+        return (float) ($this->price_extra ?? 0);
+    }
+
+    /**
+     * Price actually charged for this option.
      *
-     * The two are deliberately different, and an earlier version of this method
-     * collapsed them by treating zero as blank. That was wrong: a shirt whose cost
-     * is already inside the event fee is priced at zero on purpose, and the add-on
-     * exists only to collect a size. Reading that as "charge the add-on price"
-     * billed people twice for the same shirt.
-     *
-     * What actually caused the original confusion was not the zero, it was that
-     * nothing on the form said what would be charged. The form now prints the
-     * resolved figure beside every option, so blank and zero can be told apart at
-     * a glance.
+     * The add-on carries the price of the thing; this adds the difference. So a
+     * RM50 shirt with a RM5 extra on 5XL charges RM55, and every other size
+     * charges RM50 without repeating it.
      */
     public function unitPrice(): float
     {
-        return $this->price !== null
-            ? (float) $this->price
-            : (float) ($this->addon?->price ?? 0);
+        return round((float) ($this->addon?->price ?? 0) + $this->priceExtra(), 2);
     }
 
     public function hasStockLimit(): bool

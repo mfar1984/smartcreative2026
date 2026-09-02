@@ -778,25 +778,22 @@
                     return;
                 }
 
-                if (input.value.trim() === '') {
-                    note.textContent = Number.isFinite(addonPrice)
-                        ? 'Charges the add-on price, RM ' + addonPrice.toFixed(2)
-                        : 'Charges the add-on price';
+                const base = Number.isFinite(addonPrice) ? addonPrice : 0;
+                const extra = input.value.trim() === '' ? 0 : parseFloat(input.value);
 
-                    return;
-                }
-
-                const own = parseFloat(input.value);
-
-                if (!Number.isFinite(own)) {
+                if (!Number.isFinite(extra)) {
                     note.textContent = '';
 
                     return;
                 }
 
-                note.textContent = own === 0
-                    ? 'Free, nothing is charged'
-                    : 'Charges RM ' + own.toFixed(2);
+                // Always the figure the buyer pays, so an extra never has to be
+                // added up in somebody's head.
+                const charged = 'Charges RM ' + (base + extra).toFixed(2);
+
+                note.textContent = extra > 0
+                    ? charged + ', RM ' + extra.toFixed(2) + ' extra'
+                    : charged;
             });
         }
 

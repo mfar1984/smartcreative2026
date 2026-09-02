@@ -28,17 +28,16 @@
     </div>
 
     <div>
-        <label class="sm:hidden block text-[11px] font-semibold text-gray-500 mb-1">Price override ({{ $currency }})</label>
-        {{-- min is 0, because zero is a real answer: a shirt already paid for in
-             the event fee costs nothing here, and the add-on exists only to collect
-             a size. Blank and zero mean different things, so the note underneath
-             prints the figure that will actually be charged rather than leaving the
-             difference to be guessed at. --}}
-        <input type="number" name="{{ $name }}[price]" step="0.01" min="0" max="999999.99"
-               value="{{ $row['price'] ?? '' }}"
-               placeholder="Same as add-on"
+        <label class="sm:hidden block text-[11px] font-semibold text-gray-500 mb-1">Extra ({{ $currency }})</label>
+        {{-- An extra, not a price. Only filled in when this option genuinely costs
+             more, such as a 5XL taking more cloth. Left blank it adds nothing, so
+             the option charges whatever the add-on charges, and the note underneath
+             prints that figure so it never has to be worked out. --}}
+        <input type="number" name="{{ $name }}[price_extra]" step="0.01" min="0" max="999999.99"
+               value="{{ $row['price_extra'] ?? '' }}"
+               placeholder="No extra"
                data-variant-price
-               title="Blank charges the add-on price. Zero charges nothing."
+               title="Only for an option that costs more. Leave blank for no extra."
                class="{{ $miniInput }} bg-white">
 
         <p class="mt-1 text-[11px] text-gray-500" data-variant-charge></p>

@@ -100,7 +100,9 @@ class EventRequest extends FormRequest
             'addons.*.variants' => ['array', 'max:' . self::MAX_VARIANTS],
             'addons.*.variants.*.id' => ['nullable', 'integer'],
             'addons.*.variants.*.label' => ['required', 'string', 'max:60'],
-            'addons.*.variants.*.price' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
+            // An extra, so it can only add. A negative would be a discount, which
+            // is a different feature and not one anybody has asked for.
+            'addons.*.variants.*.price_extra' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
             'addons.*.variants.*.stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
         ];
     }
@@ -122,7 +124,8 @@ class EventRequest extends FormRequest
             'addons.*.price.numeric' => 'The add-on price must be a number.',
             'addons.*.variants.max' => 'An add-on can carry at most ' . self::MAX_VARIANTS . ' options.',
             'addons.*.variants.*.label.required' => 'Every option needs a label, for example "Size M".',
-            'addons.*.variants.*.price.numeric' => 'An option price must be a number, or blank to use the add-on price.',
+            'addons.*.variants.*.price_extra.numeric' => 'An option extra must be a number, or blank for no extra.',
+            'addons.*.variants.*.price_extra.min' => 'An option extra can only add to the price, so it cannot be negative.',
             'addons.*.variants.*.stock.integer' => 'Stock must be a whole number, or blank for unlimited.',
         ];
     }
@@ -266,11 +269,9 @@ class EventRequest extends FormRequest
                 'id' => $id,
                 'label' => $label,
 
-                // Blank stays null, which means "same as the add-on". A typed zero
-                // stays zero, which means free. Collapsing the two would take away
-                // the only way to say an option costs nothing while the add-on it
-                // belongs to has a price.
-                'price' => ($variant['price'] ?? '') === '' ? null : $variant['price'],
+                // Blank and zero both mean "no extra", so blank is stored as null
+                // and nothing has to tell the two apart later.
+                'price_extra' => ($variant['price_extra'] ?? '') === '' ? null : $variant['price_extra'],
                 'stock' => ($variant['stock'] ?? '') === '' ? null : $variant['stock'],
             ];
         }
@@ -343,7 +344,6 @@ class EventRequest extends FormRequest
         $seenIds = [];
 
         foreach ($rows as $i => $row) {
-            $this->checkAddonPrice($validator, $i, $row);
             $this->checkDuplicateLabels($validator, $i, $row);
 
             $id = $row['id'] ?? null;
@@ -383,24 +383,17 @@ class EventRequest extends FormRequest
      * option must then name its own price, otherwise a blank price would give
      * the item away.
      */
-    private function checkAddonPrice(Validator $validator, int|string $i, array $row): void
-    {
-        if ((float) ($row['price'] ?? 0) > 0) {
-            return;
-        }
-
-        foreach (($row['variants'] ?? []) as $j => $variant) {
-            if ($variant['price'] === null) {
-                $validator->errors()->add(
-                    "addons.{$i}.variants.{$j}.price",
-                    sprintf(
-                        'Set a price for "%s", or give the add-on itself a price for its options to inherit.',
-                        $variant['label'] !== '' ? $variant['label'] : 'this option'
-                    )
-                );
-            }
-        }
-    }
+    /*
+    | checkAddonPrice used to live here. It insisted that when an add-on cost
+    | nothing, every option had to name its own price, because an option with no
+    | price inherited nothing and would have been silently free.
+    |
+    | Under a surcharge that rule forbids the very thing it was protecting: an
+    | add-on priced at zero with no extras is a shirt already covered by the event
+    | fee, and asking only for a size is exactly what it is for. There is nothing
+    | left to guard, so the check is gone rather than loosened into a comment
+    | nobody can act on.
+    */
 
     private function checkDuplicateLabels(Validator $validator, int|string $i, array $row): void
     {
