@@ -32,26 +32,20 @@ class EventAddonVariant extends Model
     }
 
     /**
-     * Price charged for this option.
+     * What this option adds per unit, on top of the add-on's own price.
      *
-     * Blank means "same as the add-on", so one price does not have to be repeated
-     * across four sizes. Zero means zero: a size costing nothing is a shirt whose
-     * cost already sits in the event fee, and nothing about it should be charged or
-     * shown as money.
-     *
-     * This is the figure itself, not a difference from the add-on. A 5XL that costs
-     * more carries its own full figure. Typing it out once is worth more than the
-     * convenience of a surcharge, because a surcharge made zero mean "no extra" and
-     * quietly charged the add-on price for a size that was meant to be free.
+     * The add-on carries the price of the thing and is charged once. A size is only
+     * a choice, so it costs nothing unless that size genuinely costs more, such as
+     * a 5XL. Blank and zero therefore mean the same thing, which is what finally
+     * removes the ambiguity: there is no longer any way to write a figure here that
+     * disagrees with the price shown above it.
      */
     public function unitPrice(): float
     {
-        return $this->price !== null
-            ? (float) $this->price
-            : (float) ($this->addon?->price ?? 0);
+        return (float) ($this->price ?? 0);
     }
 
-    /** Whether this option adds nothing to the amount due. */
+    /** Whether choosing this option adds nothing to the amount due. */
     public function isFree(): bool
     {
         return abs($this->unitPrice()) < 0.01;

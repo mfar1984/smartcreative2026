@@ -62,8 +62,14 @@
                     $toggleId = "addon-toggle-{$event->slug}-{$addon->id}";
                 @endphp
 
+                {{-- data-addon-once is the add-on's own price, charged a single time
+                     when anything at all is taken from it. The quantity boxes carry
+                     only the per size surcharge, so the running total adds this once
+                     rather than multiplying it. --}}
                 <div class="rounded-lg border border-gray-200 bg-white p-4"
                      data-addon="{{ $addon->id }}"
+                     data-addon-once="{{ number_format($addon->unitPrice(), 2, '.', '') }}"
+                     data-addon-name="{{ $addon->name }}"
                      @if ($cap !== null) data-addon-cap="{{ $cap }}" @endif>
 
                     {{-- Header. The third column is left empty so the add-on's

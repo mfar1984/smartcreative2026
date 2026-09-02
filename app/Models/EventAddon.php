@@ -139,13 +139,22 @@ class EventAddon extends Model
             return 'Included';
         }
 
-        [$low, $high] = $this->priceRange();
+        /*
+         | The add-on's own price, because that is what taking it costs. Sizes are
+         | choices rather than separate products, so a range across them would read
+         | as though the shirt had four prices when it has one.
+         |
+         | "from" only when a size can add to it, which is the 5XL case.
+         */
+        $label = 'RM ' . number_format($this->unitPrice(), 2);
 
-        if (abs($high - $low) < 0.01) {
-            return 'RM ' . number_format($low, 2);
-        }
+        return $this->hasSurcharges() ? 'From ' . $label : $label;
+    }
 
-        return 'From RM ' . number_format($low, 2);
+    /** Whether any option adds to the price. */
+    public function hasSurcharges(): bool
+    {
+        return $this->variants->contains(fn (EventAddonVariant $v) => ! $v->isFree());
     }
 
     /**
@@ -158,9 +167,7 @@ class EventAddon extends Model
      */
     public function costsNothing(): bool
     {
-        [$low, $high] = $this->priceRange();
-
-        return abs($low) < 0.01 && abs($high) < 0.01;
+        return abs($this->unitPrice()) < 0.01 && ! $this->hasSurcharges();
     }
 
     /* ---------------------------------------------------------------------

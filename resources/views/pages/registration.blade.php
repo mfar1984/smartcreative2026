@@ -898,6 +898,43 @@
 
                 let addonCents = 0;
 
+                /*
+                 | The add-on's own price is charged once, however many units are
+                 | taken from it, so it is added per card rather than per box. The
+                 | boxes carry only the surcharge for their size.
+                 */
+                form.querySelectorAll('[data-addon-once]').forEach(function (card) {
+                    const once = Math.round(parseFloat(card.dataset.addonOnce || '0') * 100);
+
+                    if (once === 0) {
+                        return;
+                    }
+
+                    const taken = Array.from(card.querySelectorAll('[data-addon-qty]'))
+                        .some(function (box) { return quantityOf(box) > 0; });
+
+                    if (!taken) {
+                        return;
+                    }
+
+                    addonCents += once;
+
+                    const row = document.createElement('tr');
+                    row.setAttribute('data-addon-line', '');
+
+                    const label = document.createElement('td');
+                    label.className = 'py-1 text-gray-700';
+                    label.textContent = card.dataset.addonName || 'Extra';
+
+                    const amount = document.createElement('td');
+                    amount.className = 'py-1 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap w-28';
+                    amount.textContent = money(once);
+
+                    row.appendChild(label);
+                    row.appendChild(amount);
+                    lines.appendChild(row);
+                });
+
                 inputs.forEach(function (input) {
                     const quantity = quantityOf(input);
 
@@ -907,6 +944,13 @@
 
                     const unit = Math.round(parseFloat(input.dataset.price || '0') * 100);
                     const lineTotal = unit * quantity;
+
+                    // A size that adds nothing still records a choice, but it has no
+                    // place on a list of money.
+                    if (lineTotal === 0) {
+                        return;
+                    }
+
                     addonCents += lineTotal;
 
                     const row = document.createElement('tr');

@@ -146,8 +146,30 @@ class AddonOrder
                 continue;
             }
 
+            /*
+             | A line is written for every size chosen even when it adds nothing,
+             | because the shirts still have to be printed and somebody has to know
+             | which sizes were asked for. The figure on it is the surcharge for that
+             | size, so an ordinary size is a RM0.00 line that records a choice.
+             */
             $lines[] = self::line($addon, $variant, $variant->unitPrice(), $quantity);
             $ordered += $quantity;
+        }
+
+        /*
+         | The add-on's own price is charged once, not per unit.
+         |
+         | "Event Tee RM50" is the price of being given shirts at all; the sizes are
+         | how many and which, and they only carry money when a size costs more. So
+         | five shirts on a RM50 add-on is RM50, not RM250, and that is what makes
+         | the figure on the form match what the organiser meant by it.
+         |
+         | Added after the loop so it only appears when something was actually
+         | ordered, and placed at the front so the invoice reads as the thing first
+         | and its sizes underneath.
+         */
+        if ($lines !== [] && $addon->unitPrice() > 0) {
+            array_unshift($lines, self::line($addon, null, $addon->unitPrice(), 1));
         }
 
         // The cap counts every option together, so a limit of 3 shirts cannot be
