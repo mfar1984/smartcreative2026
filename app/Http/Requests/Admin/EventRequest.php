@@ -80,6 +80,14 @@ class EventRequest extends FormRequest
             'poster' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
             'remove_poster' => ['nullable', 'boolean'],
 
+            // PDF only. A rulebook is read, not edited, and accepting Word or
+            // spreadsheets would hand entrants a file they may not be able to
+            // open. 8 MB fits a long illustrated rulebook.
+            // mimes checks the type guessed from the file's own contents, not the
+            // extension it arrived with, so renaming a .docx to .pdf is caught.
+            'rules_file' => ['nullable', 'file', 'mimes:pdf', 'max:8192'],
+            'remove_rules_file' => ['nullable', 'boolean'],
+
             /* ---------------- Paid add-ons ---------------- */
 
             'addons' => ['array', 'max:' . self::MAX_ADDONS],
@@ -116,6 +124,9 @@ class EventRequest extends FormRequest
             'ends_at.after_or_equal' => 'The end date cannot be before the start date.',
             'max_players.gte' => 'The maximum number of players cannot be lower than the minimum.',
             'registration_closes_at.after_or_equal' => 'Registration cannot close before it opens.',
+
+            'rules_file.mimes' => 'The rules attachment must be a PDF file.',
+            'rules_file.max' => 'The rules attachment cannot be larger than 8 MB.',
 
             'addons.max' => 'An event can carry at most ' . self::MAX_ADDONS . ' add-ons.',
             'addons.*.name.required' => 'Every add-on needs a name.',
@@ -165,6 +176,7 @@ class EventRequest extends FormRequest
             'title' => is_string($this->title) ? trim($this->title) : $this->title,
             'slug' => filled($this->slug) ? str($this->slug)->slug()->toString() : null,
             'remove_poster' => $this->boolean('remove_poster'),
+            'remove_rules_file' => $this->boolean('remove_rules_file'),
             // An empty fee box means free, not zero-that-was-typed.
             'fee' => $this->input('fee') === '' ? null : $this->input('fee'),
             'addons' => $this->normalisedAddons(),
@@ -560,7 +572,14 @@ class EventRequest extends FormRequest
      */
     public function eventAttributes(): array
     {
-        $data = $this->safe()->except(['poster', 'remove_poster', 'slug', 'addons']);
+        $data = $this->safe()->except([
+            'poster',
+            'remove_poster',
+            'rules_file',
+            'remove_rules_file',
+            'slug',
+            'addons',
+        ]);
 
         // Player bounds are meaningless outside manager mode, so they are
         // cleared rather than left behind as stale numbers.

@@ -138,6 +138,46 @@
                         Leave blank and no rules section appears.
                     </p>
                 </x-admin.field-row>
+
+                <x-admin.field-row
+                    label="Rules Attachment"
+                    help="Optional PDF rulebook, offered as a download beside the registration form."
+                    for="rules_file"
+                    error="rules_file">
+
+                    <input type="file" id="rules_file" name="rules_file" accept="application/pdf,.pdf"
+                           class="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700 file:cursor-pointer">
+
+                    @if ($event->hasRulesFile())
+                        {{-- The current file is linked rather than just named, so
+                             the operator can confirm it is the right document
+                             before deciding to replace it. --}}
+                        <div class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                            <svg class="w-4 h-4 shrink-0 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+
+                            <a href="{{ $event->rulesFileUrl() }}" target="_blank" rel="noopener"
+                               class="text-sm font-semibold text-blue-600 hover:text-blue-700 hover:underline break-all">
+                                {{ $event->rulesFileName() }}
+                            </a>
+
+                            @if ($size = $event->rulesFileSizeLabel())
+                                <span class="text-xs text-gray-500">{{ $size }}</span>
+                            @endif
+                        </div>
+
+                        <div class="mt-3">
+                            <x-admin.toggle name="remove_rules_file" :checked="old('remove_rules_file')" label="Remove the current attachment" />
+                        </div>
+                    @endif
+
+                    <p class="text-xs text-gray-500 mt-2">
+                        PDF only, up to 8 MB. Uploading a new file replaces the current one.
+                        The typed rules above and this attachment are independent, so either
+                        one on its own is fine.
+                    </p>
+                </x-admin.field-row>
             </x-admin.panel>
 
             {{-- ---------------- When and where ---------------- --}}

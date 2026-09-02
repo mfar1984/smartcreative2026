@@ -35,6 +35,11 @@ class RegistrationController extends Controller
      */
     private const POSTER_DIRECTORY = 'event-posters';
 
+    /**
+     * Where rulebook attachments live on the public disk.
+     */
+    private const RULES_DIRECTORY = 'event-rules';
+
     public function index(Request $request)
     {
         $tab = $this->resolveTab($request->query('tab'));
@@ -88,6 +93,7 @@ class RegistrationController extends Controller
         $event = new Event($request->eventAttributes());
         $event->slug = $this->resolveSlug($request->input('slug'), $request->input('title'));
         $event->poster_path = $this->storePoster($request);
+        $this->applyRulesFile($request, $event);
         $event->save();
 
         $addons->sync($event, $request->addonRows());
@@ -150,6 +156,8 @@ class RegistrationController extends Controller
             $event->poster_path = $poster;
         }
 
+        $this->applyRulesFile($request, $event);
+
         $event->save();
 
         $addons->sync($event, $request->addonRows());
@@ -197,6 +205,10 @@ class RegistrationController extends Controller
 
         if ($event->poster_path) {
             Storage::disk('public')->delete($event->poster_path);
+        }
+
+        if ($event->rules_file_path) {
+            Storage::disk('public')->delete($event->rules_file_path);
         }
 
         $event->delete();
@@ -284,6 +296,66 @@ class RegistrationController extends Controller
         }
 
         return $request->file('poster')->store(self::POSTER_DIRECTORY, 'public');
+    }
+
+    /**
+     * Apply a rulebook upload, a removal, or neither, to the given event.
+     *
+     * Written onto the model rather than returned because two columns move
+     * together here: a path with no name, or a name with no path, would both be
+     * broken states, and keeping the pair in one place is what stops that.
+     * Called for a new event as well, where every branch simply finds nothing to
+     * replace.
+     */
+    private function applyRulesFile(EventRequest $request, Event $event): void
+    {
+        $disk = Storage::disk('public');
+
+        if ($request->boolean('remove_rules_file')) {
+            if ($event->rules_file_path) {
+                $disk->delete($event->rules_file_path);
+            }
+
+            $event->rules_file_path = null;
+            $event->rules_file_name = null;
+
+            return;
+        }
+
+        if (! $request->hasFile('rules_file')) {
+            return;
+        }
+
+        // Replacing drops the old file so the disk does not fill with orphans.
+        if ($event->rules_file_path) {
+            $disk->delete($event->rules_file_path);
+        }
+
+        $file = $request->file('rules_file');
+
+        $event->rules_file_path = $file->store(self::RULES_DIRECTORY, 'public');
+        $event->rules_file_name = $this->displayFileName($file->getClientOriginalName());
+    }
+
+    /**
+     * Reduce an uploaded filename to something safe to store and show.
+     *
+     * The name is display only and never reaches the filesystem, so this is not
+     * guarding a path. It strips directory parts anyway in case a later change
+     * does build a path from it, drops control characters, and trims to the
+     * column width so a long name cannot fail the insert.
+     */
+    private function displayFileName(?string $name): string
+    {
+        $name = basename(str_replace('\\', '/', (string) $name));
+        $name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name) ?? '';
+        $name = trim($name);
+
+        if ($name === '') {
+            return 'rules.pdf';
+        }
+
+        return str($name)->limit(250, '')->toString();
     }
 
     private function resolveTab(?string $tab): string

@@ -75,6 +75,8 @@ class Event extends Model
         'registration_closes_at',
         'image',
         'poster_path',
+        'rules_file_path',
+        'rules_file_name',
     ];
 
     protected function casts(): array
@@ -319,6 +321,87 @@ class Event extends Model
             ->filter()
             ->values()
             ->all();
+    }
+
+    /**
+     * Whether a rulebook document is attached.
+     */
+    public function hasRulesFile(): bool
+    {
+        return filled($this->rules_file_path);
+    }
+
+    /**
+     * Whether there is anything to show in a rules panel at all.
+     *
+     * Typed lines and an attached document are independent: an event may have
+     * either, both or neither. The views decide whether to render the panel from
+     * this rather than from hasRules() alone, otherwise attaching only a PDF
+     * would hide the panel and with it the download.
+     */
+    public function hasRulesPanel(): bool
+    {
+        return $this->hasRules() || $this->hasRulesFile();
+    }
+
+    public function rulesFileUrl(): ?string
+    {
+        return $this->hasRulesFile()
+            ? Storage::disk('public')->url($this->rules_file_path)
+            : null;
+    }
+
+    /**
+     * The name to show for the attachment.
+     *
+     * Falls back to the stored filename when the original name is missing, which
+     * is the case for nothing today but would be for a row written by hand.
+     */
+    public function rulesFileName(): ?string
+    {
+        if (! $this->hasRulesFile()) {
+            return null;
+        }
+
+        return filled($this->rules_file_name)
+            ? $this->rules_file_name
+            : basename((string) $this->rules_file_path);
+    }
+
+    /**
+     * Human-readable size of the attachment, or null when the file is gone.
+     *
+     * Read off the disk rather than stored, so it cannot drift out of step with
+     * the file it describes. A missing file returns null instead of throwing,
+     * because a broken size must not take the registration page down with it.
+     */
+    public function rulesFileSizeLabel(): ?string
+    {
+        if (! $this->hasRulesFile()) {
+            return null;
+        }
+
+        $disk = Storage::disk('public');
+
+        try {
+            if (! $disk->exists($this->rules_file_path)) {
+                return null;
+            }
+
+            $bytes = $disk->size($this->rules_file_path);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if ($bytes < 1024) {
+            return $bytes . ' B';
+        }
+
+        if ($bytes < 1024 * 1024) {
+            return round($bytes / 1024) . ' KB';
+        }
+
+        return round($bytes / (1024 * 1024), 1) . ' MB';
     }
 
     /**
