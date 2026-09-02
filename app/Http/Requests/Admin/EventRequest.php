@@ -199,7 +199,9 @@ class EventRequest extends FormRequest
             $id = blank($row['id'] ?? null) ? null : (int) $row['id'];
             $name = is_string($row['name'] ?? null) ? trim($row['name']) : '';
             $price = $row['price'] ?? '';
-            $variants = $this->normalisedVariants($row['variants'] ?? []);
+            // The add-on price is handed down because an option's zero has to be read
+            // against it: see normalisedVariants().
+            $variants = $this->normalisedVariants($row['variants'] ?? [], $price);
 
             // Untouched blank row.
             if ($id === null && $name === '' && $price === '' && $variants === []) {
@@ -238,9 +240,10 @@ class EventRequest extends FormRequest
 
     /**
      * @param  mixed  $variants
+     * @param  mixed  $addonPrice  the add-on's own price, or '' when it has none
      * @return array<int, array<string, mixed>>
      */
-    private function normalisedVariants($variants): array
+    private function normalisedVariants($variants, $addonPrice = null): array
     {
         if (! is_array($variants)) {
             return [];
@@ -263,13 +266,30 @@ class EventRequest extends FormRequest
                 continue;
             }
 
+            /*
+            | Blank means "same as the add-on". So does a typed zero, as long as the
+            | add-on itself has a price.
+            |
+            | One field cannot mean both "free" and "same as the add-on", and trying
+            | to make it mean both is what went wrong twice: a RM50 shirt with four
+            | sizes at 0.00 was read as free and stopped showing its price. Zero on a
+            | size is therefore stored as blank, and the size charges the RM50.
+            |
+            | Free is said in one place instead: price the ADD-ON at 0, and every
+            | option inherits nothing, so the form shows no money at all. That leaves
+            | no way to make one size free while the others are paid, which nobody
+            | has asked for and which is what created the ambiguity.
+            */
+            $price = ($variant['price'] ?? '') === '' ? null : $variant['price'];
+
+            if ($price !== null && (float) $price <= 0 && (float) ($addonPrice ?: 0) > 0) {
+                $price = null;
+            }
+
             $clean[] = [
                 'id' => $id,
                 'label' => $label,
-
-                // Blank stays null, which means "same as the add-on". A typed zero
-                // stays zero, which means free.
-                'price' => ($variant['price'] ?? '') === '' ? null : $variant['price'],
+                'price' => $price,
                 'stock' => ($variant['stock'] ?? '') === '' ? null : $variant['stock'],
             ];
         }

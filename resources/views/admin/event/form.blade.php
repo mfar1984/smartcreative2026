@@ -797,9 +797,18 @@
                     return;
                 }
 
-                note.textContent = own === 0
-                    ? 'Free, and no price is shown on the form'
-                    : 'Charges RM ' + own.toFixed(2);
+                // A zero here is not a way to make one size free: it is stored as
+                // blank and charges the add-on price. Said plainly, because typing
+                // 0 and expecting free is exactly what has caught people out.
+                if (own === 0) {
+                    note.textContent = base > 0
+                        ? 'Same as the add-on, RM ' + base.toFixed(2) + '. Set the add-on price to 0 to make it free.'
+                        : 'Free, the add-on itself costs nothing';
+
+                    return;
+                }
+
+                note.textContent = 'Charges RM ' + own.toFixed(2);
             });
         }
 

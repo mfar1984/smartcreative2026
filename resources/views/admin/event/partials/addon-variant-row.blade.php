@@ -29,15 +29,15 @@
 
     <div>
         <label class="sm:hidden block text-[11px] font-semibold text-gray-500 mb-1">Price ({{ $currency }})</label>
-        {{-- The figure charged for this option. Blank uses the add-on price above,
-             so one price does not have to be repeated across four sizes. Zero means
-             free, and a free option shows no money on the public form at all. The
-             note underneath says which of the three is in force. --}}
+        {{-- Only needed when this size costs more than the add-on. Blank, and a 0,
+             both mean "same as the add-on": one field cannot also mean "free"
+             without contradicting the price above it. Free is set on the add-on
+             price. The note underneath says which rule is in force. --}}
         <input type="number" name="{{ $name }}[price]" step="0.01" min="0" max="999999.99"
                value="{{ $row['price'] ?? '' }}"
                placeholder="Same as add-on"
                data-variant-price
-               title="Blank uses the add-on price. 0 means free."
+               title="Only for a size that costs more. Blank or 0 charges the add-on price."
                class="{{ $miniInput }} bg-white">
 
         <p class="mt-1 text-[11px] text-gray-500" data-variant-charge></p>

@@ -58,12 +58,12 @@
             it comes in choices, for example a shirt in S, M and L. Each option can carry its
             own price and stock.
             <span class="block mt-1">
-                An option's <strong>Price</strong> is the figure charged for that option.
-                Leave it <strong>blank</strong> to use the add-on price above, so one price does
-                not have to be repeated across four sizes. Set it to <strong>0</strong> and that
-                option is free: no money is shown against it on the registration form at all.
-                A size that costs more, such as a 5XL, carries its own figure. Each option
-                prints what it will do underneath.
+                The <strong>Price</strong> above is what the add-on costs, and it is the figure
+                shown on the registration form. An option only needs its own price when that
+                size genuinely costs more, such as a 5XL at RM55; leave it blank and the size
+                charges the add-on price. A 0 on a size means the same thing as blank, so
+                <strong>to give the add-on away, set the Price above to 0</strong> &mdash; then
+                the form shows "Included" and asks only for the size.
             </span>
         </p>
 
