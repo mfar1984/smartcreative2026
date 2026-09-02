@@ -282,10 +282,15 @@
                         @endif
 
                         {{-- Logo, one per entry rather than one per person --}}
-                        @if ($event->requiresLogo())
+                        @if ($event->asksLogo())
                             <div class="mb-5">
                                 <label for="logo_{{ $event->slug }}" class="block text-sm font-semibold text-gray-700 mb-1.5">
-                                    {{ $event->logoLabel() }} <span class="text-red-600" aria-hidden="true">*</span>
+                                    {{ $event->logoLabel() }}
+                                    @if ($event->requiresLogo())
+                                        <span class="text-red-600" aria-hidden="true">*</span>
+                                    @else
+                                        <span class="text-xs font-normal text-gray-500">(optional)</span>
+                                    @endif
                                 </label>
 
                                 <div class="flex flex-wrap items-start gap-4">
@@ -297,7 +302,8 @@
                                     </div>
 
                                     <div class="flex-1 min-w-48">
-                                        <input type="file" id="logo_{{ $event->slug }}" name="logo" required
+                                        <input type="file" id="logo_{{ $event->slug }}" name="logo"
+                                               @required($event->requiresLogo())
                                                accept="image/jpeg,image/png,image/webp,image/svg+xml"
                                                data-logo-input="{{ $event->slug }}"
                                                class="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700 file:cursor-pointer">
@@ -348,16 +354,29 @@
                         <div class="space-y-4" data-participant-list>
                             @foreach ($initialRows as $index => $row)
                                 @php
-                                    // In squad mode the first block is always the
-                                    // manager; everyone after them is a player.
-                                    $isManagerRow = $event->isManagerMode() && $index === 0;
+                                    /*
+                                     | In squad mode the first block is the person
+                                     | registering, and they choose their own
+                                     | position. Everyone after them is a player.
+                                     */
+                                    $isFirstRow = $event->isManagerMode() && $index === 0;
 
-                                    $rowRole = $event->isManagerMode()
-                                        ? ($isManagerRow ? 'manager' : 'player')
-                                        : 'participant';
+                                    // Replayed from what came back rather than reset
+                                    // to the default, so a failed submit does not
+                                    // quietly demote a manager who was also playing.
+                                    $rowPosition = $isFirstRow
+                                        ? App\Support\ParticipantOptions::positionKeyFor(
+                                            $row['role'] ?? 'manager',
+                                            filter_var($row['also_plays'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                                        )
+                                        : null;
+
+                                    [$rowRole, $rowPlays] = $isFirstRow
+                                        ? App\Support\ParticipantOptions::POSITIONS[$rowPosition]
+                                        : [$event->isManagerMode() ? 'player' : 'participant', false];
 
                                     $rowTitle = $event->isManagerMode()
-                                        ? ($isManagerRow ? 'Manager' : 'Player')
+                                        ? ($isFirstRow ? 'You' : 'Player')
                                         : 'Your Details';
                                 @endphp
 
@@ -369,9 +388,12 @@
                                     :states="$states"
                                     :countries="$countries"
                                     :role="$rowRole"
-                                    :removable="$event->isManagerMode() && ! $isManagerRow && $index > $minPlayers"
+                                    :also-plays="$rowPlays"
+                                    :positions="$isFirstRow ? App\Support\ParticipantOptions::positionLabels() : []"
+                                    :position="$rowPosition ?? 'manager_only'"
+                                    :removable="$event->isManagerMode() && ! $isFirstRow && $index > $minPlayers"
                                     :title="$rowTitle"
-                                    :requires-ign="$event->requiresIgn()" />
+                                    :ign-fields="$event->ignFormFields()" />
                             @endforeach
                         </div>
 
@@ -388,7 +410,7 @@
                                     role="player"
                                     :removable="true"
                                     title="Player"
-                                    :requires-ign="$event->requiresIgn()" />
+                                    :ign-fields="$event->ignFormFields()" />
                             </template>
                         @endif
 
@@ -547,8 +569,63 @@
                 return Array.from(list.querySelectorAll('[data-participant]'));
             }
 
+            /*
+             | The position the first person chose, as the pair the server wants.
+             |
+             | Mirrors ParticipantOptions::POSITIONS. Kept here rather than fetched
+             | so the form still works with the page it was served, and written to
+             | the two hidden inputs so the server keeps receiving a plain role.
+             */
+            const positions = {
+                manager_player: { role: 'manager', plays: true },
+                manager_only: { role: 'manager', plays: false },
+                player_only: { role: 'player', plays: false },
+            };
+
+            const positionSelect = form.querySelector('[data-position-select]');
+
+            function chosenPosition() {
+                return positions[positionSelect?.value] ?? positions.manager_only;
+            }
+
+            /** Whether the first block occupies a playing place. */
+            function firstBlockPlays() {
+                if (!isManagerMode) {
+                    return true;
+                }
+
+                const chosen = chosenPosition();
+
+                return chosen.role === 'player' || chosen.plays;
+            }
+
+            function syncPositionInputs() {
+                if (!positionSelect) {
+                    return;
+                }
+
+                const chosen = chosenPosition();
+                const block = blocks()[0];
+
+                if (!block) {
+                    return;
+                }
+
+                const roleInput = block.querySelector('[data-position-role]');
+                const playsInput = block.querySelector('[data-position-plays]');
+
+                if (roleInput) {
+                    roleInput.value = chosen.role;
+                }
+
+                if (playsInput) {
+                    playsInput.value = chosen.plays ? '1' : '0';
+                }
+            }
+
             function refresh() {
                 const all = blocks();
+                const firstPlays = firstBlockPlays();
 
                 all.forEach(function (block, position) {
                     const badge = block.querySelector('[data-participant-number]');
@@ -557,19 +634,41 @@
                         return;
                     }
 
-                    // In squad mode the first block is the manager, so players
-                    // are numbered from one rather than from two.
-                    if (isManagerMode) {
-                        badge.textContent = position === 0 ? 'M' : String(position);
-                    } else {
+                    if (!isManagerMode) {
                         badge.textContent = '1';
+
+                        return;
                     }
+
+                    /*
+                     | The first block is marked M while it is a manager, whether or
+                     | not they also play, because that is what distinguishes it from
+                     | the numbered players below. When the first person is a player
+                     | only there is no manager, so numbering simply starts at one.
+                     */
+                    if (position === 0) {
+                        badge.textContent = chosenPosition().role === 'manager' ? 'M' : '1';
+
+                        return;
+                    }
+
+                    badge.textContent = String(
+                        chosenPosition().role === 'manager' ? position : position + 1
+                    );
                 });
 
-                const players = isManagerMode ? all.length - 1 : all.length;
+                // Counted the way the server counts: everyone holding a playing
+                // place, which includes the manager when they said they play.
+                const players = isManagerMode
+                    ? (all.length - 1) + (firstPlays ? 1 : 0)
+                    : all.length;
 
                 if (summary) {
-                    let text = players + (players === 1 ? ' player' : ' players') + ' entered.';
+                    let text = players + (players === 1 ? ' player' : ' players') + ' entered';
+
+                    text += firstPlays && isManagerMode && chosenPosition().role === 'manager'
+                        ? ', counting you.'
+                        : '.';
 
                     if (players < minPlayers) {
                         text += ' At least ' + minPlayers + ' required.';
@@ -589,6 +688,45 @@
                 // The amount due is fixed per registration, so adding or
                 // removing a player deliberately does not change it.
             }
+
+            /*
+             | Switching to a position that puts the manager on the roster can push
+             | the squad one over its limit. Rather than leaving the visitor to work
+             | out which block to delete, the last still-empty player block is
+             | dropped. Only empty ones: removing a block somebody had typed into
+             | would throw their work away to fix a count.
+             */
+            function trimOverflow() {
+                if (!isManagerMode || maxPlayers === null) {
+                    return;
+                }
+
+                let all = blocks();
+                let players = (all.length - 1) + (firstBlockPlays() ? 1 : 0);
+
+                while (players > maxPlayers) {
+                    const spare = all.slice(1).reverse().find(function (block) {
+                        return Array.from(block.querySelectorAll('input:not([type="hidden"]), select'))
+                            .every(function (input) {
+                                return input.type === 'checkbox' ? !input.checked : input.value === '';
+                            });
+                    });
+
+                    if (!spare) {
+                        return;
+                    }
+
+                    spare.remove();
+                    all = blocks();
+                    players = (all.length - 1) + (firstBlockPlays() ? 1 : 0);
+                }
+            }
+
+            positionSelect?.addEventListener('change', function () {
+                syncPositionInputs();
+                trimOverflow();
+                refresh();
+            });
 
             function wireRemove(block) {
                 block.querySelector('[data-remove-participant]')?.addEventListener('click', function () {
@@ -808,6 +946,71 @@
                 // change catches the spinner and paste; input catches typing.
                 input.addEventListener('input', refreshTotal);
                 input.addEventListener('change', refreshTotal);
+            });
+
+            /*
+             | Add-ons offered already ticked.
+             |
+             | The tick box submits nothing itself. Clearing it zeroes the quantities
+             | underneath, which are what the server reads, so the two can never
+             | disagree about whether the extra was taken. Ticking it back restores
+             | one unit, on the first option still in stock when there are options.
+             |
+             | The reminder appears on the untick rather than in a dialog: declining
+             | is a deliberate choice, and a modal would interrupt somebody who
+             | meant it while telling them nothing they cannot read in place.
+             */
+            form.querySelectorAll('[data-addon-toggle]').forEach(function (toggle) {
+                const card = toggle.closest('[data-addon]');
+
+                if (!card) {
+                    return;
+                }
+
+                const reminder = card.querySelector('[data-addon-reminder]');
+                const boxes = Array.from(card.querySelectorAll('[data-addon-qty]'));
+
+                toggle.addEventListener('change', function () {
+                    if (toggle.checked) {
+                        const already = boxes.some(function (box) {
+                            return quantityOf(box) > 0;
+                        });
+
+                        if (!already) {
+                            const first = boxes.find(function (box) {
+                                return !box.disabled;
+                            });
+
+                            if (first) {
+                                first.value = '1';
+                            }
+                        }
+                    } else {
+                        boxes.forEach(function (box) {
+                            box.value = '0';
+                        });
+                    }
+
+                    reminder?.classList.toggle('hidden', toggle.checked);
+                    refreshTotal();
+                });
+
+                /*
+                 | Typing a quantity back in clears the reminder, and taking every
+                 | quantity down to zero by hand raises it. Without this the notice
+                 | would contradict the boxes as soon as somebody edited them
+                 | directly rather than using the tick.
+                 */
+                boxes.forEach(function (box) {
+                    box.addEventListener('input', function () {
+                        const any = boxes.some(function (other) {
+                            return quantityOf(other) > 0;
+                        });
+
+                        toggle.checked = any;
+                        reminder?.classList.toggle('hidden', any);
+                    });
+                });
             });
 
             refreshTotal();

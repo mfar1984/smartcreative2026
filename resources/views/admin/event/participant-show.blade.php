@@ -128,7 +128,7 @@
                         </tr>
                     @endif
 
-                    @if ($registration->hasLogo() || $event?->requiresLogo())
+                    @if ($registration->hasLogo() || $event?->asksLogo())
                         <tr>
                             <th scope="row" class="{{ $label }} text-left">{{ $event?->logoLabel() ?? 'Logo' }}</th>
                             <td class="{{ $value }}">
@@ -239,14 +239,12 @@
 
                         {{-- Only for events that ask for one, unless an older row
                              happens to carry it after the setting was changed. --}}
-                        @if ($event?->requiresIgn() || $participant->hasIgn())
+                        @if ($event?->asksIgn() || $participant->hasIgn())
                             <tr>
-                                <th scope="row" class="{{ $label }} text-left">In-Game ID</th>
+                                <th scope="row" class="{{ $label }} text-left">In-Game</th>
                                 <td class="{{ $value }}">
                                     @if ($participant->hasIgn())
-                                        <span class="font-mono font-semibold">{{ $participant->ign_player_id ?: '—' }}</span>
-                                        <span class="text-gray-400 mx-1">on</span>
-                                        {{ $participant->ign_server_id ?: '—' }}
+                                        {{ $participant->ignLabel() }}
                                     @else
                                         <span class="text-amber-700">Not recorded</span>
                                     @endif

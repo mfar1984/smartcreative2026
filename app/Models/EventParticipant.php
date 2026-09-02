@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Support\ParticipantOptions;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -13,10 +14,12 @@ class EventParticipant extends Model
     protected $fillable = [
         'event_registration_id',
         'role',
+        'also_plays',
         'full_name',
         'ic_number',
         'ign_player_id',
         'ign_server_id',
+        'ign_name',
         'marketing_consent',
         'consent_recorded_at',
         'consent_ip',
@@ -40,6 +43,7 @@ class EventParticipant extends Model
         return [
             'date_of_birth' => 'date',
             'marketing_consent' => 'boolean',
+            'also_plays' => 'boolean',
             'consent_recorded_at' => 'datetime',
         ];
     }
@@ -165,8 +169,57 @@ class EventParticipant extends Model
         return $this->role === ParticipantOptions::ROLE_MANAGER;
     }
 
+    /* ---------------------------------------------------------------------
+     | Who is on the roster
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Whether this person occupies a playing place.
+     *
+     * The single definition of that question. A manager who ticked "and Player"
+     * is on the roster too, and before this flag existed the only way to say so
+     * was to enter them a second time under their own identity card, which the
+     * duplicate check refused.
+     *
+     * Every count of players, and every line-up, goes through here or through the
+     * matching scope. Asking role === 'player' directly is what would leave a
+     * playing manager out of a tournament draw.
+     */
+    public function isPlaying(): bool
+    {
+        return $this->role === ParticipantOptions::ROLE_PLAYER
+            || ($this->isManager() && (bool) $this->also_plays);
+    }
+
+    /**
+     * The same rule in SQL, for queries that cannot load the models first.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopePlaying(Builder $query): Builder
+    {
+        return $query->where(function (Builder $inner) {
+            $inner->where('role', ParticipantOptions::ROLE_PLAYER)
+                ->orWhere(fn (Builder $manager) => $manager
+                    ->where('role', ParticipantOptions::ROLE_MANAGER)
+                    ->where('also_plays', true));
+        });
+    }
+
+    /**
+     * How this person's position reads on screen.
+     *
+     * A manager who also plays says so, because every list that shows this is read
+     * by somebody deciding who is on the pitch. Calling them "Manager" alone would
+     * hide the fact that they occupy a playing place.
+     */
     public function roleLabel(): string
     {
+        if ($this->isManager() && (bool) $this->also_plays) {
+            return ParticipantOptions::LABEL_MANAGER_PLAYER;
+        }
+
         return ParticipantOptions::ROLES[$this->role] ?? $this->role;
     }
 
@@ -209,14 +262,18 @@ class EventParticipant extends Model
 
     public function hasIgn(): bool
     {
-        return filled($this->ign_player_id) || filled($this->ign_server_id);
+        return filled($this->ign_player_id)
+            || filled($this->ign_server_id)
+            || filled($this->ign_name);
     }
 
     /**
-     * Game account as one readable line, for example "12345678 on Asia".
+     * Game account as one readable line, for example "ShadowX (12345678) on Asia".
      *
-     * Either part may be missing: an event can be switched to require these
-     * after people have registered, so an older row legitimately has neither.
+     * Assembled from whichever parts are present rather than a fixed shape. Each
+     * of the three fields is asked for independently, and an event can start
+     * asking for one after people have already registered, so any combination is
+     * legitimate, including none.
      */
     public function ignLabel(): string
     {
@@ -224,15 +281,19 @@ class EventParticipant extends Model
             return '—';
         }
 
+        // The in-game name leads when there is one: it is what an organiser reads
+        // off a scoreboard, while the id is what they use to look the account up.
+        $head = filled($this->ign_name)
+            ? $this->ign_name . (filled($this->ign_player_id) ? ' (' . $this->ign_player_id . ')' : '')
+            : (string) $this->ign_player_id;
+
         if (blank($this->ign_server_id)) {
-            return (string) $this->ign_player_id;
+            return $head !== '' ? $head : '—';
         }
 
-        if (blank($this->ign_player_id)) {
-            return 'Server ' . $this->ign_server_id;
-        }
-
-        return $this->ign_player_id . ' on ' . $this->ign_server_id;
+        return $head !== ''
+            ? $head . ' on ' . $this->ign_server_id
+            : 'Server ' . $this->ign_server_id;
     }
 
     /**

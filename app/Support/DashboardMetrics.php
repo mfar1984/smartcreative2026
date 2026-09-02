@@ -131,7 +131,9 @@ final class DashboardMetrics
     {
         return [
             'value' => EventParticipant::count(),
-            'players' => EventParticipant::where('role', ParticipantOptions::ROLE_PLAYER)->count(),
+            // playing() so a manager who also plays is counted once here, as a
+            // player, rather than being left out of the figure entirely.
+            'players' => EventParticipant::query()->playing()->count(),
         ];
     }
 

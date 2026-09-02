@@ -59,7 +59,13 @@ class Event extends Model
         'fee',
         'seats_total',
         'seats_taken',
-        'requires_ign',
+        'asks_player_id',
+        'asks_server_id',
+        'asks_ign_name',
+        'asks_logo',
+        'requires_player_id',
+        'requires_server_id',
+        'requires_ign_name',
         'requires_logo',
         'status',
         'registration_mode',
@@ -83,7 +89,13 @@ class Event extends Model
             'seats_taken' => 'integer',
             'min_players' => 'integer',
             'max_players' => 'integer',
-            'requires_ign' => 'boolean',
+            'asks_player_id' => 'boolean',
+            'asks_server_id' => 'boolean',
+            'asks_ign_name' => 'boolean',
+            'asks_logo' => 'boolean',
+            'requires_player_id' => 'boolean',
+            'requires_server_id' => 'boolean',
+            'requires_ign_name' => 'boolean',
             'requires_logo' => 'boolean',
         ];
     }
@@ -181,14 +193,101 @@ class Event extends Model
      * ------------------------------------------------------------------ */
 
     /**
-     * Whether every person on a registration must give their game account.
+     * The three game account fields, each asked and required on its own.
      *
-     * Applies to both modes: a squad needs one per player, and a solo entry
-     * needs one for that person.
+     * Field key => [asks column, requires column, label]. Kept as one map so the
+     * admin form, the public form and the validation rules all walk the same
+     * list, and adding a fourth field is one entry rather than four edits.
      */
-    public function requiresIgn(): bool
+    public const IGN_FIELDS = [
+        'ign_player_id' => ['asks_player_id', 'requires_player_id', 'Player ID'],
+        'ign_server_id' => ['asks_server_id', 'requires_server_id', 'Server ID'],
+        'ign_name' => ['asks_ign_name', 'requires_ign_name', 'Player In-Game Name'],
+    ];
+
+    /**
+     * Whether this event asks for a given game account field.
+     */
+    public function asksIgnField(string $field): bool
     {
-        return (bool) $this->requires_ign;
+        $column = self::IGN_FIELDS[$field][0] ?? null;
+
+        return $column !== null && (bool) $this->{$column};
+    }
+
+    /**
+     * Whether a field the event asks for has to be filled in.
+     *
+     * Requiring something nobody is asked for would be unsatisfiable, so the
+     * asks flag gates the answer rather than the two being read separately at
+     * every call site.
+     */
+    public function requiresIgnField(string $field): bool
+    {
+        if (! $this->asksIgnField($field)) {
+            return false;
+        }
+
+        $column = self::IGN_FIELDS[$field][1] ?? null;
+
+        return $column !== null && (bool) $this->{$column};
+    }
+
+    /**
+     * Whether any game account field is asked for at all.
+     *
+     * This is what decides whether the In-Game block appears, on the public form
+     * and everywhere in the admin that shows a person's game account. It replaces
+     * the old single requires_ign column, which could not tell "asked" from
+     * "compulsory".
+     */
+    public function asksIgn(): bool
+    {
+        foreach (array_keys(self::IGN_FIELDS) as $field) {
+            if ($this->asksIgnField($field)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The fields this event asks for, as key => label.
+     *
+     * @return array<string, string>
+     */
+    public function ignFieldsAsked(): array
+    {
+        $asked = [];
+
+        foreach (self::IGN_FIELDS as $field => [$asksColumn, $requiresColumn, $label]) {
+            if ($this->asksIgnField($field)) {
+                $asked[$field] = $label;
+            }
+        }
+
+        return $asked;
+    }
+
+    /**
+     * The same list the registration form draws, as key => [label, required].
+     *
+     * The view gets the label and the compulsory flag together so it never has to
+     * call back into the model per field, which also keeps the clone template and
+     * the server rendered rows working from one identical shape.
+     *
+     * @return array<string, array{0: string, 1: bool}>
+     */
+    public function ignFormFields(): array
+    {
+        $fields = [];
+
+        foreach ($this->ignFieldsAsked() as $field => $label) {
+            $fields[$field] = [$label, $this->requiresIgnField($field)];
+        }
+
+        return $fields;
     }
 
     /* ---------------------------------------------------------------------
@@ -223,14 +322,25 @@ class Event extends Model
     }
 
     /**
-     * Whether the person registering must upload a logo.
+     * Whether the registration form offers a logo upload.
      *
      * One per entry, not one per person: a squad has a single crest, and a solo
      * entry a single image.
      */
+    public function asksLogo(): bool
+    {
+        return (bool) $this->asks_logo;
+    }
+
+    /**
+     * Whether that upload has to be provided.
+     *
+     * Gated on asks_logo for the same reason as the game account fields: a logo
+     * that is compulsory but never asked for could not be supplied.
+     */
     public function requiresLogo(): bool
     {
-        return (bool) $this->requires_logo;
+        return $this->asksLogo() && (bool) $this->requires_logo;
     }
 
     /**

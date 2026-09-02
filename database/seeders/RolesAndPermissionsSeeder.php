@@ -310,6 +310,22 @@ class RolesAndPermissionsSeeder extends Seeder
                 'view' => ['logs.audit.view', 'View audit log'],
             ],
         ],
+
+        /*
+        | Declared last on purpose. sort_order is assigned in the order this array
+        | is walked, and the matrix renders in that order, so this section sits at
+        | the bottom of the Roles screen.
+        |
+        | Its own permission rather than reusing payments.view. Reading the Payments
+        | screen when you go looking for it is a different matter from having the
+        | takings on screen at all times, in front of whoever is standing behind you.
+        | A Viewer keeps the former and loses the latter.
+        */
+        'Sidebar' => [
+            'Account Balance' => [
+                'view' => ['sidebar.balance.view', 'See the account balance in the sidebar'],
+            ],
+        ],
     ];
 
     /**
@@ -428,6 +444,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'users.update',
                 'logs.activity.view',
                 'logs.audit.view',
+                'sidebar.balance.view',
             ],
         ],
         /*

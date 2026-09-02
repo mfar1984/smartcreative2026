@@ -265,23 +265,62 @@
                     </x-admin.field-row>
                 </div>
 
+                {{--
+                    In-Game fields. Each is asked and made compulsory separately,
+                    because the two are different questions: a tournament may want
+                    an in-game name on the scoreboard without insisting on a server
+                    id nobody can find.
+
+                    The compulsory box is disabled until the field is asked for, so
+                    the form cannot express "not asked but required". The request
+                    forces it false as well, since a disabled box is only a UI
+                    courtesy and sends nothing anyway.
+                --}}
                 <x-admin.field-row
-                    label="In-Game ID"
-                    help="For tournaments, where a name on an identity card does not say which account is playing."
-                    error="requires_ign">
+                    label="In-Game Fields"
+                    help="For tournaments, where a name on an identity card does not say which account is playing.">
 
-                    {{-- An unticked box sends nothing, so a 0 is queued first and
-                         the checkbox overrides it when ticked. --}}
-                    <input type="hidden" name="requires_ign" value="0">
-                    <x-admin.toggle
-                        name="requires_ign"
-                        :checked="old('requires_ign', $event->requires_ign)"
-                        label="Ask every person for their Player ID and Server ID" />
+                    <div class="space-y-3" data-ign-fields>
+                        @foreach ([
+                            ['ask' => 'asks_player_id', 'req' => 'requires_player_id', 'label' => 'Player ID', 'hint' => 'The numeric account id, for example 5123456789.'],
+                            ['ask' => 'asks_server_id', 'req' => 'requires_server_id', 'label' => 'Server ID', 'hint' => 'The region or server the account plays on, for example Asia.'],
+                            ['ask' => 'asks_ign_name', 'req' => 'requires_ign_name', 'label' => 'Player In-Game Name', 'hint' => 'The display name shown in the game, which is not the name on the I.C.'],
+                        ] as $ignRow)
+                            @php
+                                $asked = (bool) old($ignRow['ask'], $event->{$ignRow['ask']});
+                                $required = (bool) old($ignRow['req'], $event->{$ignRow['req']});
+                            @endphp
 
-                    <p class="text-xs text-gray-500 mt-2">
+                            <div class="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-3">
+                                <div class="min-w-56">
+                                    {{-- An unticked box sends nothing, so a 0 is
+                                         queued first and the checkbox overrides it. --}}
+                                    <input type="hidden" name="{{ $ignRow['ask'] }}" value="0">
+                                    <x-admin.toggle
+                                        :name="$ignRow['ask']"
+                                        :checked="$asked"
+                                        :label="'Ask for ' . $ignRow['label']" />
+                                </div>
+
+                                <label for="{{ $ignRow['req'] }}" class="inline-flex items-center gap-2 cursor-pointer">
+                                    <input type="hidden" name="{{ $ignRow['req'] }}" value="0">
+                                    <input type="checkbox" id="{{ $ignRow['req'] }}" name="{{ $ignRow['req'] }}" value="1"
+                                           @checked($required)
+                                           @disabled(! $asked)
+                                           data-ign-required="{{ $ignRow['ask'] }}"
+                                           class="h-4 w-4 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40 disabled:opacity-40">
+                                    <span @class(['text-sm', $asked ? 'text-gray-700' : 'text-gray-400']) data-ign-required-label>Compulsory</span>
+                                </label>
+
+                                <p class="basis-full text-xs text-gray-500">{{ $ignRow['hint'] }}</p>
+                            </div>
+                        @endforeach
+                    </div>
+
+                    <p class="text-xs text-gray-500 mt-3">
                         Applies to both modes. A squad is asked once per player, a solo entry once
-                        for that person. Leave this off for a course or a conference, where there is
-                        no game account to give.
+                        for that person. Leave all three off for a course or a conference, where
+                        there is no game account to give.
                     </p>
                 </x-admin.field-row>
 
@@ -290,11 +329,30 @@
                     help="One image per entry, uploaded by whoever registers."
                     error="requires_logo">
 
-                    <input type="hidden" name="requires_logo" value="0">
-                    <x-admin.toggle
-                        name="requires_logo"
-                        :checked="old('requires_logo', $event->requires_logo)"
-                        label="Require a logo with every registration" />
+                    @php
+                        $logoAsked = (bool) old('asks_logo', $event->asks_logo);
+                        $logoRequired = (bool) old('requires_logo', $event->requires_logo);
+                    @endphp
+
+                    <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+                        <div class="min-w-56">
+                            <input type="hidden" name="asks_logo" value="0">
+                            <x-admin.toggle
+                                name="asks_logo"
+                                :checked="$logoAsked"
+                                label="Ask for a logo" />
+                        </div>
+
+                        <label for="requires_logo" class="inline-flex items-center gap-2 cursor-pointer">
+                            <input type="hidden" name="requires_logo" value="0">
+                            <input type="checkbox" id="requires_logo" name="requires_logo" value="1"
+                                   @checked($logoRequired)
+                                   @disabled(! $logoAsked)
+                                   data-ign-required="asks_logo"
+                                   class="h-4 w-4 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40 disabled:opacity-40">
+                            <span @class(['text-sm', $logoAsked ? 'text-gray-700' : 'text-gray-400']) data-ign-required-label>Compulsory</span>
+                        </label>
+                    </div>
 
                     <p class="text-xs text-gray-500 mt-2">
                         A squad uploads one crest, not one per player, so in Manager mode this is the
@@ -416,6 +474,39 @@
                 document.querySelector('[data-role-note="individual"]')?.classList.toggle('hidden', isManager);
             });
         }
+
+        /*
+         | Compulsory follows asked.
+         |
+         | A field nobody is asked for cannot be compulsory, so the box is
+         | disabled and cleared when its toggle goes off. Clearing matters as
+         | well as disabling: leaving it ticked but greyed would save a pair
+         | that reads "not asked, but required" the moment the toggle came
+         | back on. The request enforces the same rule, because a disabled
+         | box is only a courtesy.
+         */
+        document.querySelectorAll('[data-ign-required]').forEach(function (box) {
+            const toggle = document.querySelector('input[type="checkbox"][name="' + box.dataset.ignRequired + '"]');
+
+            if (!toggle) {
+                return;
+            }
+
+            const label = box.parentElement?.querySelector('[data-ign-required-label]');
+
+            function sync() {
+                box.disabled = !toggle.checked;
+
+                if (box.disabled) {
+                    box.checked = false;
+                }
+
+                label?.classList.toggle('text-gray-400', box.disabled);
+                label?.classList.toggle('text-gray-700', !box.disabled);
+            }
+
+            toggle.addEventListener('change', sync);
+        });
 
         // Local preview so the operator sees the poster before saving.
         const posterInput = document.getElementById('poster');
@@ -623,9 +714,52 @@
             }
         });
 
+        /*
+         | The three states of an add-on, kept consistent as they are clicked.
+         |
+         | Compulsory wins: there is nothing to opt out of, so "ticked by default"
+         | is disabled and cleared, and the reminder goes away with it. Delegated
+         | rather than wired per row so a card cloned from the template is covered
+         | without repeating the wiring.
+         */
+        function syncAddonStates(row) {
+            const required = row.querySelector('[data-addon-required]');
+            const ticked = row.querySelector('[data-addon-ticked]');
+            const label = row.querySelector('[data-addon-ticked-label]');
+            const reminder = row.querySelector('[data-addon-reminder-wrap]');
+
+            if (!ticked) {
+                return;
+            }
+
+            const isRequired = !!required?.checked;
+
+            ticked.disabled = isRequired;
+
+            if (isRequired) {
+                ticked.checked = false;
+            }
+
+            label?.classList.toggle('text-gray-400', isRequired);
+            label?.classList.toggle('text-gray-700', !isRequired);
+
+            reminder?.classList.toggle('hidden', isRequired || !ticked.checked);
+        }
+
+        list.addEventListener('change', function (event) {
+            if (!event.target.matches('[data-addon-required], [data-addon-ticked]')) {
+                return;
+            }
+
+            syncAddonStates(event.target.closest('[data-addon-row]'));
+        });
+
         // A row rendered from old() may already have options, so the chrome has
         // to be brought in line on load rather than only on change.
-        list.querySelectorAll('[data-addon-row]').forEach(syncVariantChrome);
+        list.querySelectorAll('[data-addon-row]').forEach(function (row) {
+            syncVariantChrome(row);
+            syncAddonStates(row);
+        });
         renumber();
     })();
 </script>

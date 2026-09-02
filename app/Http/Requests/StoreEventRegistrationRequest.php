@@ -50,14 +50,19 @@ class StoreEventRegistrationRequest extends FormRequest
             // The mode decides which roles exist, so anything outside that set
             // is a tampered payload rather than a user mistake.
             'participants.*.role' => ['required', Rule::in(array_keys($event->allowedParticipantRoles()))],
+
+            // Only meaningful on the manager, and forced to false elsewhere in
+            // prepareForValidation, so this only has to reject a non boolean.
+            'participants.*.also_plays' => ['nullable', 'boolean'],
             'participants.*.full_name' => ['required', 'string', 'max:180'],
             // Accepts 12 digits with or without hyphens, or a passport style code.
             'participants.*.ic_number' => ['required', 'string', 'max:32', 'regex:/^[A-Za-z0-9-]+$/'],
 
             // Required from the event's setting, never from a posted flag, so a
-            // tampered form cannot opt itself out of the requirement.
-            'participants.*.ign_player_id' => [$event->requiresIgn() ? 'required' : 'nullable', 'string', 'max:60'],
-            'participants.*.ign_server_id' => [$event->requiresIgn() ? 'required' : 'nullable', 'string', 'max:60'],
+            // tampered form cannot opt itself out of the requirement. Each of the
+            // three is asked and required on its own, so they are built from the
+            // event's map rather than sharing one flag.
+            ...$this->ignRules($event),
 
             'participants.*.date_of_birth' => ['nullable', 'date', 'before:today'],
             'participants.*.address_line_1' => ['required', 'string', 'max:180'],
@@ -85,15 +90,37 @@ class StoreEventRegistrationRequest extends FormRequest
     }
 
     /**
+     * Rules for the game account fields this event actually asks for.
+     *
+     * A field that is not asked for gets no rule at all rather than a nullable
+     * one, so a value posted for a field the form never drew is simply not
+     * validated and never reaches the model, which only accepts what is fillable.
+     *
+     * @return array<string, array<int, string>>
+     */
+    private function ignRules(Event $event): array
+    {
+        $rules = [];
+
+        foreach ($event->ignFieldsAsked() as $field => $label) {
+            $rules["participants.*.{$field}"] = [
+                $event->requiresIgnField($field) ? 'required' : 'nullable',
+                'string',
+                'max:60',
+            ];
+        }
+
+        return $rules;
+    }
+
+    /**
      * @return array<string, string>
      */
     public function messages(): array
     {
-        return [
+        $messages = [
             'participants.required' => 'Add at least one person to the registration.',
             'participants.*.ic_number.regex' => 'The identity card number may only contain letters, numbers and hyphens.',
-            'participants.*.ign_player_id.required' => 'This event needs a Player ID for everyone taking part.',
-            'participants.*.ign_server_id.required' => 'This event needs a Server ID for everyone taking part.',
             'logo.required' => 'This event needs a logo with the registration.',
             'logo.mimetypes' => 'The logo must be a JPG, PNG, WebP or SVG image.',
             'logo.max' => 'The logo must be no larger than 2 MB.',
@@ -101,6 +128,18 @@ class StoreEventRegistrationRequest extends FormRequest
             'participants.*.date_of_birth.before' => 'The date of birth must be in the past.',
             'team_name.required' => 'Enter the team or organisation name.',
         ];
+
+        // Named per field so somebody who left the Server ID blank is told that,
+        // rather than being sent to hunt through a squad of six for "a game
+        // account". Only the asked fields can fail, so only they get a message.
+        foreach ($this->event()->ignFieldsAsked() as $field => $label) {
+            $messages["participants.*.{$field}.required"] = sprintf(
+                'This event needs a %s for everyone taking part.',
+                $label,
+            );
+        }
+
+        return $messages;
     }
 
     /**
@@ -118,13 +157,15 @@ class StoreEventRegistrationRequest extends FormRequest
             'ic_number' => 'identity card',
             'ign_player_id' => 'Player ID',
             'ign_server_id' => 'Server ID',
+            'ign_name' => 'in-game name',
         ];
 
         foreach (range(0, 199) as $index) {
             $person = 'person ' . ($index + 1) . ' ';
 
             foreach ([
-                'role', 'full_name', 'ic_number', 'ign_player_id', 'ign_server_id',
+                'role', 'full_name', 'ic_number',
+                'ign_player_id', 'ign_server_id', 'ign_name',
                 'date_of_birth', 'address_line_1',
                 'address_line_2', 'postcode', 'city', 'state', 'country', 'phone',
                 'email', 'gender', 'race', 'emergency_contact_name', 'emergency_contact_phone',
@@ -157,14 +198,20 @@ class StoreEventRegistrationRequest extends FormRequest
         */
         $participants = array_values(array_filter(
             $participants,
+            // also_plays joins role and marketing_consent in being ignored here:
+            // it too has a hidden 0 in front of it, so counting it would make an
+            // untouched block look filled in.
             fn ($row) => is_array($row) && collect($row)
-                ->except(['role', 'marketing_consent'])
+                ->except(['role', 'also_plays', 'marketing_consent'])
                 ->filter(fn ($value) => filled($value))
                 ->isNotEmpty()
         ));
 
         $participants = array_map(function (array $row) {
-            foreach (['full_name', 'ic_number', 'city', 'email', 'phone', 'ign_player_id', 'ign_server_id'] as $field) {
+            foreach ([
+                'full_name', 'ic_number', 'city', 'email', 'phone',
+                'ign_player_id', 'ign_server_id', 'ign_name',
+            ] as $field) {
                 if (isset($row[$field]) && is_string($row[$field])) {
                     $row[$field] = trim($row[$field]);
                 }
@@ -177,6 +224,15 @@ class StoreEventRegistrationRequest extends FormRequest
                 $row['marketing_consent'] ?? false,
                 FILTER_VALIDATE_BOOLEAN,
             );
+
+            /*
+            | "Also plays" belongs to the manager alone, so it is forced off for
+            | anybody else. A player who is already playing does not need the flag,
+            | and letting it through on their row would put a second reading of the
+            | same fact into the database, where the two could disagree.
+            */
+            $row['also_plays'] = ($row['role'] ?? null) === ParticipantOptions::ROLE_MANAGER
+                && filter_var($row['also_plays'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
             // Identity cards are compared without punctuation, so they are
             // stored in one consistent shape.
@@ -247,8 +303,23 @@ class StoreEventRegistrationRequest extends FormRequest
         }
 
         $managers = $participants->where('role', ParticipantOptions::ROLE_MANAGER)->count();
-        $players = $participants->where('role', ParticipantOptions::ROLE_PLAYER)->count();
         $plain = $participants->where('role', ParticipantOptions::ROLE_PARTICIPANT)->count();
+
+        /*
+        | Players are counted by who holds a playing place, not by the role string.
+        | A manager who chose "Manager and Player" is one row that fills one place,
+        | which is the whole point of the flag: before it, the only way to put the
+        | manager on the roster was a second row carrying their identity card twice.
+        */
+        $players = $participants
+            ->filter(fn ($row) => is_array($row) && (
+                ($row['role'] ?? null) === ParticipantOptions::ROLE_PLAYER
+                || (
+                    ($row['role'] ?? null) === ParticipantOptions::ROLE_MANAGER
+                    && filter_var($row['also_plays'] ?? false, FILTER_VALIDATE_BOOLEAN)
+                )
+            ))
+            ->count();
 
         if (! $event->isManagerMode()) {
             if ($participants->count() > 1) {
@@ -269,10 +340,13 @@ class StoreEventRegistrationRequest extends FormRequest
             return;
         }
 
-        if ($managers < 1) {
-            $validator->errors()->add('participants', 'A manager registration needs exactly one manager.');
-        }
-
+        /*
+        | Zero managers is allowed. The person registering may choose "Player only",
+        | which is a squad entered by one of its players rather than by a separate
+        | manager. Nothing downstream breaks: every place that looks the manager up
+        | already falls back to the first person on the entry, so notifications and
+        | the counter still have somebody to address.
+        */
         if ($managers > 1) {
             $validator->errors()->add('participants', 'Only one person can be the manager.');
         }
@@ -290,14 +364,18 @@ class StoreEventRegistrationRequest extends FormRequest
         if ($players < $min) {
             $validator->errors()->add(
                 'participants',
-                sprintf('Enter at least %d %s.', $min, $min === 1 ? 'player' : 'players')
+                sprintf(
+                    'Enter at least %d %s. The manager counts as one if they are playing too.',
+                    $min,
+                    $min === 1 ? 'player' : 'players',
+                )
             );
         }
 
         if ($max !== null && $players > $max) {
             $validator->errors()->add(
                 'participants',
-                sprintf('This event allows at most %d players per manager.', $max)
+                sprintf('This event allows at most %d players per entry.', $max)
             );
         }
     }

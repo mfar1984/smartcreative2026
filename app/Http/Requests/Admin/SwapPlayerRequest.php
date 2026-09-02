@@ -51,13 +51,42 @@ class SwapPlayerRequest extends FormRequest
     }
 
     /**
-     * Whether this event asks each person for a game account.
+     * The event behind this participant, or null when it cannot be reached.
      */
-    public function eventRequiresIgn(): bool
+    private function swapEvent(): ?\App\Models\Event
     {
-        return (bool) $this->participant()
+        return $this->participant()
             ->loadMissing('registration.event')
-            ->registration?->event?->requiresIgn();
+            ->registration?->event;
+    }
+
+    /**
+     * Whether this event asks each person for any game account field.
+     */
+    public function eventAsksIgn(): bool
+    {
+        return (bool) $this->swapEvent()?->asksIgn();
+    }
+
+    /**
+     * Rules for the game account fields this event asks for.
+     *
+     * @return array<string, array<int, string>>
+     */
+    private function ignRules(): array
+    {
+        $event = $this->swapEvent();
+        $rules = [];
+
+        foreach ($event?->ignFieldsAsked() ?? [] as $field => $label) {
+            $rules[$field] = [
+                $event->requiresIgnField($field) ? 'required' : 'nullable',
+                'string',
+                'max:60',
+            ];
+        }
+
+        return $rules;
     }
 
     /**
@@ -75,10 +104,10 @@ class SwapPlayerRequest extends FormRequest
             'phone' => ['required', 'string', 'max:30', 'regex:/^[0-9+\-\s()]+$/'],
 
             // A tournament needs to know which account is playing, and the
-            // outgoing player's account is not it. Required when the event asks
-            // for one, so a substitute cannot slip in without theirs.
-            'ign_player_id' => [$this->eventRequiresIgn() ? 'required' : 'nullable', 'string', 'max:60'],
-            'ign_server_id' => [$this->eventRequiresIgn() ? 'required' : 'nullable', 'string', 'max:60'],
+            // outgoing player's account is not it. Each field follows the event's
+            // own setting, so a substitute is asked for exactly what the public
+            // form asked the person they are replacing.
+            ...$this->ignRules(),
 
             'email' => ['nullable', 'string', 'email:rfc', 'max:190'],
             'gender' => ['nullable', Rule::in(array_keys(ParticipantOptions::GENDERS))],
@@ -99,16 +128,23 @@ class SwapPlayerRequest extends FormRequest
      */
     public function messages(): array
     {
-        return [
+        $messages = [
             'full_name.required' => 'Enter the name on the identity card.',
             'ic_number.required' => 'Enter the identity card number.',
             'ic_number.regex' => 'The identity card number may only contain letters, numbers and hyphens.',
             'phone.required' => 'Enter a contact number for the person taking this place.',
             'phone.regex' => 'The telephone number may only contain digits, spaces and the characters + - ( ).',
-            'ign_player_id.required' => 'This event needs the Player ID of whoever is taking the place.',
-            'ign_server_id.required' => 'This event needs the Server ID of whoever is taking the place.',
             'date_of_birth.before' => 'The date of birth must be in the past.',
         ];
+
+        foreach ($this->swapEvent()?->ignFieldsAsked() ?? [] as $field => $label) {
+            $messages["{$field}.required"] = sprintf(
+                'This event needs the %s of whoever is taking the place.',
+                $label,
+            );
+        }
+
+        return $messages;
     }
 
     protected function prepareForValidation(): void
@@ -126,6 +162,7 @@ class SwapPlayerRequest extends FormRequest
             'email' => filled($this->email) ? trim((string) $this->email) : null,
             'ign_player_id' => filled($this->ign_player_id) ? trim((string) $this->ign_player_id) : null,
             'ign_server_id' => filled($this->ign_server_id) ? trim((string) $this->ign_server_id) : null,
+            'ign_name' => filled($this->ign_name) ? trim((string) $this->ign_name) : null,
         ]);
     }
 
@@ -272,9 +309,12 @@ class SwapPlayerRequest extends FormRequest
             'email' => $data['email'] ?? null,
 
             // Overwritten rather than left alone: the account that was here
-            // belonged to the player being replaced.
+            // belonged to the player being replaced. All three are written even
+            // when the event stopped asking for one, so nothing of the outgoing
+            // player's account survives on the row.
             'ign_player_id' => $data['ign_player_id'] ?? null,
             'ign_server_id' => $data['ign_server_id'] ?? null,
+            'ign_name' => $data['ign_name'] ?? null,
             'gender' => $data['gender'] ?? null,
             'race' => $data['race'] ?? null,
             'date_of_birth' => $data['date_of_birth'] ?? null,

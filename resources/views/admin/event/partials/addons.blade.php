@@ -28,6 +28,8 @@
                 'price' => $addon->price,
                 'max_quantity' => $addon->max_quantity,
                 'is_required' => $addon->is_required ? '1' : '0',
+                'is_checked_by_default' => $addon->is_checked_by_default ? '1' : '0',
+                'uncheck_reminder' => $addon->uncheck_reminder,
                 'is_active' => $addon->is_active ? '1' : '0',
                 'variants' => $addon->variants
                     ->map(fn ($variant) => [
@@ -54,7 +56,9 @@
         <p class="text-sm text-gray-600">
             Extras a registrant may buy on top of the event price. Give an add-on options when
             it comes in choices, for example a shirt in S, M and L. Each option can carry its
-            own price and stock, and leaving an option's price blank charges the add-on price.
+            own price and stock. Leave an option's price blank, or at zero, to charge the
+            add-on price &mdash; only fill it in when that size really costs something
+            different. To give an add-on away, set its own price to zero.
         </p>
 
         {{-- The block above the list, so an error on a row the operator has

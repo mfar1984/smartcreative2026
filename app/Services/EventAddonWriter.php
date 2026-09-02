@@ -51,6 +51,11 @@ class EventAddonWriter
             'price' => round((float) $row['price'], 2),
             'max_quantity' => $row['max_quantity'] ?? null,
             'is_required' => (bool) ($row['is_required'] ?? false),
+
+            // Already reconciled against is_required by the form request, so this
+            // writes what was decided rather than deciding again.
+            'is_checked_by_default' => (bool) ($row['is_checked_by_default'] ?? false),
+            'uncheck_reminder' => $row['uncheck_reminder'] ?? null,
             'is_active' => (bool) ($row['is_active'] ?? false),
 
             // Display order follows the order of the form, so dragging a row is

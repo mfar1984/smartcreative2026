@@ -135,9 +135,15 @@ class EventRegistration extends Model
         return $this->participants()->where('role', ParticipantOptions::ROLE_MANAGER);
     }
 
+    /**
+     * Everyone holding a playing place, which includes a manager who also plays.
+     *
+     * Uses the scope rather than role = 'player' so a manager on the roster is
+     * counted here as well. See EventParticipant::isPlaying().
+     */
     public function players(): HasMany
     {
-        return $this->participants()->where('role', ParticipantOptions::ROLE_PLAYER);
+        return $this->participants()->playing();
     }
 
     /** Extras bought alongside the registration, one row per size or option. */

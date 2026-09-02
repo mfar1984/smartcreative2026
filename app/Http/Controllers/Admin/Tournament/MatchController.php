@@ -197,9 +197,12 @@ class MatchController extends Controller
             return [];
         }
 
+        // playing(), not role = 'player': a manager who also holds a place is on
+        // the roster, and leaving them out here would keep them off every match
+        // line-up while they are named on the entry.
         $byRegistration = EventParticipant::query()
             ->whereIn('event_registration_id', $registrationIds)
-            ->where('role', ParticipantOptions::ROLE_PLAYER)
+            ->playing()
             ->orderBy('full_name')
             ->get(['id', 'event_registration_id', 'full_name', 'ign_player_id'])
             ->groupBy('event_registration_id');

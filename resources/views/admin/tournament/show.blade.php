@@ -258,7 +258,11 @@
                                 @php
                                     $registration = $entrant->registration;
                                     $players = $registration?->participants ?? collect();
-                                    $missingIgn = $tournament->event?->requires_ign
+                                    // Counted only against the Player ID, and only
+                                    // when the event actually asks for it. Asking
+                                    // for a Server ID alone leaves nothing here to
+                                    // be missing.
+                                    $missingIgn = $tournament->event?->asksIgnField('ign_player_id')
                                         ? $players->filter(fn ($p) => blank($p->ign_player_id))->count()
                                         : 0;
                                 @endphp

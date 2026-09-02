@@ -15,6 +15,8 @@ class EventAddon extends Model
         'description',
         'price',
         'is_required',
+        'is_checked_by_default',
+        'uncheck_reminder',
         'max_quantity',
         'is_active',
         'sort_order',
@@ -25,10 +27,40 @@ class EventAddon extends Model
         return [
             'price' => 'decimal:2',
             'is_required' => 'boolean',
+            'is_checked_by_default' => 'boolean',
             'is_active' => 'boolean',
             'max_quantity' => 'integer',
             'sort_order' => 'integer',
         ];
+    }
+
+    /* ---------------------------------------------------------------------
+     | Offered ticked
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Whether the registration form should start with this add-on chosen.
+     *
+     * Only meaningful when the add-on can be declined. A compulsory add-on is
+     * always taken, so answering true here as well would put two readings of the
+     * same fact on screen, and the buyer would be offered a tick box they are not
+     * allowed to clear.
+     */
+    public function isCheckedByDefault(): bool
+    {
+        return ! $this->is_required
+            && $this->is_checked_by_default
+            && $this->isPurchasable();
+    }
+
+    /**
+     * The note shown to somebody who unticks it, or null when there is none.
+     */
+    public function uncheckReminder(): ?string
+    {
+        return $this->isCheckedByDefault() && filled($this->uncheck_reminder)
+            ? (string) $this->uncheck_reminder
+            : null;
     }
 
     /* ---------------------------------------------------------------------

@@ -16,7 +16,10 @@
     @param string     $role       decided by the event mode, submitted hidden
     @param bool       $removable
     @param string|null $title      heading for the block, which conveys the role
-    @param bool       $requiresIgn whether the event asks for a game account
+    @param array      $ignFields  field key => [label, required], only those asked
+    @param array      $positions  position key => label; empty means no selector
+    @param string     $position   the selected position key
+    @param bool       $alsoPlays  whether this person holds a playing place too
 --}}
 @props([
     'index',
@@ -28,7 +31,10 @@
     'role' => 'participant',
     'removable' => false,
     'title' => null,
-    'requiresIgn' => false,
+    'ignFields' => [],
+    'positions' => [],
+    'position' => 'manager_only',
+    'alsoPlays' => false,
 ])
 
 @php
@@ -66,12 +72,44 @@
         @endif
     </div>
 
-    {{--
-        The role is not a question for the visitor: the event's registration
-        mode settles it. An individual entry is a participant, a squad entry has
-        one manager and the rest players. The block heading says which this is.
-    --}}
-    <input type="hidden" name="{{ $name('role') }}" value="{{ $role }}">
+    @if ($positions !== [])
+        {{--
+            The one block where the position is a real question. A squad short of
+            people needs its manager on the roster, and asking here means they are
+            entered once instead of twice under the same identity card.
+
+            The select drives two hidden inputs rather than posting its own value,
+            so the server still receives the plain role it has always received and
+            no rule had to learn a third role name. The JS keeps them in step and
+            recounts the players; without JS the pair still carries whatever the
+            page was rendered with, so the form degrades to the chosen default.
+        --}}
+        <div class="mb-3">
+            <label for="{{ $id('position') }}" class="{{ $label }}">
+                Your position <span class="text-red-600" aria-hidden="true">*</span>
+            </label>
+            <select id="{{ $id('position') }}" data-position-select class="{{ $field }} bg-white sm:max-w-xs">
+                @foreach ($positions as $positionKey => $positionLabel)
+                    <option value="{{ $positionKey }}" @selected($positionKey === $position)>{{ $positionLabel }}</option>
+                @endforeach
+            </select>
+            <p class="text-xs text-gray-500 mt-1">
+                Choose "Manager and Player" if you are managing the squad and playing in it.
+                You will only be entered once.
+            </p>
+        </div>
+
+        <input type="hidden" name="{{ $name('role') }}" value="{{ $role }}" data-position-role>
+        <input type="hidden" name="{{ $name('also_plays') }}" value="{{ $alsoPlays ? '1' : '0' }}" data-position-plays>
+    @else
+        {{--
+            Everywhere else the role is not a question: the event's registration
+            mode settles it. An individual entry is a participant, and the people a
+            manager adds are players. The block heading says which this is.
+        --}}
+        <input type="hidden" name="{{ $name('role') }}" value="{{ $role }}">
+        <input type="hidden" name="{{ $name('also_plays') }}" value="0">
+    @endif
     @error($errorKey('role'))<p class="text-xs text-red-600 mb-2">{{ $message }}</p>@enderror
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -96,34 +134,42 @@
             the identity card because an organiser reads the two together: the
             card says who the person is, this says which account is playing.
         --}}
-        @if ($requiresIgn)
+        @if ($ignFields !== [])
+            @php
+                // Placeholders and the monospace treatment belong to the field, not
+                // to the loop, so they are looked up rather than branched on.
+                $ignHints = [
+                    'ign_player_id' => ['e.g. 5123456789', true],
+                    'ign_server_id' => ['e.g. Asia', false],
+                    'ign_name' => ['e.g. ShadowX', false],
+                ];
+            @endphp
+
             <div class="sm:col-span-2 rounded-lg border border-blue-200 bg-blue-50/60 p-3">
-                <p class="text-xs font-bold text-blue-900 mb-2">In-Game ID</p>
+                <p class="text-xs font-bold text-blue-900 mb-2">In-Game Details</p>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                        <label for="{{ $id('ign_player_id') }}" class="{{ $label }}">
-                            Player ID <span class="text-red-600" aria-hidden="true">*</span>
-                        </label>
-                        <input type="text" id="{{ $id('ign_player_id') }}" name="{{ $name('ign_player_id') }}"
-                               required maxlength="60"
-                               value="{{ $value('ign_player_id') }}"
-                               placeholder="e.g. 5123456789"
-                               class="{{ $field }} font-mono">
-                        @error($errorKey('ign_player_id'))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
-                    </div>
+                    @foreach ($ignFields as $ignField => $ignMeta)
+                        @php
+                            [$ignLabel, $ignRequired] = $ignMeta;
+                            [$ignPlaceholder, $ignMono] = $ignHints[$ignField] ?? ['', false];
+                        @endphp
 
-                    <div>
-                        <label for="{{ $id('ign_server_id') }}" class="{{ $label }}">
-                            Server ID <span class="text-red-600" aria-hidden="true">*</span>
-                        </label>
-                        <input type="text" id="{{ $id('ign_server_id') }}" name="{{ $name('ign_server_id') }}"
-                               required maxlength="60"
-                               value="{{ $value('ign_server_id') }}"
-                               placeholder="e.g. Asia"
-                               class="{{ $field }}">
-                        @error($errorKey('ign_server_id'))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
-                    </div>
+                        <div>
+                            <label for="{{ $id($ignField) }}" class="{{ $label }}">
+                                {{ $ignLabel }}
+                                @if ($ignRequired)
+                                    <span class="text-red-600" aria-hidden="true">*</span>
+                                @endif
+                            </label>
+                            <input type="text" id="{{ $id($ignField) }}" name="{{ $name($ignField) }}"
+                                   @required($ignRequired) maxlength="60"
+                                   value="{{ $value($ignField) }}"
+                                   placeholder="{{ $ignPlaceholder }}"
+                                   class="{{ $field }}{{ $ignMono ? ' font-mono' : '' }}">
+                            @error($errorKey($ignField))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
+                        </div>
+                    @endforeach
                 </div>
             </div>
         @endif

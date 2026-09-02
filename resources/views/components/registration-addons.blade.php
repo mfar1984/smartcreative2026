@@ -46,6 +46,20 @@
                     $chosen = $submittedAddons[$addon->id] ?? [];
                     $chosen = is_array($chosen) ? $chosen : [];
                     $cap = $addon->perOrderCap();
+
+                    /*
+                     | Offered ticked. On a first view the box starts ticked; after a
+                     | failed submit it follows what actually came back, so somebody
+                     | who deliberately declined is not silently opted back in.
+                     */
+                    $offeredTicked = $addon->isCheckedByDefault();
+                    $reminder = $addon->uncheckReminder();
+
+                    $wasSubmitted = $isOpenModal && $submittedAddons !== [];
+                    $chosenAny = collect($chosen)->contains(fn ($q) => (int) $q > 0);
+                    $startTicked = $offeredTicked && (! $wasSubmitted || $chosenAny);
+
+                    $toggleId = "addon-toggle-{$event->slug}-{$addon->id}";
                 @endphp
 
                 <div class="rounded-lg border border-gray-200 bg-white p-4"
@@ -57,9 +71,26 @@
                     <div class="{{ $addonGrid }} items-start">
                         <div class="min-w-0">
                             <p class="text-sm font-semibold text-gray-900">
-                                {{ $addon->name }}
+                                @if ($offeredTicked)
+                                    {{-- The name doubles as the opt out. Nothing is
+                                         submitted by this box: it only drives the
+                                         quantities below, which remain what the
+                                         server reads. --}}
+                                    <label for="{{ $toggleId }}" class="inline-flex items-start gap-2 cursor-pointer">
+                                        <input type="checkbox" id="{{ $toggleId }}"
+                                               @checked($startTicked)
+                                               data-addon-toggle
+                                               class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                        <span>{{ $addon->name }}</span>
+                                    </label>
+                                @else
+                                    {{ $addon->name }}
+                                @endif
+
                                 @if ($addon->is_required)
                                     <span class="ml-1 inline-block rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800 align-middle">Required</span>
+                                @elseif ($offeredTicked)
+                                    <span class="ml-1 inline-block rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-semibold text-green-800 align-middle">Included</span>
                                 @endif
                             </p>
                             @if (filled($addon->description))
@@ -76,7 +107,37 @@
                         <p class="text-xs text-red-600 mt-1.5">{{ $message }}</p>
                     @enderror
 
+                    @if ($reminder !== null)
+                        {{-- role=status rather than an alert: this is a consequence
+                             of a deliberate choice, not an error, and a dialog here
+                             would block somebody who meant it. Hidden until they
+                             actually clear the box. --}}
+                        <div @class(['mt-2.5 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-3', 'hidden' => $startTicked])
+                             role="status" data-addon-reminder>
+                            <svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 9v4m0 4h.01M12 3l9 16H3l9-16z"/>
+                            </svg>
+                            <p class="text-xs leading-relaxed text-amber-800">{{ $reminder }}</p>
+                        </div>
+                    @endif
+
                     @if ($addon->hasVariants())
+                        @php
+                            /*
+                             | With options, "included" has to land on one of them or
+                             | the tick above would promise something the total does
+                             | not charge for. The first option still in stock takes
+                             | it, and the buyer changes the size if it is wrong.
+                             |
+                             | Only on a first view: after a failed submit the boxes
+                             | replay what came back, so a chosen size is kept and a
+                             | deliberate decline is not undone.
+                             */
+                            $defaultVariantId = $startTicked && ! $wasSubmitted
+                                ? $addon->variants->first(fn ($v) => ! $v->isSoldOut())?->id
+                                : null;
+                        @endphp
+
                         <div class="mt-3 divide-y divide-gray-100 border-t border-gray-100">
                             @foreach ($addon->variants as $variant)
                                 @php
@@ -113,7 +174,7 @@
                                         <input type="number"
                                                id="{{ $inputId }}"
                                                name="addons[{{ $addon->id }}][{{ $variant->id }}]"
-                                               value="{{ $chosen[$variant->id] ?? 0 }}"
+                                               value="{{ $chosen[$variant->id] ?? ($variant->id === $defaultVariantId ? 1 : 0) }}"
                                                min="0"
                                                @if ($limit !== null) max="{{ $limit }}" @endif
                                                @disabled($soldOut)
@@ -131,7 +192,14 @@
                             @endforeach
                         </div>
                     @else
-                        @php $inputId = "addon-{$event->slug}-{$addon->id}-base"; @endphp
+                        @php
+                            $inputId = "addon-{$event->slug}-{$addon->id}-base";
+
+                            // An add-on offered ticked starts at one rather than
+                            // zero, which is what "already included" has to mean
+                            // for the figure below to match the tick above it.
+                            $baseValue = $chosen['base'] ?? ($startTicked ? 1 : 0);
+                        @endphp
 
                         {{-- No options to price separately, so the middle column
                              stays empty and only the box lines up. --}}
@@ -143,7 +211,7 @@
                             <input type="number"
                                    id="{{ $inputId }}"
                                    name="addons[{{ $addon->id }}][base]"
-                                   value="{{ $chosen['base'] ?? 0 }}"
+                                   value="{{ $baseValue }}"
                                    min="0"
                                    @if ($cap !== null) max="{{ $cap }}" @endif
                                    inputmode="numeric"

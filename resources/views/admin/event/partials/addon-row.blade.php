@@ -15,6 +15,8 @@
     // sell it. Required is off, because most extras are optional.
     $isActive = array_key_exists('is_active', $row) ? (bool) $row['is_active'] : true;
     $isRequired = (bool) ($row['is_required'] ?? false);
+    $isTicked = (bool) ($row['is_checked_by_default'] ?? false);
+    $reminder = (string) ($row['uncheck_reminder'] ?? '');
 
     // Rows that already have stock committed cannot be pulled out, so the
     // remove button explains itself rather than failing on save.
@@ -108,10 +110,39 @@
                 <input type="hidden" name="{{ $name }}[is_required]" value="0">
                 <label class="inline-flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" name="{{ $name }}[is_required]" value="1" @checked($isRequired)
+                           data-addon-required
                            class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                     <span class="text-xs font-semibold text-gray-700">Compulsory for every registration</span>
                 </label>
+
+                {{-- The third state: offered already ticked, but the buyer may
+                     clear it. Disabled while the add-on is compulsory, because
+                     there is nothing to opt out of. --}}
+                <input type="hidden" name="{{ $name }}[is_checked_by_default]" value="0">
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="{{ $name }}[is_checked_by_default]" value="1"
+                           @checked($isTicked) @disabled($isRequired)
+                           data-addon-ticked
+                           class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-40">
+                    <span @class(['text-xs font-semibold', $isRequired ? 'text-gray-400' : 'text-gray-700'])
+                          data-addon-ticked-label>Ticked by default, can be unticked</span>
+                </label>
             </div>
+        </div>
+
+        {{-- Reminder, shown only while the add-on is offered ticked. This is what
+             somebody sees when they clear the box on the registration form, so it
+             is worth writing in terms of what they lose. --}}
+        <div @class(['mt-3', 'hidden' => ! $isTicked || $isRequired]) data-addon-reminder-wrap>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">
+                Reminder shown if they untick it
+            </label>
+            <textarea name="{{ $name }}[uncheck_reminder]" rows="2" maxlength="500"
+                      placeholder="e.g. Without the Event Tee you will not have a team shirt on match day. Shirts cannot be ordered later."
+                      class="{{ $miniInput }} bg-white resize-y">{{ $reminder }}</textarea>
+            <p class="text-[11px] text-gray-500 mt-1">
+                Leave blank to let them untick it without a message.
+            </p>
         </div>
 
         {{-- ---------------- Options ---------------- --}}

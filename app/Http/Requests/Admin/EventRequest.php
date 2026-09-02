@@ -64,7 +64,13 @@ class EventRequest extends FormRequest
             'min_players' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'max_players' => ['nullable', 'integer', 'min:1', 'max:1000', 'gte:min_players'],
 
-            'requires_ign' => ['boolean'],
+            'asks_player_id' => ['boolean'],
+            'asks_server_id' => ['boolean'],
+            'asks_ign_name' => ['boolean'],
+            'asks_logo' => ['boolean'],
+            'requires_player_id' => ['boolean'],
+            'requires_server_id' => ['boolean'],
+            'requires_ign_name' => ['boolean'],
             'requires_logo' => ['boolean'],
 
             'registration_opens_at' => ['nullable', 'date'],
@@ -87,6 +93,8 @@ class EventRequest extends FormRequest
 
             'addons.*.max_quantity' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'addons.*.is_required' => ['boolean'],
+            'addons.*.is_checked_by_default' => ['boolean'],
+            'addons.*.uncheck_reminder' => ['nullable', 'string', 'max:500'],
             'addons.*.is_active' => ['boolean'],
 
             'addons.*.variants' => ['array', 'max:' . self::MAX_VARIANTS],
@@ -119,14 +127,43 @@ class EventRequest extends FormRequest
         ];
     }
 
+    /**
+     * Asked flag => the compulsory flag it governs.
+     *
+     * One map so the coercion below and any later reader agree on which pairs
+     * exist, rather than the relationship living in four separate lines.
+     */
+    private const OPTIONAL_FIELD_PAIRS = [
+        'asks_player_id' => 'requires_player_id',
+        'asks_server_id' => 'requires_server_id',
+        'asks_ign_name' => 'requires_ign_name',
+        'asks_logo' => 'requires_logo',
+    ];
+
     protected function prepareForValidation(): void
     {
-        $this->merge([
+        $flags = [];
+
+        /*
+        | Compulsory is forced off whenever the field is not asked for.
+        |
+        | The form disables the box, but a disabled input is a courtesy to the
+        | operator and not a guarantee: it sends nothing, and nothing is what a
+        | tampered payload also sends. Deciding it here means the stored pair can
+        | never say "not asked, but required", which would make the public form
+        | demand a field it does not draw.
+        */
+        foreach (self::OPTIONAL_FIELD_PAIRS as $asks => $requires) {
+            $asked = $this->boolean($asks);
+
+            $flags[$asks] = $asked;
+            $flags[$requires] = $asked && $this->boolean($requires);
+        }
+
+        $this->merge($flags + [
             'title' => is_string($this->title) ? trim($this->title) : $this->title,
             'slug' => filled($this->slug) ? str($this->slug)->slug()->toString() : null,
             'remove_poster' => $this->boolean('remove_poster'),
-            'requires_ign' => $this->boolean('requires_ign'),
-            'requires_logo' => $this->boolean('requires_logo'),
             // An empty fee box means free, not zero-that-was-typed.
             'fee' => $this->input('fee') === '' ? null : $this->input('fee'),
             'addons' => $this->normalisedAddons(),
@@ -168,13 +205,28 @@ class EventRequest extends FormRequest
                 continue;
             }
 
+            $required = (bool) ($row['is_required'] ?? false);
+
+            /*
+            | Offered ticked only means something when it can be unticked, so a
+            | compulsory add-on drops the flag and its reminder. Leaving them set
+            | would store a reminder for an untick the form never allows, and the
+            | next person to read the row could not tell which rule was in force.
+            */
+            $ticked = ! $required && (bool) ($row['is_checked_by_default'] ?? false);
+            $reminder = filled($row['uncheck_reminder'] ?? null)
+                ? trim((string) $row['uncheck_reminder'])
+                : null;
+
             $clean[] = [
                 'id' => $id,
                 'name' => $name,
                 'description' => filled($row['description'] ?? null) ? trim((string) $row['description']) : null,
                 'price' => $price === '' ? null : $price,
                 'max_quantity' => blank($row['max_quantity'] ?? null) ? null : (int) $row['max_quantity'],
-                'is_required' => (bool) ($row['is_required'] ?? false),
+                'is_required' => $required,
+                'is_checked_by_default' => $ticked,
+                'uncheck_reminder' => $ticked ? $reminder : null,
                 'is_active' => (bool) ($row['is_active'] ?? false),
                 'variants' => $variants,
             ];
@@ -210,10 +262,25 @@ class EventRequest extends FormRequest
                 continue;
             }
 
+            /*
+            | A zero override is stored as blank, because that is what it means:
+            | charge the add-on price. Keeping the 0 would leave the form showing
+            | a figure that is not the one charged, which is how the RM50 shirt
+            | came to read RM0.00 on the public form.
+            |
+            | EventAddonVariant::unitPrice() applies the same rule when reading,
+            | so rows saved before this still price correctly.
+            */
+            $price = ($variant['price'] ?? '') === '' ? null : $variant['price'];
+
+            if ($price !== null && (float) $price <= 0) {
+                $price = null;
+            }
+
             $clean[] = [
                 'id' => $id,
                 'label' => $label,
-                'price' => ($variant['price'] ?? '') === '' ? null : $variant['price'],
+                'price' => $price,
                 'stock' => ($variant['stock'] ?? '') === '' ? null : $variant['stock'],
             ];
         }

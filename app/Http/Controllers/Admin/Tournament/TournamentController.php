@@ -205,7 +205,14 @@ class TournamentController extends Controller
             ? (string) $request->query('tab')
             : 'progress';
 
-        $tournament->load(['event:id,title,slug,min_players,max_players,requires_ign', 'pointRule', 'creator:id,name']);
+        $tournament->load([
+            // The asks_* trio is selected rather than a single flag because
+            // Event::asksIgn() reads all three to decide whether this tournament
+            // has game accounts to be missing in the first place.
+            'event:id,title,slug,min_players,max_players,asks_player_id,asks_server_id,asks_ign_name',
+            'pointRule',
+            'creator:id,name',
+        ]);
 
         $entrants = $tournament->entrants()
             ->with(['registration.participants'])

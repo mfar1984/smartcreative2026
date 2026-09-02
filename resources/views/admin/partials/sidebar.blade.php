@@ -146,10 +146,16 @@
          minutes, because this partial is drawn on every admin page and an outage at
          CHIP must not slow all of them down.
 
-         Hidden without payments.view. A balance on every screen would otherwise
-         show the takings to anybody who can reach the admin, a Referee included. --}}
+         Gated on its own permission, Sidebar / Account Balance on the Roles screen,
+         rather than on payments.view. Opening the Payments screen deliberately is
+         one thing; carrying the takings on every screen, in front of whoever walks
+         past, is another. Untick it and this whole block is not rendered, so CHIP is
+         never even asked.
+
+         Note the check runs before ChipBalance is resolved out of the container. A
+         role without the permission costs nothing at all, not even a cache read. --}}
     @php
-        $balance = auth()->user()?->hasPermission('payments.view')
+        $balance = auth()->user()?->hasPermission('sidebar.balance.view')
             ? app(App\Support\ChipBalance::class)->current()
             : null;
     @endphp

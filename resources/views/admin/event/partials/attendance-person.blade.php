@@ -60,13 +60,14 @@
             {{-- The counter checks this against the account on the player's
                  handset, so it sits with the card number rather than in a
                  details panel. --}}
-            @if ($registration->event?->requiresIgn() || $participant->hasIgn())
+            {{-- One composed line rather than a fixed "id on server" pair, because
+                 an event may ask for any combination of the three fields and this
+                 sits on a phone at the counter. ignLabel() decides the wording. --}}
+            @if ($registration->event?->asksIgn() || $participant->hasIgn())
                 <p class="mt-1 text-sm">
                     <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">In-Game</span>
                     @if ($participant->hasIgn())
-                        <span class="font-mono font-bold text-gray-900">{{ $participant->ign_player_id ?: '—' }}</span>
-                        <span class="text-gray-400 mx-1">on</span>
-                        <span class="font-semibold text-gray-900">{{ $participant->ign_server_id ?: '—' }}</span>
+                        <span class="font-semibold text-gray-900">{{ $participant->ignLabel() }}</span>
                     @else
                         <span class="font-semibold text-amber-700">Not recorded</span>
                     @endif
@@ -274,27 +275,26 @@
                                  player leaving, so their replacement has to give
                                  their own. Asked here rather than folded away,
                                  because a tournament cannot run without it. --}}
-                            @if ($registration->event?->requiresIgn())
-                                <div>
-                                    <label for="swap-ign-player-{{ $participant->id }}" class="block text-xs font-semibold text-gray-700 mb-1">
-                                        Player ID <span class="text-red-600" aria-hidden="true">*</span>
-                                    </label>
-                                    <input type="text" id="swap-ign-player-{{ $participant->id }}" name="ign_player_id"
-                                           maxlength="60" required
-                                           value="{{ old('_swap_for') == $participant->id ? old('ign_player_id') : '' }}"
-                                           class="{{ $swapInput }} font-mono">
-                                </div>
+                            {{-- Driven by the event's own list, so the counter is
+                                 asked for exactly the fields the public form asked
+                                 for, and each is only starred when it is
+                                 compulsory there too. --}}
+                            @foreach ($registration->event?->ignFieldsAsked() ?? [] as $ignField => $ignLabel)
+                                @php $ignRequired = $registration->event->requiresIgnField($ignField); @endphp
 
                                 <div>
-                                    <label for="swap-ign-server-{{ $participant->id }}" class="block text-xs font-semibold text-gray-700 mb-1">
-                                        Server ID <span class="text-red-600" aria-hidden="true">*</span>
+                                    <label for="swap-{{ $ignField }}-{{ $participant->id }}" class="block text-xs font-semibold text-gray-700 mb-1">
+                                        {{ $ignLabel }}
+                                        @if ($ignRequired)
+                                            <span class="text-red-600" aria-hidden="true">*</span>
+                                        @endif
                                     </label>
-                                    <input type="text" id="swap-ign-server-{{ $participant->id }}" name="ign_server_id"
-                                           maxlength="60" required
-                                           value="{{ old('_swap_for') == $participant->id ? old('ign_server_id') : '' }}"
-                                           class="{{ $swapInput }}">
+                                    <input type="text" id="swap-{{ $ignField }}-{{ $participant->id }}" name="{{ $ignField }}"
+                                           maxlength="60" @required($ignRequired)
+                                           value="{{ old('_swap_for') == $participant->id ? old($ignField) : '' }}"
+                                           class="{{ $swapInput }}{{ $ignField === 'ign_player_id' ? ' font-mono' : '' }}">
                                 </div>
-                            @endif
+                            @endforeach
                         </div>
 
                         <details class="mt-3">

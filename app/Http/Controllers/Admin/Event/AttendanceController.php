@@ -543,8 +543,10 @@ class AttendanceController extends Controller
             return null;
         }
 
+        // Counted with playing(), so a manager who also plays keeps the squad above
+        // its minimum rather than the count reading one short.
         $remaining = $registration->participants()
-            ->where('role', ParticipantOptions::ROLE_PLAYER)
+            ->playing()
             ->count();
 
         if ($remaining >= $minimum) {

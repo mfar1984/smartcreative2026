@@ -30,6 +30,60 @@ class ParticipantOptions
     ];
 
     /**
+     * Shown when a manager also holds a playing place.
+     *
+     * Not a role of its own. It is the manager role with also_plays set, kept as a
+     * label so nothing is tempted to store it in the role column, where it would
+     * be missed by every query that looks for a manager or for a player.
+     */
+    public const LABEL_MANAGER_PLAYER = 'Manager & Player';
+
+    /**
+     * The positions the person registering a squad may choose for themselves.
+     *
+     * Key => [role, also_plays, label]. One map so the form, the request and the
+     * writer agree, rather than the combination being reassembled at each.
+     */
+    public const POSITIONS = [
+        'manager_player' => [self::ROLE_MANAGER, true, 'Manager and Player'],
+        'manager_only' => [self::ROLE_MANAGER, false, 'Manager only'],
+        'player_only' => [self::ROLE_PLAYER, false, 'Player only'],
+    ];
+
+    /**
+     * Position key => label, for a select.
+     *
+     * @return array<string, string>
+     */
+    public static function positionLabels(): array
+    {
+        $labels = [];
+
+        foreach (self::POSITIONS as $key => [$role, $alsoPlays, $label]) {
+            $labels[$key] = $label;
+        }
+
+        return $labels;
+    }
+
+    /**
+     * The position key a stored row corresponds to.
+     *
+     * Used to re-select the right option when a submission comes back with
+     * errors, so the visitor is not silently reset to the default.
+     */
+    public static function positionKeyFor(?string $role, bool $alsoPlays): string
+    {
+        foreach (self::POSITIONS as $key => [$candidateRole, $candidatePlays, $label]) {
+            if ($candidateRole === $role && $candidatePlays === $alsoPlays) {
+                return $key;
+            }
+        }
+
+        return 'manager_only';
+    }
+
+    /**
      * The only role an individual registration can carry.
      */
     public const INDIVIDUAL_ROLES = [
