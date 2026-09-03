@@ -228,6 +228,46 @@
                         </ul>
                     @endif
 
+                    {{-- Said before the Add to Basket button, not after it. Somebody who
+                         buys this expecting a parcel has been misled, and the place and
+                         time are the whole of what they are agreeing to. --}}
+                    @if ($product->isOffline() && $product->collectionPoint())
+                        @php $point = $product->collectionPoint(); @endphp
+
+                        <div class="rounded-lg border border-blue-200 bg-blue-50 p-5 mb-6">
+                            <p class="text-sm font-bold text-blue-900">Collected in person, not posted</p>
+
+                            <p class="text-sm text-blue-900 mt-2">
+                                Pay here and collect at our counter. There is no delivery charge and
+                                nothing is sent to you.
+                            </p>
+
+                            <dl class="mt-3 pt-3 border-t border-blue-200 space-y-1 text-sm">
+                                @if (filled($point['location']))
+                                    <div>
+                                        <dt class="text-xs text-blue-800">Where</dt>
+                                        <dd class="font-semibold text-blue-900">{{ $point['location'] }}</dd>
+                                    </div>
+                                @endif
+
+                                @if ($point['at'])
+                                    <div>
+                                        <dt class="text-xs text-blue-800">When</dt>
+                                        <dd class="font-semibold text-blue-900">
+                                            {{ $point['at']->format('l, d F Y') }} at {{ $point['at']->format('g:i a') }}
+                                        </dd>
+                                    </div>
+                                @endif
+                            </dl>
+
+                            <p class="text-xs text-blue-800 mt-3 leading-relaxed">
+                                You will be asked for an identity card number at checkout, and our counter
+                                checks the document against it before handing your order over. Collected
+                                items cannot share a basket with posted ones.
+                            </p>
+                        </div>
+                    @endif
+
                     {{-- ==================== Buy, or enquire ==================== --}}
                     @if ($canBuy && ! $soldOut)
                         {{-- The option chooser is a radio group rather than a select, so

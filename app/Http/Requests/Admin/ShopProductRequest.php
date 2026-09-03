@@ -110,6 +110,21 @@ class ShopProductRequest extends FormRequest
             'payment_methods' => ['required', 'array', 'min:1'],
             'payment_methods.*' => ['string', Rule::in(array_keys(ShopOrder::METHODS))],
 
+            /* ---------------- Posted out, or collected in person ---------------- */
+
+            /*
+             | Which way this product reaches the buyer. Not nullable and not
+             | defaulted here: postage applies to one and not the other, so leaving it
+             | unanswered would decide it by accident.
+             */
+            'fulfilment' => ['required', Rule::in(array_keys(ShopProduct::FULFILMENTS))],
+
+            // Only meaningful for an offline product. Cross checked in after().
+            'collection_source' => ['nullable', Rule::in(['event', 'manual'])],
+            'collection_event_id' => ['nullable', 'integer', Rule::exists('events', 'id')],
+            'collection_location' => ['nullable', 'string', 'max:190'],
+            'collection_at' => ['nullable', 'date'],
+
             'is_featured' => ['boolean'],
             'sort_order' => ['nullable', 'integer', 'min:0', 'max:9999'],
 
@@ -229,7 +244,47 @@ class ShopProductRequest extends FormRequest
             fn (Validator $validator) => $this->checkVariantLabelsAreUnique($validator),
             fn (Validator $validator) => $this->checkOptionNameIsGiven($validator),
             fn (Validator $validator) => $this->checkNothingSoldWasRemoved($validator),
+            fn (Validator $validator) => $this->checkCollectionPointIsUsable($validator),
         ];
+    }
+
+    /**
+     * An offline product needs somewhere and some time to be collected.
+     *
+     * Either an event already in the system, or a location and a moment typed in.
+     * Both halves of the manual pair are required together: a place with no time, or
+     * a time with no place, is not something a buyer can turn up for.
+     */
+    private function checkCollectionPointIsUsable(Validator $validator): void
+    {
+        if ($this->input('fulfilment') !== ShopProduct::FULFILMENT_OFFLINE) {
+            return;
+        }
+
+        if ($this->input('collection_source') === 'event') {
+            if (blank($this->input('collection_event_id'))) {
+                $validator->errors()->add(
+                    'collection_event_id',
+                    'Choose the event this is collected at, or switch to entering the details by hand.',
+                );
+            }
+
+            return;
+        }
+
+        if (blank($this->input('collection_location'))) {
+            $validator->errors()->add(
+                'collection_location',
+                'Say where this is collected from. A buyer needs somewhere to turn up to.',
+            );
+        }
+
+        if (blank($this->input('collection_at'))) {
+            $validator->errors()->add(
+                'collection_at',
+                'Say when it can be collected, date and time. A date on its own is not something anybody can turn up for.',
+            );
+        }
     }
 
     /* ---------------------------------------------------------------------
@@ -432,7 +487,21 @@ class ShopProductRequest extends FormRequest
             'length_cm',
             'width_cm',
             'height_cm',
+
+            // A radio that decides which of the collection fields to keep. It is a
+            // question about the form, not a property of the product.
+            'collection_source',
         ]);
+
+        /*
+         | Exactly one collection point survives, and switching away clears the other.
+         |
+         | Written here rather than left to whatever the form posted, because both
+         | halves of the form exist in the markup at once: without this, unticking
+         | "at an event" and saving would leave the old event id behind and the
+         | product would still be collected somewhere nobody chose.
+         */
+        $data = array_merge($data, $this->collectionColumns());
 
         $data['weight_grams'] = $this->filled('weight_kg')
             ? (int) round((float) $this->input('weight_kg') * 1000)
@@ -451,6 +520,39 @@ class ShopProductRequest extends FormRequest
         }
 
         return $data;
+    }
+
+    /**
+     * The three collection columns, resolved to one answer.
+     *
+     * An online product carries none of them. An offline one carries either the event
+     * or the manual pair, never a mixture, so nothing downstream has to decide which
+     * of two filled-in sources it meant.
+     *
+     * @return array{collection_event_id: int|null, collection_location: string|null, collection_at: string|null}
+     */
+    private function collectionColumns(): array
+    {
+        $blank = [
+            'collection_event_id' => null,
+            'collection_location' => null,
+            'collection_at' => null,
+        ];
+
+        if ($this->input('fulfilment') !== ShopProduct::FULFILMENT_OFFLINE) {
+            return $blank;
+        }
+
+        if ($this->input('collection_source') === 'event') {
+            return array_merge($blank, [
+                'collection_event_id' => (int) $this->input('collection_event_id'),
+            ]);
+        }
+
+        return array_merge($blank, [
+            'collection_location' => trim((string) $this->input('collection_location')),
+            'collection_at' => $this->input('collection_at'),
+        ]);
     }
 
     /**

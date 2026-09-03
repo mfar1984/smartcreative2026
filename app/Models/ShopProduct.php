@@ -6,6 +6,7 @@ use App\Support\PaymentFigures;
 use App\Support\PaymentSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -29,6 +30,20 @@ class ShopProduct extends Model
         self::STATUS_DRAFT => 'Draft',
         self::STATUS_ACTIVE => 'Active',
         self::STATUS_ARCHIVED => 'Archived',
+    ];
+
+    /** Posted to the buyer, priced with postage. */
+    public const FULFILMENT_ONLINE = 'online';
+
+    /** Handed over in person at a counter. No postage, and no courier. */
+    public const FULFILMENT_OFFLINE = 'offline';
+
+    /**
+     * Fulfilment slug => label.
+     */
+    public const FULFILMENTS = [
+        self::FULFILMENT_ONLINE => 'Online, posted to the buyer',
+        self::FULFILMENT_OFFLINE => 'Offline, collected at a counter',
     ];
 
     protected $fillable = [
@@ -57,6 +72,10 @@ class ShopProduct extends Model
         'brand',
         'status',
         'payment_methods',
+        'fulfilment',
+        'collection_event_id',
+        'collection_location',
+        'collection_at',
         'is_featured',
         'sort_order',
         'seo_title',
@@ -79,6 +98,7 @@ class ShopProduct extends Model
             'width_mm' => 'integer',
             'height_mm' => 'integer',
             'payment_methods' => 'array',
+            'collection_at' => 'datetime',
             'is_featured' => 'boolean',
             'sort_order' => 'integer',
         ];
@@ -319,15 +339,133 @@ class ShopProduct extends Model
         );
     }
 
+    /* ---------------------------------------------------------------------
+     | Posted out, or collected in person
+     * ------------------------------------------------------------------ */
+
+    public function collectionEvent(): BelongsTo
+    {
+        return $this->belongsTo(Event::class, 'collection_event_id');
+    }
+
+    public function isOffline(): bool
+    {
+        return $this->fulfilment === self::FULFILMENT_OFFLINE;
+    }
+
+    public function isOnline(): bool
+    {
+        return ! $this->isOffline();
+    }
+
+    public function fulfilmentLabel(): string
+    {
+        return self::FULFILMENTS[$this->fulfilment] ?? $this->fulfilment;
+    }
+
+    /**
+     * Where and when this is handed over, or null when it is posted instead.
+     *
+     * An event wins over the manual fields when both somehow hold values, because
+     * the event is the maintained copy. The event's own location and date are read
+     * live here rather than copied, so a venue change reaches the storefront; orders
+     * already placed keep their snapshot and are unaffected.
+     *
+     * @return array{label: string, location: string|null, at: \Illuminate\Support\Carbon|null, event_id: int|null}|null
+     */
+    public function collectionPoint(): ?array
+    {
+        if (! $this->isOffline()) {
+            return null;
+        }
+
+        $event = $this->collection_event_id !== null ? $this->collectionEvent : null;
+
+        if ($event !== null) {
+            return [
+                'label' => (string) $event->title,
+                'location' => $event->location ?: $event->address,
+                'at' => $event->starts_at,
+                'event_id' => $event->id,
+            ];
+        }
+
+        if (filled($this->collection_location) || $this->collection_at !== null) {
+            return [
+                'label' => 'Collection point',
+                'location' => $this->collection_location,
+                'at' => $this->collection_at,
+                'event_id' => null,
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether there is somewhere to collect this from.
+     *
+     * False for an offline product whose event has since been deleted. That product
+     * cannot be sold, because nobody could be told where to turn up, which is why
+     * isPurchasable() refuses it rather than leaving it on the storefront.
+     */
+    public function hasCollectionPoint(): bool
+    {
+        return ! $this->isOffline() || $this->collectionPoint() !== null;
+    }
+
+    /**
+     * An identifier for the collection point, for comparing two products.
+     *
+     * One order is handed over once, in one place. A basket mixing two different
+     * collection points could not be fulfilled, so the cart compares this rather
+     * than trying to reconcile them later.
+     */
+    public function collectionKey(): ?string
+    {
+        $point = $this->collectionPoint();
+
+        if ($point === null) {
+            return null;
+        }
+
+        return $point['event_id'] !== null
+            ? 'event:' . $point['event_id']
+            : 'manual:' . sha1(($point['location'] ?? '') . '|' . ($point['at']?->toDateTimeString() ?? ''));
+    }
+
+    /**
+     * "Kuala Lumpur, 3 Dec 2026, 10:00 am", or null when it is posted.
+     */
+    public function collectionSummary(): ?string
+    {
+        $point = $this->collectionPoint();
+
+        if ($point === null) {
+            return null;
+        }
+
+        return collect([
+            $point['location'],
+            $point['at']?->format('d M Y, g:i a'),
+        ])->filter()->join(', ') ?: $point['label'];
+    }
+
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;
     }
 
-    /** Live, and there is something to sell. */
+    /**
+     * Live, there is something to sell, and it can actually be handed over.
+     *
+     * The collection check matters for offline products whose event has gone: it is
+     * better to drop them off the storefront than to take money for a handover with
+     * no place or time attached to it.
+     */
     public function isPurchasable(): bool
     {
-        return $this->isActive() && ! $this->isSoldOut();
+        return $this->isActive() && ! $this->isSoldOut() && $this->hasCollectionPoint();
     }
 
     /* ---------------------------------------------------------------------

@@ -36,6 +36,18 @@
     ];
 
     $paymentSettingsUrl = route('admin.settings.integration', ['tab' => 'payments']);
+    $shippingSettingsUrl = route('admin.settings.integration', ['tab' => 'shipping']);
+
+    $fulfilment = old('fulfilment', $product->fulfilment ?: ShopProduct::FULFILMENT_ONLINE);
+
+    /*
+     | Which half of the offline form is in use. An existing product is read from
+     | whichever column actually holds a value, so the radio matches the data rather
+     | than defaulting and quietly proposing a change.
+     */
+    $collectionSource = old('collection_source', $product->collection_event_id !== null ? 'event' : 'manual');
+
+    $collectionAt = old('collection_at', $product->collection_at?->format('Y-m-d\TH:i'));
 @endphp
 
 @section('title', $heading)
@@ -364,8 +376,139 @@
                 </x-admin.field-row>
             </x-admin.panel>
 
+            {{-- ==================== Fulfilment ==================== --}}
+            <x-admin.panel title="How It Reaches The Buyer" icon="inbox">
+                <x-admin.field-row
+                    label="Fulfilment"
+                    help="Posted out, or handed over in person. One or the other: postage applies to the first and not the second."
+                    :required="true"
+                    error="fulfilment">
+
+                    <div class="space-y-2.5">
+                        @foreach ($fulfilments as $slug => $label)
+                            <label class="flex items-start gap-3 rounded-lg border border-gray-300 px-3.5 py-3 cursor-pointer transition hover:border-blue-300 hover:bg-blue-50/40 has-checked:border-blue-600 has-checked:bg-blue-50">
+                                <input type="radio"
+                                       name="fulfilment"
+                                       value="{{ $slug }}"
+                                       required
+                                       data-fulfilment-choice
+                                       @checked($fulfilment === $slug)
+                                       class="mt-0.5 shrink-0 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+
+                                <span class="min-w-0">
+                                    <span class="block text-sm font-semibold text-gray-900">{{ $label }}</span>
+
+                                    <span class="block text-xs text-gray-500 mt-0.5 leading-snug">
+                                        @if ($slug === ShopProduct::FULFILMENT_ONLINE)
+                                            Charged postage from the flat rates in
+                                            <a href="{{ $shippingSettingsUrl }}" class="font-semibold text-blue-600 hover:underline">Settings &gt; Integration &gt; Shipping</a>,
+                                            banded by the delivery state.
+                                        @else
+                                            Bought here and collected at a counter. No postage is charged and no
+                                            courier is involved, so the shipping settings do not apply. The buyer is
+                                            asked for an identity card, which is what the counter checks.
+                                        @endif
+                                    </span>
+                                </span>
+                            </label>
+                        @endforeach
+                    </div>
+                </x-admin.field-row>
+
+                {{-- Only meaningful for an offline product. Hidden rather than removed
+                     so switching back and forth does not lose what was typed. --}}
+                <div data-offline-only @class(['hidden' => $fulfilment !== ShopProduct::FULFILMENT_OFFLINE])>
+
+                    <x-admin.field-row
+                        label="Collection Point"
+                        help="Point at an event and its venue and date are kept in step automatically. Enter them by hand for a handover that is not at an event."
+                        :required="true"
+                        error="collection_source">
+
+                        <div class="space-y-2.5">
+                            <label class="flex items-center gap-3 rounded-lg border border-gray-300 px-3.5 py-2.5 cursor-pointer transition hover:border-blue-300 has-checked:border-blue-600 has-checked:bg-blue-50">
+                                <input type="radio" name="collection_source" value="event" data-collection-source
+                                       @checked($collectionSource === 'event')
+                                       class="shrink-0 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm font-semibold text-gray-900">An event already in the system</span>
+                            </label>
+
+                            <label class="flex items-center gap-3 rounded-lg border border-gray-300 px-3.5 py-2.5 cursor-pointer transition hover:border-blue-300 has-checked:border-blue-600 has-checked:bg-blue-50">
+                                <input type="radio" name="collection_source" value="manual" data-collection-source
+                                       @checked($collectionSource !== 'event')
+                                       class="shrink-0 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm font-semibold text-gray-900">Enter the location, date and time by hand</span>
+                            </label>
+                        </div>
+                    </x-admin.field-row>
+
+                    {{-- ---- At an event ---- --}}
+                    <div data-collection-panel="event" @class(['hidden' => $collectionSource !== 'event'])>
+                        <x-admin.field-row
+                            label="Event"
+                            help="Upcoming events only. Its venue and start time become the collection details, and follow the event if it is changed."
+                            for="collection_event_id"
+                            error="collection_event_id">
+
+                            @if ($collectableEvents->isEmpty())
+                                <p role="status" class="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800 leading-relaxed">
+                                    There are no upcoming events to collect at. Create one first, or enter the
+                                    location, date and time by hand above.
+                                </p>
+                            @else
+                                <select id="collection_event_id" name="collection_event_id" class="{{ $input }} bg-white">
+                                    <option value="">Choose an event</option>
+                                    @foreach ($collectableEvents as $event)
+                                        <option value="{{ $event->id }}"
+                                                @selected((int) old('collection_event_id', $product->collection_event_id) === $event->id)>
+                                            {{ $event->title }} &middot; {{ $event->starts_at?->format('d M Y') }}@if (filled($event->location)) &middot; {{ $event->location }}@endif
+                                        </option>
+                                    @endforeach
+                                </select>
+                            @endif
+                        </x-admin.field-row>
+                    </div>
+
+                    {{-- ---- By hand ---- --}}
+                    <div data-collection-panel="manual" @class(['hidden' => $collectionSource === 'event'])>
+                        <x-admin.field-row
+                            label="Location"
+                            help="Where the buyer turns up. Specific enough to find: a hall name, not just a city."
+                            for="collection_location"
+                            error="collection_location">
+                            <input type="text" id="collection_location" name="collection_location" maxlength="190"
+                                   value="{{ old('collection_location', $product->collection_location) }}"
+                                   placeholder="e.g. Dewan Serbaguna MBPJ, Counter 3, Petaling Jaya"
+                                   class="{{ $input }}">
+                        </x-admin.field-row>
+
+                        <x-admin.field-row
+                            label="Date &amp; Time"
+                            help="When the counter is open for collection. Both halves are needed: a date on its own is not something anybody can turn up for."
+                            for="collection_at"
+                            error="collection_at">
+                            <input type="datetime-local" id="collection_at" name="collection_at"
+                                   value="{{ $collectionAt }}"
+                                   class="{{ $input }} max-w-60">
+                        </x-admin.field-row>
+                    </div>
+                </div>
+            </x-admin.panel>
+
             {{-- ==================== Shipping ==================== --}}
             <x-admin.panel title="Shipping" icon="archive">
+                {{-- Weight and size still matter for a collected product: they describe
+                     the item. Only the postage charge disappears. --}}
+                <div data-online-note @class(['hidden' => $fulfilment !== ShopProduct::FULFILMENT_OFFLINE])>
+                    <div class="px-5 pt-4">
+                        <p role="status" class="rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs text-blue-900 leading-relaxed">
+                            This product is collected at a counter, so no postage is charged and the
+                            shipping settings are not consulted for it. The measurements below are still
+                            worth filling in as a description of the item.
+                        </p>
+                    </div>
+                </div>
+
                 <x-admin.field-row
                     label="Weight (kg)"
                     help="Used to work out postage. Stored to the gram, so 0.045 is fine."
@@ -663,6 +806,55 @@
                 reader.readAsDataURL(file);
             });
         });
+    })();
+
+    /* ---------------------------------------------------------------------
+     | Show only the fulfilment fields that apply
+     |
+     | Hidden rather than removed, and never disabled: switching to online and back
+     | again keeps whatever was typed into the collection fields, so a mistaken click
+     | does not throw the work away. The server decides what is actually stored, so
+     | fields left behind in the markup cannot leak into an online product.
+     * ------------------------------------------------------------------ */
+    (function () {
+        const choices = document.querySelectorAll('[data-fulfilment-choice]');
+        const offlineOnly = document.querySelectorAll('[data-offline-only]');
+        const offlineNotes = document.querySelectorAll('[data-online-note]');
+        const sources = document.querySelectorAll('[data-collection-source]');
+        const panels = document.querySelectorAll('[data-collection-panel]');
+
+        if (!choices.length) {
+            return;
+        }
+
+        function chosenFulfilment() {
+            const picked = document.querySelector('[data-fulfilment-choice]:checked');
+
+            return picked ? picked.value : 'online';
+        }
+
+        function chosenSource() {
+            const picked = document.querySelector('[data-collection-source]:checked');
+
+            return picked ? picked.value : 'manual';
+        }
+
+        function render() {
+            const offline = chosenFulfilment() === 'offline';
+            const source = chosenSource();
+
+            offlineOnly.forEach((node) => node.classList.toggle('hidden', !offline));
+            offlineNotes.forEach((node) => node.classList.toggle('hidden', !offline));
+
+            panels.forEach((panel) => {
+                panel.classList.toggle('hidden', panel.dataset.collectionPanel !== source);
+            });
+        }
+
+        choices.forEach((node) => node.addEventListener('change', render));
+        sources.forEach((node) => node.addEventListener('change', render));
+
+        render();
     })();
 </script>
 @endpush

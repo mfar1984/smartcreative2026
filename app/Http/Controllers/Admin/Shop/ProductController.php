@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin\Shop;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ShopProductRequest;
+use App\Models\Event;
 use App\Models\ShopCategory;
 use App\Models\ShopProduct;
 use App\Services\AdminLogger;
@@ -11,6 +12,7 @@ use App\Services\ShopVariantWriter;
 use App\Support\ShopSettings;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
@@ -83,6 +85,7 @@ class ProductController extends Controller
     {
         return view('admin.shop.product-form', $this->formData(new ShopProduct([
             'status' => ShopProduct::STATUS_DRAFT,
+            'fulfilment' => ShopProduct::FULFILMENT_ONLINE,
             'track_inventory' => true,
             'stock_quantity' => 0,
             'low_stock_threshold' => ShopSettings::lowStockThreshold(),
@@ -196,7 +199,7 @@ class ProductController extends Controller
     private function formData(ShopProduct $product, string $mode): array
     {
         if ($product->exists) {
-            $product->load(['images', 'variants', 'categories']);
+            $product->load(['images', 'variants', 'categories', 'collectionEvent']);
         }
 
         return [
@@ -207,7 +210,40 @@ class ProductController extends Controller
             'selectedCategories' => $product->exists
                 ? $product->categories->pluck('id')->all()
                 : [],
+
+            'fulfilments' => ShopProduct::FULFILMENTS,
+
+            /*
+             | Events that could still be collected at.
+             |
+             | Upcoming only, because an event that has finished is not a handover
+             | anybody can be sent to. The one already chosen is added back even when
+             | it has passed, so opening an old product does not silently swap its
+             | collection point for whatever happens to be first in the list.
+             */
+            'collectableEvents' => $this->collectableEvents($product),
         ];
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, Event>
+     */
+    private function collectableEvents(ShopProduct $product): Collection
+    {
+        $events = Event::query()
+            ->upcoming()
+            ->orderBy('starts_at')
+            ->get(['id', 'title', 'location', 'address', 'starts_at', 'time']);
+
+        if ($product->collection_event_id !== null && ! $events->contains('id', $product->collection_event_id)) {
+            $chosen = Event::query()->find($product->collection_event_id, ['id', 'title', 'location', 'address', 'starts_at', 'time']);
+
+            if ($chosen !== null) {
+                $events->prepend($chosen);
+            }
+        }
+
+        return $events;
     }
 
     private function resolveSlug(?string $slug, string $name, ?int $ignoreId = null): string

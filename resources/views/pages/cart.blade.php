@@ -143,14 +143,38 @@
                                     </div>
 
                                     {{-- Postage needs a destination, which is asked for at checkout.
-                                         Quoting a figure here would be a guess shown as a price. --}}
+                                         Quoting a figure here would be a guess shown as a price.
+                                         A collected basket has no postage at all, so it is answered
+                                         outright rather than deferred. --}}
                                     <div class="flex justify-between gap-4 text-sm">
-                                        <dt class="text-gray-600">Delivery</dt>
-                                        <dd class="text-gray-500">Worked out at checkout</dd>
+                                        <dt class="text-gray-600">{{ $isOffline ? 'Collection' : 'Delivery' }}</dt>
+                                        <dd class="{{ $isOffline ? 'font-semibold text-gray-900' : 'text-gray-500' }}">
+                                            {{ $isOffline ? 'No charge' : 'Worked out at checkout' }}
+                                        </dd>
                                     </div>
                                 </dl>
 
-                                @if ($freeShippingThreshold !== null)
+                                @if ($isOffline && $collectionPoint)
+                                    <div class="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-3">
+                                        <p class="text-xs font-bold text-blue-900">Collected in person</p>
+
+                                        @if (filled($collectionPoint['location']))
+                                            <p class="text-xs text-blue-900 mt-1">{{ $collectionPoint['location'] }}</p>
+                                        @endif
+
+                                        @if ($collectionPoint['at'])
+                                            <p class="text-xs font-semibold text-blue-900 mt-0.5">
+                                                {{ $collectionPoint['at']->format('d M Y, g:i a') }}
+                                            </p>
+                                        @endif
+
+                                        <p class="text-[11px] text-blue-800 mt-2 leading-relaxed">
+                                            Nothing is posted. Bring your identity card to the counter.
+                                        </p>
+                                    </div>
+                                @endif
+
+                                @if (! $isOffline && $freeShippingThreshold !== null)
                                     <p class="text-xs mt-3 {{ $itemsTotal >= $freeShippingThreshold ? 'text-green-700 font-semibold' : 'text-gray-500' }}">
                                         @if ($itemsTotal >= $freeShippingThreshold)
                                             Delivery is free on this order.
@@ -173,7 +197,7 @@
                                     Keep shopping
                                 </a>
 
-                                @if (filled($shippingNote))
+                                @if (! $isOffline && filled($shippingNote))
                                     <p class="text-xs text-gray-500 mt-5 pt-4 border-t border-gray-200">{{ $shippingNote }}</p>
                                 @endif
                             </div>

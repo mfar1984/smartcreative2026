@@ -10,6 +10,7 @@ use App\Support\Cart;
 use App\Support\ShippingSettings;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Turns a basket into an order.
@@ -24,6 +25,10 @@ use Illuminate\Support\Facades\DB;
  */
 class ShopOrderWriter
 {
+    public function __construct(private ShopOrderNotifier $notifier)
+    {
+    }
+
     /**
      * @param  array<string, mixed>  $buyer  validated customer and address fields
      */
@@ -36,17 +41,31 @@ class ShopOrderWriter
         }
 
         $itemsTotal = round((float) $lines->sum('line_total'), 2);
-        $shipping = ShippingSettings::quote($buyer['state'] ?? null, $itemsTotal);
 
-        return DB::transaction(function () use ($lines, $buyer, $paymentMethod, $ip, $itemsTotal, $shipping) {
+        /*
+         | A collected order is never posted, so postage is not quoted for it at all
+         | rather than quoted and then zeroed. Nothing about the shipping settings is
+         | consulted: no flat rate, no free-delivery threshold, no banding by state.
+         */
+        $isOffline = Cart::isOffline();
+        $shipping = $isOffline ? 0.0 : ShippingSettings::quote($buyer['state'] ?? null, $itemsTotal);
+        $collection = $isOffline ? Cart::collectionPoint() : null;
+
+        return DB::transaction(function () use ($lines, $buyer, $paymentMethod, $ip, $itemsTotal, $shipping, $isOffline, $collection) {
             $order = new ShopOrder([
                 'reference' => ShopOrder::nextReference(),
                 'status' => ShopOrder::STATUS_PENDING_PAYMENT,
+                'fulfilment' => $isOffline ? ShopOrder::FULFILMENT_OFFLINE : ShopOrder::FULFILMENT_ONLINE,
                 'payment_method' => $paymentMethod,
 
                 'customer_name' => $buyer['customer_name'],
                 'customer_email' => $buyer['customer_email'],
                 'customer_phone' => $buyer['customer_phone'],
+
+                // Only held for a collected order, where somebody checks it. Storing an
+                // identity number on a posted parcel would be collecting it for nothing.
+                'identity_card' => $isOffline ? trim((string) ($buyer['identity_card'] ?? '')) : null,
+
                 'address_line_1' => $buyer['address_line_1'],
                 'address_line_2' => $buyer['address_line_2'] ?? null,
                 'postcode' => $buyer['postcode'],
@@ -57,7 +76,19 @@ class ShopOrderWriter
                 'items_total' => $itemsTotal,
                 'shipping_total' => $shipping,
                 'grand_total' => round($itemsTotal + $shipping, 2),
-                'shipping_label' => $this->shippingLabel($buyer['state'] ?? null, $shipping),
+                'shipping_label' => $isOffline
+                    ? 'Collected at the counter, nothing posted'
+                    : $this->shippingLabel($buyer['state'] ?? null, $shipping),
+
+                /*
+                 | Snapshotted, not read back through the product. The buyer was told a
+                 | place and a time; if the event later moves, or is renamed, or is
+                 | deleted, this order still says what was actually promised.
+                 */
+                'collection_event_id' => $collection['event_id'] ?? null,
+                'collection_label' => $collection['label'] ?? null,
+                'collection_location' => $collection['location'] ?? null,
+                'collection_at' => $collection['at'] ?? null,
 
                 'ip_address' => $ip,
             ]);
@@ -86,8 +117,11 @@ class ShopOrderWriter
             }
 
             $this->record($order, ShopOrder::STATUS_PENDING_PAYMENT, sprintf(
-                'Order placed, paying by %s.',
+                'Order placed, paying by %s. %s',
                 ShopOrder::METHODS[$paymentMethod] ?? $paymentMethod,
+                $isOffline
+                    ? 'To be collected at ' . ($order->collectionSummary() ?: 'the counter') . '.'
+                    : 'To be posted.',
             ));
 
             return $order;
@@ -106,8 +140,11 @@ class ShopOrderWriter
             return false;
         }
 
-        DB::transaction(function () use ($order, $status, $note) {
+        $becamePaid = false;
+
+        DB::transaction(function () use ($order, $status, $note, &$becamePaid) {
             $wasPaid = $order->isPaid();
+            $becamePaid = $status === ShopOrder::STATUS_PAID && ! $wasPaid;
 
             $order->status = $status;
 
@@ -137,6 +174,22 @@ class ShopOrderWriter
             $this->record($order, $status, $note);
         });
 
+        /*
+         | After the transaction, never inside it.
+         |
+         | A mail server can be slow or unreachable, and holding a database transaction
+         | open across a network call to somebody else's machine is how row locks turn
+         | into a stalled checkout. It also means a send that fails cannot roll back a
+         | payment that really happened.
+         |
+         | This is the only place an order becomes paid, whichever route got it there,
+         | which is why the collection email is triggered here rather than in each
+         | caller.
+         */
+        if ($becamePaid) {
+            $this->notifier->collectionReady($order);
+        }
+
         return true;
     }
 
@@ -146,6 +199,34 @@ class ShopOrderWriter
     public function note(ShopOrder $order, string $note): void
     {
         $this->record($order, null, $note);
+    }
+
+    /**
+     * Attach the buyer's proof of a bank transfer.
+     *
+     * Evidence for a decision, never the decision. Uploading a receipt does not mark
+     * anything paid: somebody still has to look at the account and say the money
+     * arrived, which is the whole reason a manual transfer is manual.
+     *
+     * A replacement deletes the file it replaces. Buyers do upload the wrong photo,
+     * and keeping every attempt would leave the disk holding pictures nobody will
+     * ever look at again.
+     */
+    public function attachPaymentReceipt(ShopOrder $order, string $path, ?string $note = null): void
+    {
+        $previous = $order->payment_receipt_path;
+
+        $order->payment_receipt_path = $path;
+        $order->payment_receipt_uploaded_at = now();
+        $order->save();
+
+        if (filled($previous) && $previous !== $path) {
+            Storage::disk('public')->delete($previous);
+        }
+
+        $this->record($order, null, $note ?? ($previous === null
+            ? 'Buyer uploaded a payment receipt. Still needs checking against the account.'
+            : 'Buyer replaced the payment receipt. Still needs checking against the account.'));
     }
 
     /* ---------------------------------------------------------------------

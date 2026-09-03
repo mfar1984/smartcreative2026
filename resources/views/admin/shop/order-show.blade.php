@@ -241,6 +241,57 @@
             {{-- ==================== Sidebar ==================== --}}
             <div class="space-y-5">
 
+                {{--
+                    Proof of a bank transfer, above Confirm Payment on purpose: it is what
+                    somebody reads before deciding, so it comes before the button that
+                    asserts the money arrived.
+                --}}
+                @if ($order->payment_method === ShopOrder::METHOD_BANK_TRANSFER)
+                    <x-admin.panel title="Payment Receipt" icon="clipboard">
+                        <div class="px-5 py-4">
+                            @if ($order->hasPaymentReceipt())
+                                <p class="text-xs text-gray-500">
+                                    Sent by the buyer {{ $order->payment_receipt_uploaded_at?->format('d M Y, g:i a') }}
+                                </p>
+
+                                @if ($order->paymentReceiptIsImage())
+                                    {{-- Shown inline so a transfer can be checked without
+                                         downloading a file first. --}}
+                                    <a href="{{ $order->paymentReceiptUrl() }}" target="_blank" rel="noopener"
+                                       class="block mt-3 rounded-lg border border-gray-200 overflow-hidden hover:border-blue-400 transition">
+                                        <img src="{{ $order->paymentReceiptUrl() }}"
+                                             alt="Payment receipt for order {{ $order->reference }}"
+                                             class="w-full h-auto">
+                                    </a>
+                                @endif
+
+                                <a href="{{ $order->paymentReceiptUrl() }}" target="_blank" rel="noopener"
+                                   class="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+                                    <x-admin.icon name="eye" class="w-4 h-4" />
+                                    Open the full receipt
+                                </a>
+
+                                @unless ($order->isPaid())
+                                    <p role="status" class="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800 leading-relaxed">
+                                        A receipt is not a payment. Check the amount and the date against the
+                                        bank account before confirming this order.
+                                    </p>
+                                @endunless
+                            @else
+                                <p class="text-sm text-gray-500">
+                                    The buyer has not sent a receipt yet.
+                                </p>
+
+                                <p class="text-xs text-gray-500 mt-2 leading-relaxed">
+                                    They were emailed the account details and a link to upload one when the
+                                    order was placed. Nothing stops you confirming this order without it, if
+                                    you can see the money in the account.
+                                </p>
+                            @endif
+                        </div>
+                    </x-admin.panel>
+                @endif
+
                 @if ($canConfirmPayment && $order->canMoveTo(ShopOrder::STATUS_PAID))
                     <x-admin.panel title="Confirm Payment" icon="cash">
                         <form action="{{ route('admin.shop.orders.payment', $order) }}" method="POST"
@@ -361,10 +412,58 @@
                         <p class="text-gray-600">
                             <a href="tel:{{ $order->customer_phone }}" class="text-blue-600 hover:underline">{{ $order->customer_phone }}</a>
                         </p>
+
+                        @if ($order->isOffline())
+                            {{-- The number the counter checks against the document they are
+                                 shown. Given its own line and label rather than sitting in the
+                                 contact details, because it is used for a decision. --}}
+                            <p class="pt-2 mt-1 border-t border-gray-100">
+                                <span class="block text-xs text-gray-500">Identity card to check</span>
+                                <span class="block font-semibold text-gray-900 tabular-nums">
+                                    {{ $order->identity_card ?: 'Not recorded' }}
+                                </span>
+                            </p>
+                        @endif
                     </div>
                 </x-admin.panel>
 
-                <x-admin.panel title="Delivering To" icon="archive">
+                @if ($order->isOffline())
+                    <x-admin.panel title="Collected At" icon="identification">
+                        <div class="px-5 py-4 text-sm space-y-1">
+                            <p class="font-semibold text-gray-900">
+                                {{ $order->collection_label ?: 'Collection point' }}
+                            </p>
+
+                            @if (filled($order->collection_location))
+                                <p class="text-gray-700">{{ $order->collection_location }}</p>
+                            @endif
+
+                            @if ($order->collection_at)
+                                <p class="text-gray-700">
+                                    {{ $order->collection_at->format('l, d M Y') }} at {{ $order->collection_at->format('g:i a') }}
+                                </p>
+                            @endif
+
+                            @if ($order->collection_event_id && $order->collectionEvent)
+                                <p class="pt-2">
+                                    <a href="{{ route('admin.event.registration.show', $order->collection_event_id) }}"
+                                       class="text-xs font-semibold text-blue-600 hover:underline">
+                                        Open the event
+                                    </a>
+                                </p>
+                            @endif
+
+                            {{-- Said plainly, because this is where somebody would otherwise
+                                 look for a tracking number and wonder why there is none. --}}
+                            <p class="text-xs text-gray-500 pt-2 mt-1 border-t border-gray-100 leading-relaxed">
+                                Nothing is posted for this order, so there is no courier, no tracking and
+                                no postage charge.
+                            </p>
+                        </div>
+                    </x-admin.panel>
+                @endif
+
+                <x-admin.panel :title="$order->isOffline() ? 'Buyer Address' : 'Delivering To'" icon="archive">
                     <div class="px-5 py-4 text-sm text-gray-700 space-y-0.5">
                         <p>{{ $order->address_line_1 }}</p>
                         @if (filled($order->address_line_2))
@@ -373,7 +472,11 @@
                         <p>{{ $order->postcode }} {{ $order->city }}</p>
                         <p>{{ $order->state }}, {{ $order->country }}</p>
 
-                        @if ($order->weightGrams() > 0)
+                        @if ($order->isOffline())
+                            <p class="text-xs text-gray-500 pt-2">
+                                Contact details only. Nothing is sent here.
+                            </p>
+                        @elseif ($order->weightGrams() > 0)
                             <p class="text-xs text-gray-500 pt-2 tabular-nums">
                                 Parcel weight {{ number_format($order->weightGrams() / 1000, 3) }} kg
                             </p>

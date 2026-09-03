@@ -21,41 +21,103 @@ class OrderController extends Controller
         $search = trim((string) $request->query('q'));
         $status = trim((string) $request->query('status'));
         $method = trim((string) $request->query('method'));
+        $tab = $this->resolveTab($request->query('tab'));
+        $isOffline = $tab === ShopOrder::FULFILMENT_OFFLINE;
 
-        $orders = ShopOrder::query()
-            ->withCount('items')
-            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
-                $inner->where('reference', 'like', "%{$search}%")
-                    ->orWhere('customer_name', 'like', "%{$search}%")
-                    ->orWhere('customer_email', 'like', "%{$search}%")
-                    ->orWhere('customer_phone', 'like', "%{$search}%")
-                    ->orWhere('tracking_number', 'like', "%{$search}%");
-            }))
-            ->when($status !== '', fn (Builder $query) => $query->where('status', $status))
-            ->when($method !== '', fn (Builder $query) => $query->where('payment_method', $method))
+        /*
+         | The two kinds of order are kept on separate tabs rather than mixed with a
+         | filter, because almost nothing about handling them is the same. A posted
+         | order has a destination, a courier and a tracking number; a collected one has
+         | a counter, a date and somebody's identity card. One table trying to show
+         | both would have half its columns empty on every row.
+         */
+        $orders = $this->filtered($search, $status, $method)
+            ->fulfilment($tab)
             ->latest('id')
             ->paginate(self::PER_PAGE)
             ->withQueryString();
 
         return view('admin.shop.orders', [
             'orders' => $orders,
-            'statuses' => ShopOrder::STATUSES,
+
+            'activeTab' => $tab,
+            'isOffline' => $isOffline,
+            'tabs' => [
+                ShopOrder::FULFILMENT_ONLINE => [
+                    'label' => 'Online',
+                    'count' => ShopOrder::query()->fulfilment(ShopOrder::FULFILMENT_ONLINE)->count(),
+                ],
+                ShopOrder::FULFILMENT_OFFLINE => [
+                    'label' => 'Offline',
+                    'count' => ShopOrder::query()->fulfilment(ShopOrder::FULFILMENT_OFFLINE)->count(),
+                ],
+            ],
+
+            // Packing and shipped cannot happen to a collected order, so offering them
+            // as filters would offer a search that can never match.
+            'statuses' => $isOffline ? $this->offlineStatuses() : ShopOrder::STATUSES,
             'methods' => ShopOrder::METHODS,
+
             'search' => $search,
             'status' => $status,
             'method' => $method,
             'isFiltered' => $search !== '' || $status !== '' || $method !== '',
 
             /*
-             | The two figures somebody opening this screen is actually looking for:
-             | what is waiting on money, and what owes a parcel.
+             | The figures somebody opening this screen is actually looking for. Counted
+             | within the tab, because "3 awaiting payment" is useless if two of them are
+             | on the other list.
              */
-            'awaitingPayment' => ShopOrder::query()->awaitingPayment()->count(),
-            'openCount' => ShopOrder::query()->open()->count(),
+            'awaitingPayment' => ShopOrder::query()->fulfilment($tab)->awaitingPayment()->count(),
+            'openCount' => ShopOrder::query()->fulfilment($tab)->open()->count(),
+
+            // Bank transfers with a receipt sitting there waiting to be checked. Only
+            // worth showing when there are some.
+            'awaitingReceiptCheck' => ShopOrder::query()->fulfilment($tab)->awaitingReceiptCheck()->count(),
 
             'canUpdate' => $request->user()->hasPermission('shop.orders.update'),
             'canConfirmPayment' => $request->user()->hasPermission('shop.orders.payment'),
         ]);
+    }
+
+    /**
+     * Online unless offline was asked for, so a mistyped tab lands somewhere real
+     * rather than on an empty page.
+     */
+    private function resolveTab(mixed $tab): string
+    {
+        return $tab === ShopOrder::FULFILMENT_OFFLINE
+            ? ShopOrder::FULFILMENT_OFFLINE
+            : ShopOrder::FULFILMENT_ONLINE;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function offlineStatuses(): array
+    {
+        return collect(ShopOrder::STATUSES)
+            ->except([ShopOrder::STATUS_PACKING, ShopOrder::STATUS_SHIPPED])
+            ->all();
+    }
+
+    /**
+     * The search and filter clauses, shared by both tabs.
+     */
+    private function filtered(string $search, string $status, string $method): Builder
+    {
+        return ShopOrder::query()
+            ->withCount('items')
+            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
+                $inner->where('reference', 'like', "%{$search}%")
+                    ->orWhere('customer_name', 'like', "%{$search}%")
+                    ->orWhere('customer_email', 'like', "%{$search}%")
+                    ->orWhere('customer_phone', 'like', "%{$search}%")
+                    ->orWhere('identity_card', 'like', "%{$search}%")
+                    ->orWhere('tracking_number', 'like', "%{$search}%");
+            }))
+            ->when($status !== '', fn (Builder $query) => $query->where('status', $status))
+            ->when($method !== '', fn (Builder $query) => $query->where('payment_method', $method));
     }
 
     public function show(Request $request, ShopOrder $order)
@@ -86,6 +148,10 @@ class OrderController extends Controller
             'courier_name' => ['nullable', 'string', 'max:190'],
             'tracking_number' => ['nullable', 'string', 'max:190'],
             'tracking_url' => ['nullable', 'url', 'max:500'],
+
+            // Where to send the operator afterwards. Only ever "list" or absent, so it
+            // cannot be turned into an open redirect.
+            'from' => ['nullable', 'in:list'],
         ]);
 
         /*
@@ -109,12 +175,22 @@ class OrderController extends Controller
             ]);
         }
 
-        // Tracking details are saved before the move, so the shipped notification and
-        // the trail entry both see them.
-        if (filled($validated['courier_name']) || filled($validated['tracking_number'])) {
+        /*
+         | Tracking details are saved before the move, so the shipped notification and
+         | the trail entry both see them.
+         |
+         | Read with ?? rather than by index: a nullable field that was not submitted at
+         | all is absent from the validated set, not null in it. The status form on the
+         | order page always posts these boxes, so the difference never showed until the
+         | hand-over button on the orders list started posting a status on its own.
+         */
+        $courier = $validated['courier_name'] ?? null;
+        $tracking = $validated['tracking_number'] ?? null;
+
+        if (filled($courier) || filled($tracking)) {
             $order->fill([
-                'courier_name' => $validated['courier_name'] ?? $order->courier_name,
-                'tracking_number' => $validated['tracking_number'] ?? $order->tracking_number,
+                'courier_name' => $courier ?? $order->courier_name,
+                'tracking_number' => $tracking ?? $order->tracking_number,
                 'tracking_url' => $validated['tracking_url'] ?? $order->tracking_url,
             ])->save();
         }
@@ -130,9 +206,24 @@ class OrderController extends Controller
             'tracking_number' => $order->tracking_number,
         ]);
 
+        $message = $order->isOffline() && $order->isCollected()
+            ? sprintf('Order %s handed over at the counter.', $order->reference)
+            : sprintf('Order %s is now %s.', $order->reference, $order->statusLabel());
+
+        /*
+         | Back to the list when the press came from the list. Handing orders over at a
+         | counter is a run of quick actions on one screen, and bouncing to a detail
+         | page after each one would mean navigating back before the next person.
+         */
+        if ($request->input('from') === 'list') {
+            return redirect()
+                ->route('admin.shop.orders', ['tab' => $order->fulfilment])
+                ->with('status', $message);
+        }
+
         return redirect()
             ->route('admin.shop.orders.show', $order)
-            ->with('status', sprintf('Order %s is now %s.', $order->reference, $order->statusLabel()));
+            ->with('status', $message);
     }
 
     /**

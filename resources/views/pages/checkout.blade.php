@@ -17,7 +17,9 @@
 @section('content')
     @include('components.page-header', [
         'title' => $pageTitle,
-        'subtitle' => 'Where the parcel goes, and how you would like to pay.',
+        'subtitle' => $isOffline
+            ? 'Who is collecting, and how you would like to pay.'
+            : 'Where the parcel goes, and how you would like to pay.',
     ])
 
     <section class="py-14 bg-white">
@@ -63,13 +65,71 @@
                                     <label for="customer_phone" class="{{ $label }}">Phone <span class="text-red-600" aria-hidden="true">*</span></label>
                                     <input type="tel" id="customer_phone" name="customer_phone" required maxlength="40"
                                            value="{{ old('customer_phone') }}" autocomplete="tel" class="{{ $field }}">
-                                    <p class="text-xs text-gray-500 mt-1">The courier calls this if they cannot find you.</p>
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        {{ $isOffline ? 'We call this if there is a problem with your collection.' : 'The courier calls this if they cannot find you.' }}
+                                    </p>
                                 </div>
+
+                                @if ($isOffline)
+                                    {{-- Only asked for on a collected order, because it is only
+                                         checked at a counter. --}}
+                                    <div class="sm:col-span-2">
+                                        <label for="identity_card" class="{{ $label }}">
+                                            Identity Card <span class="text-red-600" aria-hidden="true">*</span>
+                                        </label>
+                                        <input type="text" id="identity_card" name="identity_card" required minlength="6" maxlength="30"
+                                               value="{{ old('identity_card') }}" class="{{ $field }}"
+                                               placeholder="e.g. 900101-14-5678">
+                                        <p class="text-xs text-gray-500 mt-1">
+                                            Bring this document with you. Our counter checks it against this number
+                                            before handing your order over. A passport number is fine if you do not
+                                            hold a Malaysian identity card.
+                                        </p>
+                                    </div>
+                                @endif
                             </div>
                         </div>
 
+                        @if ($isOffline)
+                            {{-- Where they are turning up. Stated before the address so it is
+                                 not mistaken for somewhere a parcel is going. --}}
+                            <div>
+                                <h2 class="text-xl font-bold text-gray-900 mb-4">Where you collect this</h2>
+
+                                <div class="rounded-lg border border-blue-200 bg-blue-50 p-5">
+                                    @if ($collectionPoint)
+                                        <p class="text-sm font-bold text-blue-900">{{ $collectionPoint['label'] }}</p>
+
+                                        @if (filled($collectionPoint['location']))
+                                            <p class="text-sm text-blue-900 mt-1">{{ $collectionPoint['location'] }}</p>
+                                        @endif
+
+                                        @if ($collectionPoint['at'])
+                                            <p class="text-sm font-semibold text-blue-900 mt-1">
+                                                {{ $collectionPoint['at']->format('l, d F Y') }} at {{ $collectionPoint['at']->format('g:i a') }}
+                                            </p>
+                                        @endif
+                                    @endif
+
+                                    <p class="text-xs text-blue-800 mt-3 pt-3 border-t border-blue-200 leading-relaxed">
+                                        Nothing is posted. There is no delivery charge. We email you the collection
+                                        details again once your payment is confirmed, and you bring your identity
+                                        card to the counter.
+                                    </p>
+                                </div>
+                            </div>
+                        @endif
+
                         <div>
-                            <h2 class="text-xl font-bold text-gray-900 mb-4">Delivery address</h2>
+                            <h2 class="text-xl font-bold text-gray-900 mb-4">
+                                {{ $isOffline ? 'Your address' : 'Delivery address' }}
+                            </h2>
+
+                            @if ($isOffline)
+                                <p class="text-sm text-gray-600 -mt-2 mb-4">
+                                    Kept on the order as your contact details. Nothing is sent here.
+                                </p>
+                            @endif
 
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div class="sm:col-span-2">
@@ -104,7 +164,9 @@
                                             <option value="{{ $value }}" @selected(old('state') === $value)>{{ $text }}</option>
                                         @endforeach
                                     </select>
-                                    <p class="text-xs text-gray-500 mt-1">Delivery to Sabah and Sarawak costs more, so this sets the postage.</p>
+                                    @unless ($isOffline)
+                                        <p class="text-xs text-gray-500 mt-1">Delivery to Sabah and Sarawak costs more, so this sets the postage.</p>
+                                    @endunless
                                 </div>
                             </div>
                         </div>
@@ -181,10 +243,14 @@
                                 </div>
 
                                 <div class="flex justify-between gap-4 text-sm">
-                                    <dt class="text-gray-600">Delivery</dt>
-                                    <dd class="font-semibold text-gray-900 tabular-nums" data-checkout-shipping>
-                                        Choose a state
-                                    </dd>
+                                    <dt class="text-gray-600">{{ $isOffline ? 'Collection' : 'Delivery' }}</dt>
+                                    @if ($isOffline)
+                                        <dd class="font-semibold text-gray-900">No charge</dd>
+                                    @else
+                                        <dd class="font-semibold text-gray-900 tabular-nums" data-checkout-shipping>
+                                            Choose a state
+                                        </dd>
+                                    @endif
                                 </div>
                             </dl>
 
@@ -225,11 +291,15 @@
     </section>
 @endsection
 
+@unless ($isOffline)
 @push('scripts')
 <script>
     /*
      | Previews the postage as soon as a state is chosen, so the total is not a
      | surprise on the next page.
+     |
+     | Not emitted at all for a collected order. There is no postage to preview and no
+     | element to write it into, so the script would only sit there doing nothing.
      |
      | Only a preview. The order is priced again on the server when it is placed, so
      | editing these numbers in the page changes nothing that is charged.
@@ -272,3 +342,4 @@
     })();
 </script>
 @endpush
+@endunless

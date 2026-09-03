@@ -26,6 +26,16 @@ final class Cart
     /** Most anybody can buy of one line in one order. */
     public const MAX_PER_LINE = 99;
 
+    /**
+     * The one message for "there is nothing here to buy".
+     *
+     * Gone, unpublished, sold out, the wrong option, or an offline product whose
+     * collection point has disappeared. Five causes, one thing from the buyer's side:
+     * it is not available. The distinctions matter to an administrator and are
+     * visible in the admin, not here.
+     */
+    public const UNAVAILABLE = 'That is not available. It may have sold out or been taken off the shop while you were looking.';
+
     /* ---------------------------------------------------------------------
      | Writing
      * ------------------------------------------------------------------ */
@@ -36,12 +46,23 @@ final class Cart
      * Returns false when there is nothing to add: no such product, not on sale, or
      * an option that does not belong to it.
      */
-    public static function add(int $productId, ?int $variantId, int $quantity = 1): bool
+    public static function add(int $productId, ?int $variantId, int $quantity = 1): ?string
     {
-        $product = ShopProduct::query()->active()->with('variants')->find($productId);
+        $product = ShopProduct::query()
+            ->active()
+            ->with(['variants', 'collectionEvent'])
+            ->find($productId);
 
         if ($product === null) {
-            return false;
+            return self::UNAVAILABLE;
+        }
+
+        /*
+         | An offline product with no collection point cannot be handed over, so it
+         | cannot be sold. This happens when the event it pointed at is deleted.
+         */
+        if (! $product->hasCollectionPoint()) {
+            return self::UNAVAILABLE;
         }
 
         /*
@@ -51,10 +72,14 @@ final class Cart
          */
         if ($product->hasVariants()) {
             if ($variantId === null || $product->variants->firstWhere('id', $variantId) === null) {
-                return false;
+                return self::UNAVAILABLE;
             }
         } else {
             $variantId = null;
+        }
+
+        if ($clash = self::fulfilmentClash($product)) {
+            return $clash;
         }
 
         $lines = self::raw();
@@ -71,7 +96,48 @@ final class Cart
 
         self::store($lines);
 
-        return true;
+        return null;
+    }
+
+    /**
+     * Why this product cannot join the basket, or null when it can.
+     *
+     * One order is fulfilled once. A posted parcel and a counter handover are two
+     * different acts with different addresses, charges and paperwork, and two counter
+     * handovers at different events happen in two different places on two different
+     * days. None of those can be one order, so the basket refuses the combination at
+     * the point somebody creates it rather than at the last step.
+     */
+    private static function fulfilmentClash(ShopProduct $product): ?string
+    {
+        $existing = self::lines();
+
+        if ($existing->isEmpty()) {
+            return null;
+        }
+
+        /** @var ShopProduct $first */
+        $first = $existing->first()['product'];
+
+        if ($first->isOffline() !== $product->isOffline()) {
+            return $product->isOffline()
+                ? 'That one is collected at a counter, and your basket already has something being posted out. Please order them separately.'
+                : 'That one is posted out, and your basket already has something being collected at a counter. Please order them separately.';
+        }
+
+        if (! $product->isOffline()) {
+            return null;
+        }
+
+        if ($first->collectionKey() !== $product->collectionKey()) {
+            return sprintf(
+                'That one is collected at %s, and your basket is being collected at %s. One order is handed over in one place, so please order them separately.',
+                $product->collectionSummary() ?: 'another collection point',
+                $first->collectionSummary() ?: 'another collection point',
+            );
+        }
+
+        return null;
     }
 
     /**
@@ -137,7 +203,7 @@ final class Cart
 
         $products = ShopProduct::query()
             ->active()
-            ->with(['variants', 'images'])
+            ->with(['variants', 'images', 'collectionEvent'])
             ->whereKey(collect($raw)->pluck('product_id')->unique()->all())
             ->get()
             ->keyBy('id');
@@ -234,6 +300,45 @@ final class Cart
     public static function itemsTotal(): float
     {
         return round((float) self::lines()->sum('line_total'), 2);
+    }
+
+    /* ---------------------------------------------------------------------
+     | Posted out, or collected in person
+     |
+     | Read off the first line rather than combined across all of them, because add()
+     | already refuses a basket that mixes the two. Asking every line and reducing
+     | would be a second implementation of the same rule, free to disagree with the
+     | first.
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Whether this basket is collected at a counter. False for an empty basket, which
+     * is the harmless answer: an empty basket is not checked out.
+     */
+    public static function isOffline(): bool
+    {
+        $lines = self::lines();
+
+        return $lines->isNotEmpty() && $lines->first()['product']->isOffline();
+    }
+
+    public static function fulfilment(): string
+    {
+        return self::isOffline()
+            ? ShopProduct::FULFILMENT_OFFLINE
+            : ShopProduct::FULFILMENT_ONLINE;
+    }
+
+    /**
+     * Where and when this basket is collected, or null when it is posted.
+     *
+     * @return array{label: string, location: string|null, at: \Illuminate\Support\Carbon|null, event_id: int|null}|null
+     */
+    public static function collectionPoint(): ?array
+    {
+        $lines = self::lines();
+
+        return $lines->isEmpty() ? null : $lines->first()['product']->collectionPoint();
     }
 
     /**

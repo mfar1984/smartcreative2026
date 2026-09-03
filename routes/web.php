@@ -188,6 +188,22 @@ Route::post('/order/{reference}/received', [CheckoutController::class, 'confirmR
     ->middleware(['signed', 'throttle:10,1'])
     ->name('shop.order.received.confirm');
 
+/*
+| Proof of a manual bank transfer. Signed for the same reason as the pages above:
+| references run in sequence, so an unsigned link would let anybody count upwards
+| through other people's orders.
+|
+| Neither route marks anything paid. They collect the evidence somebody in the admin
+| then checks against the bank.
+*/
+Route::get('/order/{reference}/receipt', [CheckoutController::class, 'receiptForm'])
+    ->middleware('signed')
+    ->name('shop.order.receipt');
+
+Route::post('/order/{reference}/receipt', [CheckoutController::class, 'storeReceipt'])
+    ->middleware(['signed', 'throttle:10,1'])
+    ->name('shop.order.receipt.store');
+
 
 
 /*

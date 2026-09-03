@@ -37,6 +37,14 @@ class CartController extends Controller
              */
             'freeShippingThreshold' => ShippingSettings::freeShippingThreshold(),
             'shippingNote' => ShippingSettings::note(),
+
+            /*
+             | A collected basket is not posted, so none of the postage copy applies to
+             | it. Stated here rather than left for checkout, because a buyer looking at
+             | "delivery worked out at checkout" would reasonably expect a parcel.
+             */
+            'isOffline' => Cart::isOffline(),
+            'collectionPoint' => Cart::collectionPoint(),
         ]);
     }
 
@@ -48,21 +56,20 @@ class CartController extends Controller
             'quantity' => ['nullable', 'integer', 'min:1', 'max:' . Cart::MAX_PER_LINE],
         ]);
 
-        $added = Cart::add(
+        /*
+         | Cart::add returns the reason it refused, or null when it worked. A reason
+         | rather than a bare false because the refusals are no longer alike: "sold
+         | out" and "that cannot be in the same order as what you already have" need
+         | different things from the buyer.
+         */
+        $refusal = Cart::add(
             (int) $validated['product_id'],
             isset($validated['variant_id']) ? (int) $validated['variant_id'] : null,
             (int) ($validated['quantity'] ?? 1),
         );
 
-        if (! $added) {
-            /*
-             | Cart::add refuses when the product is gone, not on sale, or the option
-             | does not belong to it. Reported as one message rather than three,
-             | because from the buyer's side they are the same event.
-             */
-            return back()->withErrors([
-                'cart' => 'That is not available. It may have sold out or been taken off the shop while you were looking.',
-            ]);
+        if ($refusal !== null) {
+            return back()->withErrors(['cart' => $refusal]);
         }
 
         return redirect()
