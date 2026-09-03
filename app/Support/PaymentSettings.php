@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Setting;
+use App\Models\ShopOrder;
 
 class PaymentSettings
 {
@@ -163,6 +164,50 @@ class PaymentSettings
     public static function hasAnyMethod(): bool
     {
         return self::isReady() || self::codEnabled() || self::bankTransferEnabled();
+    }
+
+    /**
+     * The shop payment methods switched on right now, slug => label.
+     *
+     * The one answer to "what can this shop take", so the product form and the
+     * checkout cannot disagree. A product may narrow this list but never widen
+     * it: a method the shop is not configured for could not collect the money,
+     * so ticking it on a product must not put it in front of a buyer.
+     *
+     * The gateway is judged by whether its credentials are complete rather than
+     * by a switch of its own, because sending somebody to a gateway that will
+     * refuse the request loses the sale and tells them nothing.
+     *
+     * Order matters: it is the order the checkout lists them in, cheapest to
+     * settle first.
+     *
+     * @return array<string, string>
+     */
+    public static function enabledMethods(): array
+    {
+        $methods = [];
+
+        if (self::isReady()) {
+            $methods[ShopOrder::METHOD_GATEWAY] = ShopOrder::METHODS[ShopOrder::METHOD_GATEWAY];
+        }
+
+        if (self::bankTransferEnabled()) {
+            $methods[ShopOrder::METHOD_BANK_TRANSFER] = ShopOrder::METHODS[ShopOrder::METHOD_BANK_TRANSFER];
+        }
+
+        if (self::codEnabled()) {
+            $methods[ShopOrder::METHOD_COD] = ShopOrder::METHODS[ShopOrder::METHOD_COD];
+        }
+
+        return $methods;
+    }
+
+    /**
+     * Whether one shop payment method is switched on.
+     */
+    public static function methodEnabled(string $method): bool
+    {
+        return array_key_exists($method, self::enabledMethods());
     }
 
     /* ---------------------------------------------------------------------

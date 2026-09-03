@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Support\PaymentFigures;
+use App\Support\PaymentSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -55,6 +56,7 @@ class ShopProduct extends Model
         'vendor',
         'brand',
         'status',
+        'payment_methods',
         'is_featured',
         'sort_order',
         'seo_title',
@@ -76,6 +78,7 @@ class ShopProduct extends Model
             'length_mm' => 'integer',
             'width_mm' => 'integer',
             'height_mm' => 'integer',
+            'payment_methods' => 'array',
             'is_featured' => 'boolean',
             'sort_order' => 'integer',
         ];
@@ -246,6 +249,74 @@ class ShopProduct extends Model
         $left = $this->stockLeft();
 
         return $left !== null && $left > 0 && $left <= $this->low_stock_threshold;
+    }
+
+    /* ---------------------------------------------------------------------
+     | How it may be paid for
+     |
+     | Two lists decide this, and both have to agree. The switches on Settings >
+     | Integration > Payments say what the shop can take at all; the list here
+     | narrows that for one product. The narrower answer wins, because a method
+     | the shop is not configured for cannot collect the money whatever a product
+     | claims, and a method the seller refused for this item must not be offered
+     | just because the shop supports it.
+     * ------------------------------------------------------------------ */
+
+    /**
+     * The methods this product accepts, before the shop's own switches are applied.
+     *
+     * Unknown slugs are dropped so a value left behind by an older release, or
+     * written straight into the database, cannot reach a radio button.
+     *
+     * A blank column falls back to every method. Not a feature and not reachable
+     * through the form, which insists on at least one: it is the safe direction
+     * for a row written by hand, since the alternative is a product silently
+     * becoming impossible to buy.
+     *
+     * @return array<int, string>
+     */
+    public function allowedPaymentMethods(): array
+    {
+        $stored = array_values(array_intersect(
+            (array) ($this->payment_methods ?? []),
+            array_keys(ShopOrder::METHODS),
+        ));
+
+        return $stored === [] ? array_keys(ShopOrder::METHODS) : $stored;
+    }
+
+    public function allowsPaymentMethod(string $method): bool
+    {
+        return in_array($method, $this->allowedPaymentMethods(), true);
+    }
+
+    /**
+     * What a buyer could actually choose for this product on its own, slug => label.
+     *
+     * Empty means nobody can buy it right now: either the shop takes nothing, or
+     * everything it does take is refused by this product.
+     *
+     * @return array<string, string>
+     */
+    public function payablePaymentMethods(): array
+    {
+        return array_intersect_key(
+            PaymentSettings::enabledMethods(),
+            array_flip($this->allowedPaymentMethods()),
+        );
+    }
+
+    /**
+     * Labels for the methods this product accepts, for reading on screen.
+     *
+     * @return array<int, string>
+     */
+    public function paymentMethodLabels(): array
+    {
+        return array_map(
+            fn (string $method) => ShopOrder::METHODS[$method],
+            $this->allowedPaymentMethods(),
+        );
     }
 
     public function isActive(): bool

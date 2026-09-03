@@ -10,6 +10,7 @@ use App\Support\PaymentSettings;
 use App\Support\ShippingSettings;
 use App\Support\ShopSettings;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rule;
 
@@ -39,16 +40,17 @@ class CheckoutController extends Controller
                 ->withErrors(['cart' => 'Your basket is empty, so there is nothing to check out.']);
         }
 
-        $methods = $this->availableMethods();
+        $methods = $this->availableMethods($lines);
 
         if ($methods === []) {
             /*
-             | Nothing is configured to take money. Said plainly rather than showing a
-             | form whose submit button could not do anything.
+             | Nothing left that could take the money. Said plainly, and with the
+             | reason, rather than showing a form whose submit button could not do
+             | anything.
              */
             return redirect()
                 ->route('cart')
-                ->withErrors(['cart' => 'We cannot take payment online at the moment. Please contact us to place this order.']);
+                ->withErrors(['cart' => $this->whyNoMethod($lines)]);
         }
 
         return view('pages.checkout', [
@@ -69,11 +71,25 @@ class CheckoutController extends Controller
 
     public function place(Request $request, ShopOrderWriter $writer)
     {
-        if (! ShopSettings::isOpen() || Cart::lines()->isEmpty()) {
+        $lines = Cart::lines();
+
+        if (! ShopSettings::isOpen() || $lines->isEmpty()) {
             return redirect()->route('shop');
         }
 
-        $methods = $this->availableMethods();
+        $methods = $this->availableMethods($lines);
+
+        /*
+         | The basket can change between opening the form and posting it: a setting
+         | switched off, or a product edited. Caught here rather than left to the
+         | payment_method rule, which would report "choose one of the methods
+         | offered" beside a form that is offering none.
+         */
+        if ($methods === []) {
+            return redirect()
+                ->route('cart')
+                ->withErrors(['cart' => $this->whyNoMethod($lines)]);
+        }
 
         $validated = $request->validate([
             'customer_name' => ['required', 'string', 'max:190'],
@@ -189,29 +205,89 @@ class CheckoutController extends Controller
      * ------------------------------------------------------------------ */
 
     /**
-     * The payment methods a buyer may actually choose right now.
+     * The payment methods a buyer may actually choose for this basket.
      *
-     * The online gateway is offered only when it is fully configured, because sending
-     * somebody to a gateway that will refuse the request wastes the sale.
+     * Two things narrow it, and both have to agree. PaymentSettings::enabledMethods()
+     * says what the shop can take at all, judging the online gateway by whether its
+     * credentials are complete, because sending somebody to a gateway that will
+     * refuse the request wastes the sale. Then every product in the basket has to
+     * accept the method as well.
      *
+     * An intersection rather than a union. A method only one product accepts cannot
+     * pay for the whole order, and offering it would charge for an item its seller
+     * had refused that method for. The cost is that a mixed basket can end up with
+     * nothing in common, which whyNoMethod() explains instead of leaving the buyer
+     * at a dead end.
+     *
+     * @param  Collection<int, array<string, mixed>>  $lines
      * @return array<string, string>
      */
-    private function availableMethods(): array
+    private function availableMethods(Collection $lines): array
     {
-        $methods = [];
+        $methods = PaymentSettings::enabledMethods();
 
-        if (PaymentSettings::isReady()) {
-            $methods[ShopOrder::METHOD_GATEWAY] = ShopOrder::METHODS[ShopOrder::METHOD_GATEWAY];
-        }
+        foreach ($lines as $line) {
+            $methods = array_intersect_key(
+                $methods,
+                array_flip($line['product']->allowedPaymentMethods()),
+            );
 
-        if (PaymentSettings::bankTransferEnabled()) {
-            $methods[ShopOrder::METHOD_BANK_TRANSFER] = ShopOrder::METHODS[ShopOrder::METHOD_BANK_TRANSFER];
-        }
-
-        if (PaymentSettings::codEnabled()) {
-            $methods[ShopOrder::METHOD_COD] = ShopOrder::METHODS[ShopOrder::METHOD_COD];
+            if ($methods === []) {
+                break;
+            }
         }
 
         return $methods;
+    }
+
+    /**
+     * Why this basket cannot be paid for, in words a buyer can act on.
+     *
+     * Three different situations end up with no method, and telling them apart is
+     * the whole point: "contact us" is right when the shop takes nothing, and wrong
+     * when the fix is to split the basket in two.
+     *
+     * @param  Collection<int, array<string, mixed>>  $lines
+     */
+    private function whyNoMethod(Collection $lines): string
+    {
+        if (PaymentSettings::enabledMethods() === []) {
+            return 'We cannot take payment online at the moment. Please contact us to place this order.';
+        }
+
+        // Items that cannot be paid for by any method the shop currently takes.
+        $unpayable = $lines
+            ->filter(fn (array $line) => $line['product']->payablePaymentMethods() === [])
+            ->map(fn (array $line) => $line['product']->name)
+            ->unique()
+            ->values();
+
+        if ($unpayable->isNotEmpty()) {
+            return sprintf(
+                'We cannot take payment for %s at the moment. Please remove %s from your basket, or contact us to order %s.',
+                $unpayable->join(', ', ' and '),
+                $unpayable->count() === 1 ? 'it' : 'them',
+                $unpayable->count() === 1 ? 'it' : 'them',
+            );
+        }
+
+        /*
+         | Every item can be paid for on its own, but not by the same method, so the
+         | basket has to be split. Each item is listed with what it does take, which
+         | is what tells the buyer where to cut it.
+         */
+        $described = $lines
+            ->unique(fn (array $line) => $line['product']->id)
+            ->map(fn (array $line) => sprintf(
+                '%s (%s)',
+                $line['product']->name,
+                collect($line['product']->payablePaymentMethods())->join(', ', ' or '),
+            ))
+            ->values();
+
+        return sprintf(
+            'These items do not share a payment method, so they cannot be bought together: %s. Please order them separately.',
+            $described->join('; '),
+        );
     }
 }

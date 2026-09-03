@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Models\ShopOrder;
 use App\Models\ShopProduct;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Collection;
@@ -94,6 +95,21 @@ class ShopProductRequest extends FormRequest
             'brand' => ['nullable', 'string', 'max:180'],
 
             'status' => ['required', Rule::in(array_keys(ShopProduct::STATUSES))],
+
+            /*
+             | How this product may be paid for. At least one, always: a product
+             | that accepts no method reaches the storefront looking for sale and
+             | then cannot be bought, which is worse than not listing it.
+             |
+             | Validated against the whole set of methods rather than against the
+             | ones currently switched on. The shop's switches are the ceiling at
+             | checkout, not at save time, so an administrator can set a product up
+             | before wiring the gateway, and turning a method off in settings does
+             | not silently rewrite every product that accepted it.
+             */
+            'payment_methods' => ['required', 'array', 'min:1'],
+            'payment_methods.*' => ['string', Rule::in(array_keys(ShopOrder::METHODS))],
+
             'is_featured' => ['boolean'],
             'sort_order' => ['nullable', 'integer', 'min:0', 'max:9999'],
 
@@ -140,6 +156,11 @@ class ShopProductRequest extends FormRequest
             'slug.regex' => 'The URL slug may only contain lowercase letters, numbers and single hyphens.',
             'sku.unique' => 'Another product already uses that SKU.',
             'price.required' => 'Every product needs a price. Enter 0 if it is given away.',
+
+            'payment_methods.required' => 'Choose at least one way this product can be paid for. With none ticked nobody could buy it.',
+            'payment_methods.min' => 'Choose at least one way this product can be paid for. With none ticked nobody could buy it.',
+            'payment_methods.*.in' => 'That is not a payment method this shop knows about.',
+
             'images.max' => 'A product can carry at most ' . self::MAX_IMAGES . ' images.',
             'variants.max' => 'A product can carry at most ' . self::MAX_VARIANTS . ' options.',
             'variants.*.label.required' => 'Every option needs a label, for example "Size M".',
@@ -169,7 +190,33 @@ class ShopProductRequest extends FormRequest
             'cost_price' => $this->filled('cost_price') ? $this->input('cost_price') : null,
 
             'variants' => $this->normalisedVariants(),
+            'payment_methods' => $this->normalisedPaymentMethods(),
         ]);
+    }
+
+    /**
+     * The ticked payment methods, de-duplicated and re-indexed.
+     *
+     * Unticked boxes send nothing, so an empty list here is what "none chosen"
+     * looks like and the required rule reports it. Duplicates are dropped rather
+     * than stored twice, which would otherwise show the same radio button twice
+     * at checkout.
+     *
+     * @return array<int, string>
+     */
+    private function normalisedPaymentMethods(): array
+    {
+        $methods = $this->input('payment_methods');
+
+        if (! is_array($methods)) {
+            return [];
+        }
+
+        return collect($methods)
+            ->filter(fn ($method) => is_string($method) && $method !== '')
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

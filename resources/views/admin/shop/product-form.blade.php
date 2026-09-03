@@ -1,6 +1,7 @@
 @extends('layouts.admin')
 
 @php
+    use App\Models\ShopOrder;
     use App\Models\ShopProduct;
     use App\Support\PaymentSettings;
 
@@ -12,6 +13,29 @@
 
     $input = 'w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
     $currency = PaymentSettings::currency();
+
+    /*
+     | Which payment boxes start ticked.
+     |
+     | On a redisplay after a failed save the submitted set is used even when it is
+     | empty, because unticked boxes send nothing and falling back to the default
+     | would silently re-tick everything the operator had just cleared, hiding the
+     | very mistake the error message is complaining about.
+     */
+    $selectedMethods = session()->hasOldInput()
+        ? (array) old('payment_methods', [])
+        : $product->allowedPaymentMethods();
+
+    $enabledMethods = PaymentSettings::enabledMethods();
+
+    // Why a method is not on offer, so the reason is on screen rather than looked for.
+    $methodOffReasons = [
+        ShopOrder::METHOD_GATEWAY => 'No payment gateway is set up, so this is not offered at checkout yet.',
+        ShopOrder::METHOD_BANK_TRANSFER => 'Switched off for the shop, or the account details are incomplete.',
+        ShopOrder::METHOD_COD => 'Switched off for the shop.',
+    ];
+
+    $paymentSettingsUrl = route('admin.settings.integration', ['tab' => 'payments']);
 @endphp
 
 @section('title', $heading)
@@ -120,6 +144,63 @@
                            value="{{ old('cost_price', $product->cost_price) }}"
                            placeholder="Optional"
                            class="{{ $input }} max-w-40 text-right tabular-nums">
+                </x-admin.field-row>
+            </x-admin.panel>
+
+            {{-- ==================== Payment ==================== --}}
+            <x-admin.panel title="Payment Methods" icon="credit-card">
+                <x-admin.field-row
+                    label="How It Can Be Paid For"
+                    help="At least one. Whatever is ticked here is narrowed by what the shop itself can take, so this list can never be wider than Settings &gt; Integration &gt; Payments allows."
+                    :required="true"
+                    error="payment_methods">
+
+                    <div class="space-y-2.5">
+                        @foreach (ShopOrder::METHODS as $slug => $label)
+                            @php $live = array_key_exists($slug, $enabledMethods); @endphp
+
+                            <label @class([
+                                'flex items-start gap-3 rounded-lg border px-3.5 py-3 cursor-pointer transition',
+                                'border-gray-300 hover:border-blue-300 hover:bg-blue-50/40' => $live,
+                                // Still selectable when the shop has it switched off: the
+                                // choice is recorded for when it is switched back on, and
+                                // clearing it here would lose the operator's intent.
+                                'border-gray-200 bg-gray-50 hover:border-gray-300' => ! $live,
+                            ])>
+                                <input type="checkbox"
+                                       name="payment_methods[]"
+                                       value="{{ $slug }}"
+                                       @checked(in_array($slug, $selectedMethods, true))
+                                       class="mt-0.5 w-4 h-4 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+
+                                <span class="min-w-0">
+                                    <span class="block text-sm font-semibold text-gray-900">{{ $label }}</span>
+
+                                    <span @class([
+                                        'block text-xs mt-0.5 leading-snug',
+                                        'text-green-700' => $live,
+                                        'text-amber-700' => ! $live,
+                                    ])>
+                                        @if ($live)
+                                            Switched on for the shop, so a buyer can choose it.
+                                        @else
+                                            {{ $methodOffReasons[$slug] }} Ticking it now is kept for when it is.
+                                        @endif
+                                    </span>
+                                </span>
+                            </label>
+                        @endforeach
+                    </div>
+
+                    @if ($enabledMethods === [])
+                        {{-- role=status rather than an alert: it is worth knowing before
+                             saving, but it does not stop the product being set up. --}}
+                        <p role="status" class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800 leading-relaxed">
+                            The shop cannot take any payment at the moment, so nothing ticked here
+                            reaches a buyer yet. Turn a gateway, bank transfer or cash on delivery on
+                            in <a href="{{ $paymentSettingsUrl }}" class="font-semibold underline hover:no-underline">Settings &gt; Integration &gt; Payments</a>.
+                        </p>
+                    @endif
                 </x-admin.field-row>
             </x-admin.panel>
 
