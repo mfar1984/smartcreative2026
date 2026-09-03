@@ -91,7 +91,15 @@
                                 ->contains(fn (array $link) => request()->routeIs(...(array) $link['active']));
                         @endphp
 
-                        <details class="group" data-nav-group="{{ $child['key'] }}" @if ($groupActive) open @endif>
+                        {{-- name= makes the browser itself keep only one of these
+                             open, so the accordion holds even before the script at
+                             the bottom of the page runs and on a browser where it
+                             never does. The script still exists because it is what
+                             remembers the choice between pages. --}}
+                        <details class="group"
+                                 name="admin-sidebar-nav"
+                                 data-nav-group="{{ $child['key'] }}"
+                                 @if ($groupActive) open @endif>
                             <summary class="{{ $itemBase }} {{ $itemIdle }} cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">
                                 <x-admin.icon :name="$child['icon']" class="w-5 h-5 shrink-0" />
                                 <span class="flex-1">{{ $child['label'] }}</span>
@@ -214,37 +222,110 @@
 
 @push('scripts')
 <script>
-    // Remember which groups the operator left open. A group holding the current
-    // page is always opened regardless of what was stored.
+    /*
+     | One group open at a time, remembered between pages.
+     |
+     | Storage holds a single group key rather than a map of every group's state. A
+     | map is what let several sit open at once: it could describe two open groups,
+     | so sooner or later it did. One key cannot express that.
+     |
+     | The group holding the current page wins over whatever was stored. Being on
+     | Shop > Orders with Event expanded instead would be actively unhelpful, and the
+     | server already marks that group open, so this only has to not undo it.
+     */
     (function () {
-        const storageKey = 'admin.sidebar.groups';
-        let stored = {};
+        const storageKey = 'admin.sidebar.group';
 
+        // The old key held a map of every group. Removed rather than migrated: it
+        // describes a state this menu no longer has.
         try {
-            stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+            localStorage.removeItem('admin.sidebar.groups');
         } catch (error) {
-            stored = {};
+            // Storage unavailable. Nothing to clean up, and nothing to remember.
         }
 
-        document.querySelectorAll('[data-nav-group]').forEach(function (group) {
-            const key = group.dataset.navGroup;
-
-            // `open` is already set server side when a child route is active.
-            if (!group.open && stored[key] === true) {
-                group.open = true;
+        function remember(key) {
+            try {
+                key === null
+                    ? localStorage.removeItem(storageKey)
+                    : localStorage.setItem(storageKey, key);
+            } catch (error) {
+                // Private browsing, or storage full. The menu still works, it just
+                // will not remember the choice on the next page.
             }
+        }
 
+        function recall() {
+            try {
+                return localStorage.getItem(storageKey);
+            } catch (error) {
+                return null;
+            }
+        }
+
+        const groups = Array.from(document.querySelectorAll('[data-nav-group]'));
+
+        if (groups.length === 0) {
+            return;
+        }
+
+        groups.forEach(function (group) {
             group.addEventListener('toggle', function () {
-                stored[key] = group.open;
+                const key = group.dataset.navGroup;
 
-                try {
-                    localStorage.setItem(storageKey, JSON.stringify(stored));
-                } catch (error) {
-                    // Storage unavailable, for example private browsing. The
-                    // menu still works, it just will not remember state.
+                if (group.open) {
+                    /*
+                     | Close the rest. Redundant where the browser honours name= on
+                     | details, and the whole of the behaviour where it does not.
+                     |
+                     | No re-entry guard is needed. toggle fires as a queued task, so
+                     | the closures below are handled after this function returns, by
+                     | which point the key below is already stored and their own
+                     | handlers find nothing of theirs to clear.
+                     */
+                    groups.forEach(function (other) {
+                        if (other !== group) {
+                            other.open = false;
+                        }
+                    });
+
+                    remember(key);
+
+                    return;
+                }
+
+                // Only the group that was being remembered clears the memory. A
+                // sibling closing as a side effect of another one opening must not.
+                if (recall() === key) {
+                    remember(null);
                 }
             });
         });
+
+        // Whatever the server opened is the current page's group, so it decides.
+        const active = groups.find(function (group) {
+            return group.open;
+        });
+
+        if (active) {
+            groups.forEach(function (group) {
+                if (group !== active) {
+                    group.open = false;
+                }
+            });
+
+            remember(active.dataset.navGroup);
+
+            return;
+        }
+
+        const restored = groups.find(function (group) {
+            return group.dataset.navGroup === recall();
+        });
+
+        if (restored) {
+            restored.open = true;
+        }
     })();
 </script>
 @endpush
