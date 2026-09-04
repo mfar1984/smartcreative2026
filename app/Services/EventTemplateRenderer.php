@@ -133,6 +133,8 @@ class EventTemplateRenderer
             'manager_phone' => $this->manager($registration)?->phone ?? '',
 
             'amount' => $registration->amountLabel(),
+            'amount_paid' => $registration->amountPaidLabel(),
+            'amount_outstanding' => $registration->outstandingAmountLabel(),
             'registration_fee' => $registration->registrationFeeLabel(),
             'addons_total' => $registration->addonsTotalLabel(),
             'payment_status' => $registration->paymentStatusLabel(),
@@ -216,9 +218,17 @@ class EventTemplateRenderer
             'manager_phone' => '0138801201',
 
             'amount' => 'RM 120.00',
+
+            // Previewed as a part payment on purpose. A sample where received and
+            // outstanding are 0.00 and the full amount would let somebody write a
+            // reminder that reads correctly against a sample and wrongly against a
+            // real entry.
+            'amount_paid' => 'RM 80.00',
+            'amount_outstanding' => 'RM 40.00',
+
             'registration_fee' => 'RM 120.00',
             'addons_total' => 'RM 0.00',
-            'payment_status' => 'Awaiting Payment',
+            'payment_status' => 'Partly Paid',
 
             'payment_link' => url('/registration/payment/REG-2026-0003?expires=0&signature=sample'),
 

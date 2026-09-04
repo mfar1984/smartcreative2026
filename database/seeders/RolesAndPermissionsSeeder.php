@@ -171,6 +171,19 @@ class RolesAndPermissionsSeeder extends Seeder
             ],
             'Unpaid & Failed' => [
                 'view' => ['payments.unpaid.view', 'View unpaid and failed entries'],
+
+                /*
+                 | Recording money that arrived outside the gateway. Its own
+                 | permission, and deliberately not granted to Viewer: nothing here
+                 | can observe a bank transfer, so pressing it is a person asserting
+                 | they saw the money. That assertion moves an entry into the takings
+                 | and confirms the entrant's place.
+                 |
+                 | Kept apart from payments.refund for the same reason the shop keeps
+                 | its two apart: being trusted to send money back out is not the same
+                 | as being trusted to declare it arrived.
+                 */
+                'send' => ['payments.record', 'Record a payment received by hand'],
             ],
             'Refunds' => [
                 'view' => ['payments.refunds.view', 'View refunded entries'],
@@ -370,6 +383,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'payments.reports.view',
                 'payments.export',
                 'payments.refund',
+                'payments.record',
 
                 'campaigns.view',
                 'campaigns.create',

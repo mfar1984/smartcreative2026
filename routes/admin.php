@@ -119,6 +119,19 @@ Route::prefix('admin')->name('admin.')->group(function () {
 
             // Chasing an unpaid entry is the same capability as resending, so it
             // sits behind the same permission.
+            /*
+             | Recording money that arrived outside the gateway. Its own permission,
+             | because nothing here observed the payment: pressing it is a person
+             | asserting they saw it, and that assertion confirms the entrant's place
+             | and moves the figure into the takings.
+             |
+             | Throttled. It writes to a ledger, and a stuck finger on a confirm
+             | dialog must not be able to record the same receipt twenty times.
+             */
+            Route::post('participants/{registration}/payment', [ParticipantController::class, 'recordPayment'])
+                ->middleware(['permission:payments.record', 'throttle:20,1'])
+                ->name('participants.payment');
+
             Route::post('participants/{registration}/remind', [ParticipantController::class, 'remind'])
                 ->middleware('permission:participants.notify')
                 ->name('participants.remind');

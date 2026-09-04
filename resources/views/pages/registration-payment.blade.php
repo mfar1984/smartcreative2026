@@ -8,6 +8,19 @@
     $isRefunded = $registration->payment_status === EventRegistration::PAYMENT_REFUNDED;
     $canPay = $registration->awaitingPayment();
 
+    /*
+     | Some of it has arrived and some has not.
+     |
+     | Called out separately because it is neither payable here nor settled, and
+     | without its own branch it fell through to "there is nothing to pay on this
+     | registration" — told to somebody who still owes a balance.
+     |
+     | Not payable on the gateway on purpose: the checkout is built from the full
+     | charge, so offering it would take the whole fee a second time. Money that
+     | started arriving by hand is finished by hand.
+     */
+    $isPartlyPaid = $registration->isPartlyPaid();
+
     // 'success' means the gateway sent the payer back saying it went through, but
     // nothing is confirmed until the payment status itself says so.
     $awaitingConfirmation = $outcome === 'success' && ! $isPaid;
@@ -200,10 +213,27 @@
                                 @endif
                                 <tr>
                                     <td colspan="3" class="pt-3 text-right text-base font-bold text-gray-900">
-                                        {{ $isPaid ? 'Total paid' : 'Amount due' }}
+                                        {{ $isPaid ? 'Total paid' : 'Total' }}
                                     </td>
                                     <td class="pt-3 text-right text-base font-bold text-blue-700 tabular-nums whitespace-nowrap">{{ $registration->amountLabel() }}</td>
                                 </tr>
+
+                                @if ($isPartlyPaid)
+                                    {{-- Both figures, because the total on its own no longer
+                                         tells this payer what they owe. --}}
+                                    <tr>
+                                        <td colspan="3" class="pt-2 text-right text-sm text-gray-600">Received so far</td>
+                                        <td class="pt-2 text-right text-sm font-semibold text-green-700 tabular-nums whitespace-nowrap">
+                                            {{ $registration->amountPaidLabel() }}
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td colspan="3" class="pt-1 text-right text-base font-bold text-gray-900">Still to pay</td>
+                                        <td class="pt-1 text-right text-base font-bold text-amber-700 tabular-nums whitespace-nowrap">
+                                            {{ $registration->outstandingAmountLabel() }}
+                                        </td>
+                                    </tr>
+                                @endif
                             </tfoot>
                         </table>
                     </div>
@@ -219,6 +249,21 @@
                                    class="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-md shrink-0">
                                     Back to Events
                                 </a>
+                            </div>
+                        @elseif ($isPartlyPaid)
+                            <div class="flex items-start gap-3">
+                                <svg class="w-5 h-5 shrink-0 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <p class="text-sm text-gray-700">
+                                    We have received <strong>{{ $registration->amountPaidLabel() }}</strong> of
+                                    {{ $registration->amountLabel() }}, so
+                                    <strong>{{ $registration->outstandingAmountLabel() }}</strong> is still
+                                    outstanding. Your place is held. Please
+                                    <a href="{{ route('contact') }}" class="text-blue-600 font-semibold hover:underline">contact us</a>
+                                    quoting reference <strong>{{ $registration->reference }}</strong> to settle
+                                    the balance the same way you paid the first part.
+                                </p>
                             </div>
                         @elseif (! $canPay)
                             <p class="text-sm text-gray-600">

@@ -23,6 +23,8 @@
     $payTones = [
         EventRegistration::PAYMENT_UNPAID => 'gray',
         EventRegistration::PAYMENT_PENDING => 'amber',
+        // Blue: some of the money is in, so it reads as neither settled nor untouched.
+        EventRegistration::PAYMENT_PARTIAL => 'blue',
         EventRegistration::PAYMENT_PAID => 'green',
         EventRegistration::PAYMENT_FAILED => 'red',
         EventRegistration::PAYMENT_REFUNDED => 'purple',

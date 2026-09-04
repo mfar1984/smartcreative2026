@@ -394,6 +394,9 @@ class PaymentController extends Controller
                 'Reference', 'Event', 'Entry', 'Mode', 'People',
                 'Registrant', 'Telephone', 'Email',
                 'Fee', 'Extras', 'Amount',
+                // What was charged, what arrived, and what is still owed. Amount
+                // alone could not distinguish a settled entry from a part-paid one.
+                'Paid', 'Outstanding', 'Refunded',
                 'Payment Status', 'Entry Status',
                 'Gateway Reference', 'Registered At', 'Last Gateway Sync',
             ]);
@@ -415,6 +418,9 @@ class PaymentController extends Controller
                         number_format((float) $registration->registration_fee, 2, '.', ''),
                         number_format((float) $registration->addons_total, 2, '.', ''),
                         number_format((float) $registration->amount, 2, '.', ''),
+                        number_format((float) $registration->amount_paid, 2, '.', ''),
+                        number_format($registration->outstandingAmount(), 2, '.', ''),
+                        number_format((float) $registration->refunded_amount, 2, '.', ''),
                         $registration->paymentStatusLabel(),
                         $registration->statusLabel(),
                         $registration->payment_reference ?? '',

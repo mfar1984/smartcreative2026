@@ -3,7 +3,9 @@
 namespace App\Support;
 
 use App\Models\EventRegistration;
+use App\Models\EventRegistrationPayment;
 use Illuminate\Contracts\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * One place that decides what the money figures mean.
@@ -24,10 +26,18 @@ use Illuminate\Contracts\Database\Eloquent\Builder;
  */
 class PaymentFigures
 {
-    /** Statuses where somebody still owes money. */
+    /**
+     * Statuses where somebody still owes money.
+     *
+     * Partial belongs here: some of the charge has arrived and the rest has not, so
+     * the entry is still owed money even though it is no longer untouched. What it
+     * owes is the balance rather than the charge, which is why outstanding() sums a
+     * difference instead of a column.
+     */
     public const OWING = [
         EventRegistration::PAYMENT_UNPAID,
         EventRegistration::PAYMENT_PENDING,
+        EventRegistration::PAYMENT_PARTIAL,
         EventRegistration::PAYMENT_FAILED,
     ];
 
@@ -52,28 +62,40 @@ class PaymentFigures
      */
     public static function collected(?string $from = null, ?string $to = null): float
     {
-        $paid = (float) self::window(self::base(), $from, $to)
-            ->where('payment_status', EventRegistration::PAYMENT_PAID)
-            ->sum('amount');
+        /*
+         | amount_paid, not amount, and no filter on the status.
+         |
+         | The charge and the receipt are different figures, and until part payments
+         | existed they happened to agree for every settled entry, so summing the
+         | charge of everything marked paid gave the right answer. It no longer does:
+         | that query would report nothing at all for an entry that has genuinely
+         | transferred RM 200 of RM 250. Summing what arrived needs no status filter,
+         | because an entry that has paid nothing contributes nothing.
+         */
+        $received = (float) self::window(self::base(), $from, $to)->sum('amount_paid');
 
-        return round($paid - self::refunded($from, $to), 2);
+        return round($received - self::refunded($from, $to), 2);
     }
 
-    /** What was charged before any refund, for reconciling against the gateway. */
+    /** What arrived before any refund, for reconciling against the gateway. */
     public static function grossCollected(?string $from = null, ?string $to = null): float
     {
-        return (float) self::window(self::base(), $from, $to)
-            ->where('payment_status', EventRegistration::PAYMENT_PAID)
-            ->sum('amount');
+        return (float) self::window(self::base(), $from, $to)->sum('amount_paid');
     }
 
-    /** What is still expected from entries that have not been cancelled. */
+    /**
+     * What is still expected from entries that have not been cancelled.
+     *
+     * The balance rather than the charge, so an entry that has paid part of its way
+     * is counted for what it still owes. Summing `amount` here would report the same
+     * money as both collected and outstanding at the same time.
+     */
     public static function outstanding(?string $from = null, ?string $to = null): float
     {
-        return (float) self::window(self::base(), $from, $to)
+        return round((float) self::window(self::base(), $from, $to)
             ->whereIn('payment_status', self::OWING)
             ->where('status', '!=', EventRegistration::STATUS_CANCELLED)
-            ->sum('amount');
+            ->sum(DB::raw('amount - amount_paid')), 2);
     }
 
     /**
@@ -149,18 +171,34 @@ class PaymentFigures
      */
     public static function dailyCollected(?string $from = null, ?string $to = null): array
     {
-        return self::window(self::base(), $from, $to)
-            ->where('payment_status', EventRegistration::PAYMENT_PAID)
-            ->selectRaw('DATE(COALESCE(payment_synced_at, updated_at)) as day, COUNT(*) as total, SUM(amount) as amount')
+        /*
+         | Read off the receipt ledger, grouped by the day the money arrived.
+         |
+         | It used to group the registrations by DATE(COALESCE(payment_synced_at,
+         | updated_at)), which was the best available guess when a registration could
+         | only hold one payment: the sync timestamp for a gateway payment, and the
+         | last time the row changed for anything else. Both were approximations of a
+         | date that is now recorded, and the fallback would land a transfer somebody
+         | reports on Monday on whatever day their entry happened to be edited.
+         |
+         | The range applies to the receipt date here rather than through window(),
+         | which narrows on when the entry was created. On a reconciliation screen the
+         | question is which day the money landed, not which day the entry was made.
+         */
+        $rows = EventRegistrationPayment::query()
+            ->join('event_registrations', 'event_registrations.id', '=', 'event_registration_payments.event_registration_id')
+            ->when(filled($from), fn (Builder $q) => $q->whereDate('event_registration_payments.received_at', '>=', $from))
+            ->when(filled($to), fn (Builder $q) => $q->whereDate('event_registration_payments.received_at', '<=', $to))
+            ->selectRaw('DATE(event_registration_payments.received_at) as day, COUNT(*) as total, SUM(event_registration_payments.amount) as amount')
             ->groupBy('day')
             ->orderByDesc('day')
-            ->get()
-            ->map(fn ($row) => [
-                'date' => (string) $row->day,
-                'count' => (int) $row->total,
-                'total' => (float) $row->amount,
-            ])
-            ->all();
+            ->get();
+
+        return $rows->map(fn ($row) => [
+            'date' => (string) $row->day,
+            'count' => (int) $row->total,
+            'total' => (float) $row->amount,
+        ])->all();
     }
 
     /**
@@ -172,13 +210,18 @@ class PaymentFigures
     {
         $rows = self::window(self::base(), $from, $to)
             ->join('events', 'events.id', '=', 'event_registrations.event_id')
+            /*
+             | Received money and remaining balance, matching collected() and
+             | outstanding(). Selecting the charge of everything marked paid credited
+             | a part-paid entry with nothing, and charged it for the full fee in the
+             | outstanding column at the same time.
+             */
             ->selectRaw("
                 events.title as title,
                 COUNT(*) as entries,
-                SUM(CASE WHEN payment_status = ? THEN amount ELSE 0 END) as collected,
-                SUM(CASE WHEN payment_status IN (?, ?, ?) AND event_registrations.status != ? THEN amount ELSE 0 END) as outstanding
+                SUM(amount_paid) as collected,
+                SUM(CASE WHEN payment_status IN (?, ?, ?, ?) AND event_registrations.status != ? THEN amount - amount_paid ELSE 0 END) as outstanding
             ", [
-                EventRegistration::PAYMENT_PAID,
                 ...self::OWING,
                 EventRegistration::STATUS_CANCELLED,
             ])

@@ -15,9 +15,11 @@ use App\Services\Payment\RegistrationPaymentUpdater;
 use App\Support\EventTemplates;
 use App\Support\GatewayPaymentRecord;
 use App\Support\ParticipantOptions;
+use App\Support\PaymentFigures;
 use App\Support\PaymentSettings;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -91,6 +93,7 @@ class ParticipantController extends Controller
             // registrations and the answer is the same for all of them.
             'canNotify' => $request->user()->hasPermission('participants.notify'),
             'canDelete' => $request->user()->hasPermission('participants.delete'),
+            'canRecordPayment' => $request->user()->hasPermission('payments.record'),
 
             // Only events that actually have entries, so the filter never offers
             // a choice that returns nothing.
@@ -103,16 +106,18 @@ class ParticipantController extends Controller
             'search' => $search,
             'eventId' => $eventId,
             'isFiltered' => $search !== '' || $eventId !== '',
+            /*
+             | Read through PaymentFigures rather than summed here.
+             |
+             | These two were counted inline, which meant they answered slightly
+             | different questions from the same figures on the Payments screens:
+             | free entries were included, refunds were not subtracted, and now that
+             | part-paid entries exist the difference would have grown into showing
+             | money as both collected and outstanding at once.
+             */
             'totals' => [
-                'collected' => EventRegistration::query()->where('payment_status', EventRegistration::PAYMENT_PAID)->sum('amount'),
-                'outstanding' => EventRegistration::query()
-                    ->whereIn('payment_status', [
-                        EventRegistration::PAYMENT_UNPAID,
-                        EventRegistration::PAYMENT_PENDING,
-                        EventRegistration::PAYMENT_FAILED,
-                    ])
-                    ->where('status', '!=', EventRegistration::STATUS_CANCELLED)
-                    ->sum('amount'),
+                'collected' => PaymentFigures::collected(),
+                'outstanding' => PaymentFigures::outstanding(),
             ],
         ]);
     }
@@ -123,7 +128,7 @@ class ParticipantController extends Controller
      */
     public function show(Request $request, EventRegistration $registration)
     {
-        $registration->load(['event', 'participants', 'addonLines', 'notifications.triggeredBy']);
+        $registration->load(['event', 'participants', 'addonLines', 'notifications.triggeredBy', 'payments.recordedBy']);
 
         $reachedGateway = $this->refreshPayment($registration);
 
@@ -195,7 +200,12 @@ class ParticipantController extends Controller
      */
     public function remind(Request $request, EventRegistration $registration, EventNotifier $notifier)
     {
-        if (! $registration->awaitingPayment()) {
+        /*
+         | owesBalance() rather than awaitingPayment(): a part-paid entry still owes
+         | something and is exactly the kind worth chasing, but it is not one the
+         | gateway should be offered, which is what awaitingPayment() answers.
+         */
+        if (! $registration->owesBalance()) {
             return back()->with('warning', sprintf(
                 'Nothing to chase on %s: it is %s.',
                 $registration->reference,
@@ -218,9 +228,99 @@ class ParticipantController extends Controller
         );
 
         return back()->with('status', sprintf(
-            'Payment reminder queued for %s (%s).',
+            'Payment reminder queued for %s (%s outstanding).',
             $this->registrant($registration)?->full_name ?? $registration->reference,
-            $registration->amountLabel(),
+            $registration->outstandingAmountLabel(),
+        ));
+    }
+
+    /**
+     * Record money that arrived outside the gateway.
+     *
+     * The case this exists for: an entrant transferred the fee, the site failed
+     * before their entry was confirmed, and the office is holding a receipt no
+     * machine has ever seen. The alternatives were leaving a paying entrant marked
+     * unpaid or inventing a gateway reference, and both are worse.
+     *
+     * Nothing here observed the money. Every figure this moves rests on a person
+     * asserting they saw it, which is why it carries its own permission, is logged
+     * as an assertion, and asks when the money arrived rather than assuming it was
+     * now.
+     */
+    public function recordPayment(Request $request, EventRegistration $registration)
+    {
+        if ($registration->isFree()) {
+            return back()->withErrors([
+                'record_payment' => sprintf('%s is free of charge, so there is no payment to record.', $registration->reference),
+            ]);
+        }
+
+        if (! $registration->owesBalance()) {
+            return back()->withErrors([
+                'record_payment' => sprintf(
+                    'Nothing is owed on %s: it is %s.',
+                    $registration->reference,
+                    strtolower($registration->paymentStatusLabel()),
+                ),
+            ]);
+        }
+
+        $outstanding = $registration->outstandingAmount();
+
+        $validated = $request->validate([
+            // Split into two boxes because that is how somebody reads a receipt.
+            // Recombined below into the one datetime the ledger stores.
+            'received_date' => ['required', 'date', 'before_or_equal:today'],
+            'received_time' => ['required', 'date_format:H:i'],
+
+            'reference' => ['nullable', 'string', 'max:190'],
+            'note' => ['nullable', 'string', 'max:255'],
+
+            'settlement' => ['required', 'in:full,partial'],
+
+            /*
+             | Only read when partial was chosen, and capped at the balance. An
+             | overpayment is a different problem with a different answer, and
+             | accepting one here would push the entry's outstanding figure negative
+             | and quietly reduce what everybody else on the event owes.
+             */
+            'amount' => ['nullable', 'required_if:settlement,partial', 'numeric', 'min:0.01', 'max:' . $outstanding],
+        ], [
+            'received_date.required' => 'Enter the date the money arrived.',
+            'received_date.before_or_equal' => 'The money cannot have arrived in the future.',
+            'received_time.required' => 'Enter the time the money arrived.',
+            'received_time.date_format' => 'Enter the time as HH:MM, for example 14:30.',
+            'settlement.required' => 'Say whether this settles the whole balance or part of it.',
+            'amount.required_if' => 'Enter how much arrived.',
+            'amount.max' => sprintf(
+                'That is more than is owed. The outstanding balance on this entry is %s.',
+                PaymentFigures::money($outstanding),
+            ),
+        ]);
+
+        $amount = $validated['settlement'] === 'full'
+            ? $outstanding
+            : round((float) $validated['amount'], 2);
+
+        $receivedAt = sprintf('%s %s:00', Carbon::parse($validated['received_date'])->toDateString(), $validated['received_time']);
+
+        $this->updater->recordManualPayment(
+            registration: $registration,
+            amount: $amount,
+            receivedAt: $receivedAt,
+            reference: $validated['reference'] ?? null,
+            note: $validated['note'] ?? null,
+        );
+
+        $registration->refresh();
+
+        return back()->with('status', sprintf(
+            '%s recorded on %s. %s',
+            PaymentFigures::money($amount),
+            $registration->reference,
+            $registration->isPaid()
+                ? 'It is now paid in full and the entry is confirmed.'
+                : sprintf('%s is still outstanding.', $registration->outstandingAmountLabel()),
         ));
     }
 

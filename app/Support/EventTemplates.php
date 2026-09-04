@@ -64,6 +64,16 @@ class EventTemplates
         'manager_phone' => 'Telephone of whoever registered',
 
         'amount' => 'Total payable, for example RM 120.00',
+
+        /*
+         | What has arrived and what is still owed, which are not the same as the
+         | total once part payments exist. A reminder quoting `amount` at somebody
+         | who has already transferred most of it reads as though nothing was
+         | received, and is the fastest way to be accused of losing their money.
+         */
+        'amount_paid' => 'Received so far, for example RM 80.00',
+        'amount_outstanding' => 'Still owed, for example RM 40.00',
+
         'registration_fee' => 'Event fee portion',
         'addons_total' => 'Extras portion',
         'payment_status' => 'Payment status in words',
@@ -122,7 +132,7 @@ class EventTemplates
     ];
 
     /** Money, which only the person paying needs spelled out. */
-    private const MONEY = ['amount', 'registration_fee', 'addons_total'];
+    private const MONEY = ['amount', 'amount_paid', 'amount_outstanding', 'registration_fee', 'addons_total'];
 
     /** Details of a payment that has already happened. */
     private const RECEIPT = ['paid_on', 'payment_method', 'payment_reference'];
@@ -139,7 +149,7 @@ class EventTemplates
         'site_name', 'event_name', 'event_dates', 'event_location',
         'reference', 'team_name', 'people_count', 'player_list',
         'manager_name', 'manager_email', 'manager_phone', 'contact_name',
-        'amount', 'payment_status',
+        'amount', 'amount_paid', 'amount_outstanding', 'payment_status',
     ];
 
     /* ---------------------------------------------------------------------

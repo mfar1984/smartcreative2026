@@ -26,6 +26,8 @@
         $payTones = [
             EventRegistration::PAYMENT_UNPAID => 'gray',
             EventRegistration::PAYMENT_PENDING => 'amber',
+            // Blue: some of the money is in, so it reads as neither settled nor untouched.
+            EventRegistration::PAYMENT_PARTIAL => 'blue',
             EventRegistration::PAYMENT_PAID => 'green',
             EventRegistration::PAYMENT_FAILED => 'red',
             EventRegistration::PAYMENT_REFUNDED => 'purple',
@@ -64,9 +66,9 @@
                 </a>
             @endif
 
-            @if ($canNotify && $registration->awaitingPayment())
+            @if ($canNotify && $registration->owesBalance())
                 <form action="{{ route('admin.event.participants.remind', $registration) }}" method="POST"
-                      onsubmit="return confirm('Email a payment reminder for {{ addslashes($registration->displayName()) }} ({{ $registration->amountLabel() }} due)?');">
+                      onsubmit="return confirm('Email a payment reminder for {{ addslashes($registration->displayName()) }} ({{ $registration->outstandingAmountLabel() }} outstanding)?');">
                     @csrf
                     <button type="submit"
                             class="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-4 py-2.5 text-sm font-semibold text-amber-700 hover:bg-amber-50 transition">
@@ -216,10 +218,109 @@
                                 {{ $registration->amountLabel() }}
                             </td>
                         </tr>
+
+                        {{-- Received and owed, shown only when they differ from the
+                             total. On a settled or untouched entry they would repeat
+                             what the line above already said. --}}
+                        @if ($registration->amountPaid() > 0 && ! $registration->isPaid())
+                            <tr>
+                                <td colspan="3" class="pt-2 text-right text-sm text-gray-600">Received</td>
+                                <td class="pt-2 text-right text-sm font-semibold text-green-700 tabular-nums whitespace-nowrap">
+                                    {{ $registration->amountPaidLabel() }}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td colspan="3" class="pt-1 text-right text-sm font-bold text-gray-900">Outstanding</td>
+                                <td class="pt-1 text-right text-sm font-bold text-amber-700 tabular-nums whitespace-nowrap">
+                                    {{ $registration->outstandingAmountLabel() }}
+                                </td>
+                            </tr>
+                        @endif
                     </tfoot>
                 </table>
             </div>
         </x-admin.panel>
+
+        {{--
+            Every receipt against this entry.
+
+            Shown as a list rather than a single figure because that is the question
+            somebody asks here: not how much has arrived, but which arrivals make it
+            up, so a bank statement line can be matched to one of them.
+
+            Only rendered when there is something to show. An entry paid in one go on
+            the gateway has one row, which is still worth seeing.
+        --}}
+        @if ($registration->payments->isNotEmpty())
+            <x-admin.panel title="Payments Received" icon="cash">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-left">
+                            <tr>
+                                <th scope="col" class="{{ $label }}">Received</th>
+                                <th scope="col" class="{{ $label }} text-right">Amount</th>
+                                <th scope="col" class="{{ $label }}">Reference</th>
+                                <th scope="col" class="{{ $label }}">Source</th>
+                                <th scope="col" class="{{ $label }}">Recorded By</th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-gray-100">
+                            @foreach ($registration->payments as $receipt)
+                                <tr>
+                                    <td class="px-5 py-3 whitespace-nowrap text-gray-700">
+                                        {{ $receipt->received_at?->format('d M Y') }}
+                                        <span class="block text-xs text-gray-400">{{ $receipt->received_at?->format('g:i a') }}</span>
+                                    </td>
+
+                                    <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">
+                                        {{ $receipt->amountLabel() }}
+                                    </td>
+
+                                    <td class="px-5 py-3 text-gray-600">
+                                        @if (filled($receipt->reference))
+                                            <code class="text-xs break-all">{{ $receipt->reference }}</code>
+                                        @else
+                                            <span class="text-gray-400">&mdash;</span>
+                                        @endif
+
+                                        @if (filled($receipt->note))
+                                            <span class="block text-xs text-gray-500 mt-0.5">{{ $receipt->note }}</span>
+                                        @endif
+                                    </td>
+
+                                    <td class="px-5 py-3 whitespace-nowrap">
+                                        <x-admin.badge :tone="$receipt->isManual() ? 'amber' : 'green'">
+                                            {{ $receipt->sourceLabel() }}
+                                        </x-admin.badge>
+                                    </td>
+
+                                    <td class="px-5 py-3 text-xs text-gray-500">
+                                        {{ $receipt->actor() }}
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+
+                        <tfoot class="bg-gray-50">
+                            <tr>
+                                <td class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Total received</td>
+                                <td class="px-5 py-3 text-right text-base font-bold text-green-700 tabular-nums whitespace-nowrap">
+                                    {{ $registration->amountPaidLabel() }}
+                                </td>
+                                <td colspan="3" class="px-5 py-3 text-xs text-gray-500">
+                                    @if ($registration->outstandingAmount() > 0.005)
+                                        {{ $registration->outstandingAmountLabel() }} of {{ $registration->amountLabel() }} still outstanding.
+                                    @else
+                                        Settled in full.
+                                    @endif
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </x-admin.panel>
+        @endif
 
         {{-- ---------------- People ---------------- --}}
         <x-admin.section-intro
