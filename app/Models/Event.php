@@ -455,6 +455,56 @@ class Event extends Model
         return $this->purchasableAddons()->isNotEmpty();
     }
 
+    /* ---------------------------------------------------------------------
+     | Seats
+     |
+     | What one seat means depends on the mode, and every path that moves the
+     | counter has to agree on it. A squad entry occupies one place however many
+     | players it names, the same way it pays one fee however many players it
+     | names: see registrationAmount().
+     |
+     | Counting a squad per head is what this fixes. An event offering 32 places
+     | to teams of up to seven ran out after four entries, and the fifth was
+     | refused with "Only 4 places are left, but 7 people are named" while
+     | twenty eight of the thirty two teams had never turned up.
+     * ------------------------------------------------------------------ */
+
+    /**
+     * How many places an entry of this size occupies.
+     *
+     * Every increment, decrement and availability check goes through here, so
+     * the counter cannot mean one thing when an entry is taken and another when
+     * it is given back.
+     */
+    public function seatsForEntry(int $headCount): int
+    {
+        return $this->isManagerMode() ? 1 : max(0, $headCount);
+    }
+
+    /**
+     * What the places are places for, for wording. Singular.
+     */
+    public function seatUnit(): string
+    {
+        return $this->isManagerMode() ? 'team place' : 'place';
+    }
+
+    /**
+     * The same, pluralised, because "1 team places left" reads badly.
+     */
+    public function seatUnitPlural(): string
+    {
+        return $this->isManagerMode() ? 'team places' : 'places';
+    }
+
+    /**
+     * How the capacity should be described where it is being set or reported.
+     */
+    public function seatBasisLabel(): string
+    {
+        return $this->isManagerMode() ? 'teams' : 'people';
+    }
+
     public function seatsLeft(): int
     {
         return max(0, $this->seats_total - $this->seats_taken);

@@ -113,7 +113,7 @@
         @if ($event->seats_total > 0)
             <div class="mb-5 mt-auto">
                 <div class="flex justify-between text-xs text-gray-500 mb-1">
-                    <span>{{ $event->seatsLeft() }} of {{ $event->seats_total }} places left</span>
+                    <span>{{ $event->seatsLeft() }} of {{ $event->seats_total }} {{ $event->seatsLeft() === 1 ? $event->seatUnit() : $event->seatUnitPlural() }} left</span>
                     <span>{{ $event->filledPercent() }}% filled</span>
                 </div>
                 <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden" aria-hidden="true">

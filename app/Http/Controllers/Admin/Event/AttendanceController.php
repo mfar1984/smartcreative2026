@@ -510,11 +510,16 @@ class AttendanceController extends Controller
      * ------------------------------------------------------------------ */
 
     /**
-     * Give a place back to the event.
+     * Give a place back to the event when a person leaves an entry.
      *
-     * Seats are counted per head, so a person leaving frees one. Locked and
-     * clamped the same way the public form takes them, so two counters working at
-     * once cannot drive the count below zero.
+     * Only meaningful where a place belongs to a person. On a squad event the
+     * place belongs to the entry, so a player being removed or swapped out frees
+     * nothing: the team still holds its place and is still going to turn up. This
+     * used to decrement regardless, which quietly handed a thirty two team event
+     * an extra place every time a squad dropped a player.
+     *
+     * Locked and clamped the same way the public form takes them, so two counters
+     * working at once cannot drive the count below zero.
      */
     private function releaseSeat(?EventRegistration $registration, int $count): void
     {
@@ -525,6 +530,13 @@ class AttendanceController extends Controller
         $event = Event::query()->whereKey($registration->event_id)->lockForUpdate()->first();
 
         if ($event === null) {
+            return;
+        }
+
+        // Not routed through seatsForEntry(): that answers what a whole entry
+        // occupies, and $count here is a number of people inside an entry that is
+        // staying. On a squad event the answer is simply that nothing is freed.
+        if ($event->isManagerMode()) {
             return;
         }
 

@@ -166,7 +166,7 @@
                     <x-admin.field-row label="Seats">
                         <p class="md:pt-2.5 text-sm text-gray-900">
                             @if ($event->seats_total > 0)
-                                {{ $event->seats_taken }} / {{ $event->seats_total }}
+                                {{ $event->seats_taken }} / {{ $event->seats_total }} {{ $event->seatBasisLabel() }}
                                 <span class="text-xs text-gray-500">({{ $event->seatsLeft() }} left, {{ $event->filledPercent() }}% filled)</span>
                             @else
                                 Unlimited

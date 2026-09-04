@@ -409,14 +409,26 @@ class ParticipantController extends Controller
             'people_named' => $registration->participants->pluck('full_name')->all(),
         ], null);
 
-        DB::transaction(function () use ($registration, $headCount) {
+        /*
+         | Given back in the same unit it was taken in. A squad occupied one place
+         | however many players it named, so deleting it frees one, not seven.
+         | Returning the head count would have handed the event six places it never
+         | had, and the message would have claimed it too.
+         |
+         | Read from the loaded event rather than the locked row below because the
+         | mode decides the unit and the mode is not what the lock protects; the
+         | lock is there for the arithmetic on the counter.
+         */
+        $seatsHeld = $registration->event?->seatsForEntry($headCount) ?? 0;
+
+        DB::transaction(function () use ($registration, $seatsHeld) {
             // Locked and clamped the same way the public form takes them, so two
             // administrators deleting at once cannot push the count negative.
-            if ($registration->event_id !== null) {
+            if ($registration->event_id !== null && $seatsHeld > 0) {
                 $event = Event::query()->whereKey($registration->event_id)->lockForUpdate()->first();
 
-                if ($event !== null && $headCount > 0) {
-                    $event->seats_taken = max(0, $event->seats_taken - $headCount);
+                if ($event !== null) {
+                    $event->seats_taken = max(0, $event->seats_taken - $seatsHeld);
                     $event->save();
                 }
             }
@@ -459,15 +471,24 @@ class ParticipantController extends Controller
 
         AdminLogger::activity(
             'participants.delete',
-            sprintf('Deleted registration %s (%s), releasing %d seat(s).', $reference, $name, $headCount),
+            sprintf(
+                'Deleted registration %s (%s), %d people, releasing %d place(s).',
+                $reference,
+                $name,
+                $headCount,
+                $seatsHeld,
+            ),
         );
 
         return redirect()
             ->route('admin.event.participants')
             ->with('status', sprintf(
-                'Registration %s deleted. %d seat(s) released back to the event.',
+                'Registration %s deleted. %d %s released back to the event.',
                 $reference,
-                $headCount,
+                $seatsHeld,
+                $seatsHeld === 1
+                    ? $registration->event?->seatUnit() ?? 'place'
+                    : $registration->event?->seatUnitPlural() ?? 'places',
             ));
     }
 

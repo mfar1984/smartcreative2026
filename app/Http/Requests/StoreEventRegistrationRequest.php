@@ -418,6 +418,14 @@ class StoreEventRegistrationRequest extends FormRequest
         }
     }
 
+    /**
+     * Refuse an entry the event has no room for.
+     *
+     * Measured in places, not in people. A squad wants one place however many
+     * players it names, so an event offering thirty two places to teams has room
+     * for thirty two squads rather than thirty two players. Counting heads here
+     * is what turned a thirty two team event away after four entries.
+     */
     private function checkSeatsAvailable(Validator $validator): void
     {
         $event = $this->event();
@@ -426,19 +434,31 @@ class StoreEventRegistrationRequest extends FormRequest
             return;
         }
 
-        $requested = count($this->input('participants', []));
+        $named = count($this->input('participants', []));
+        $wanted = $event->seatsForEntry($named);
+        $left = $event->seatsLeft();
 
-        if ($requested > $event->seatsLeft()) {
-            $validator->errors()->add(
-                'participants',
-                sprintf(
-                    'Only %d %s left for this event, but %d %s named.',
-                    $event->seatsLeft(),
-                    $event->seatsLeft() === 1 ? 'place is' : 'places are',
-                    $requested,
-                    $requested === 1 ? 'person is' : 'people are',
-                )
-            );
+        if ($wanted <= $left) {
+            return;
         }
+
+        // A squad is one place or nothing, so naming fewer players would not help
+        // and the message must not imply it would.
+        if ($event->isManagerMode()) {
+            $validator->errors()->add('participants', 'This event is fully booked.');
+
+            return;
+        }
+
+        $validator->errors()->add(
+            'participants',
+            sprintf(
+                'Only %d %s left for this event, but %d %s named.',
+                $left,
+                $left === 1 ? 'place is' : 'places are',
+                $named,
+                $named === 1 ? 'person is' : 'people are',
+            )
+        );
     }
 }

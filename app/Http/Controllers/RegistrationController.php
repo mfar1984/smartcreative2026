@@ -98,8 +98,10 @@ class RegistrationController extends Controller
     ) {
         $participants = $request->validated()['participants'];
 
-        // Seats are counted per head, because each person occupies a place.
-        // The fee is not: see Event::registrationAmount().
+        // How many people are named, which is not the same as how many places
+        // they occupy. A squad entry takes one place however many players it
+        // names, the same way it pays one fee: see Event::seatsForEntry() and
+        // Event::registrationAmount().
         $headCount = count($participants);
 
         // Stored before the transaction opens: a file write cannot be rolled back
@@ -114,8 +116,18 @@ class RegistrationController extends Controller
             /** @var Event $locked */
             $locked = Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
 
-            if ($locked->seats_total > 0 && $headCount > $locked->seatsLeft()) {
-                return ['error' => 'The remaining places were taken while you were filling in the form. Please try again with fewer people.'];
+            // Asked of the locked row rather than the one the form was built
+            // from, so the mode read here is the mode that is about to be
+            // charged against.
+            $seatsWanted = $locked->seatsForEntry($headCount);
+
+            if ($locked->seats_total > 0 && $seatsWanted > $locked->seatsLeft()) {
+                // A squad wants exactly one place, so there is no smaller entry it
+                // could retry with. Only an individual entry can usefully be told
+                // to name fewer people.
+                return ['error' => $locked->isManagerMode()
+                    ? 'The last place was taken while you were filling in the form.'
+                    : 'The remaining places were taken while you were filling in the form. Please try again with fewer people.'];
             }
 
             // Re-price against locked catalogue rows. Validation ran before this
@@ -178,7 +190,12 @@ class RegistrationController extends Controller
                 EventAddonVariant::query()->whereKey($variantId)->increment('stock_taken', $quantity);
             }
 
-            $locked->increment('seats_taken', $headCount);
+            // $seatsWanted, not $headCount: one place for a squad, one per person
+            // for an individual event. Skipped at zero so a mode that charges
+            // nothing cannot write a pointless update.
+            if ($seatsWanted > 0) {
+                $locked->increment('seats_taken', $seatsWanted);
+            }
 
             return ['registration' => $registration];
         });

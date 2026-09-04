@@ -262,6 +262,18 @@
                     <input type="number" id="seats_total" name="seats_total" required min="0" max="100000"
                            value="{{ old('seats_total', $event->seats_total ?? 0) }}"
                            class="{{ $input }}">
+
+                    {{-- The unit depends on the registration mode, and the number is
+                         meaningless without it: 32 reads as 32 players on a squad
+                         event when it actually means 32 squads. --}}
+                    <p class="text-xs text-gray-500 mt-2" id="seat-basis-note">
+                        <span @class(['hidden' => ! $isManagerMode]) data-seat-basis="manager">
+                            Counted in <strong>teams</strong>. One squad takes one place, whether it enters 2 players or 20.
+                        </span>
+                        <span @class(['hidden' => $isManagerMode]) data-seat-basis="individual">
+                            Counted in <strong>people</strong>. Each person named takes one place.
+                        </span>
+                    </p>
                 </x-admin.field-row>
 
                 <x-admin.field-row label="Status" help="Only Open and Closing Soon accept registrations." for="status" :required="true" error="status">
@@ -512,6 +524,10 @@
                 // And keep the role explanation matching the mode too.
                 document.querySelector('[data-role-note="manager"]')?.classList.toggle('hidden', !isManager);
                 document.querySelector('[data-role-note="individual"]')?.classList.toggle('hidden', isManager);
+
+                // Total Seats changes unit with the mode: 32 squads, or 32 people.
+                document.querySelector('[data-seat-basis="manager"]')?.classList.toggle('hidden', !isManager);
+                document.querySelector('[data-seat-basis="individual"]')?.classList.toggle('hidden', isManager);
             });
         }
 

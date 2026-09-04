@@ -131,7 +131,9 @@
 
                                 <td class="px-5 py-3 whitespace-nowrap">
                                     <span class="text-gray-900">{{ $event->seats_taken }} / {{ $event->seats_total }}</span>
-                                    <span class="block text-xs text-gray-400">{{ $event->filledPercent() }}% filled</span>
+                                    <span class="block text-xs text-gray-400">
+                                        {{ $event->filledPercent() }}% filled &middot; {{ $event->seatBasisLabel() }}
+                                    </span>
                                 </td>
 
                                 <td class="px-5 py-3 whitespace-nowrap text-gray-700">
