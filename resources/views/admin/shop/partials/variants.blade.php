@@ -21,6 +21,11 @@
                     'label' => $variant->label,
                     'sku' => $variant->sku,
                     'price' => $variant->price,
+                    // Stored in grams, edited in kilograms. Null stays null so the
+                    // box comes back empty and keeps meaning "same as product".
+                    'weight_kg' => $variant->weight_grams === null
+                        ? null
+                        : round($variant->weight_grams / 1000, 3),
                     'stock' => $variant->stock,
                     'stock_taken' => $variant->stock_taken,
                 ])
@@ -38,9 +43,9 @@
     <div class="px-5 py-4">
         <p class="text-sm text-gray-600">
             Use options when the same product comes in choices, for example a shirt in S, M
-            and L. Each option carries its own stock, and can carry its own price and SKU.
-            Leave an option's price blank to charge the product price, and its stock blank
-            for unlimited.
+            and L. Each option carries its own stock, and can carry its own price, weight
+            and SKU. Leave an option's price or weight blank to use the product's, and its
+            stock blank for unlimited.
         </p>
 
         <p class="text-sm text-gray-500 mt-2">
@@ -77,13 +82,14 @@
              sm:grid, so 'hidden' alone would lose to it; both are managed together
              by the script. --}}
         <div data-variant-head @class([
-            'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem_7rem_2.5rem] gap-3 px-1 pb-2 mb-1 border-b border-gray-200',
+            'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem_7rem_7rem_2.5rem] gap-3 px-1 pb-2 mb-1 border-b border-gray-200',
             'hidden' => count($variantRows) === 0,
             'sm:grid' => count($variantRows) > 0,
         ])>
             <span class="text-xs font-bold uppercase tracking-wide text-gray-500">Option</span>
             <span class="text-xs font-bold uppercase tracking-wide text-gray-500">SKU</span>
             <span class="text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Price</span>
+            <span class="text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Weight (kg)</span>
             <span class="text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Stock</span>
             <span class="sr-only">Remove</span>
         </div>

@@ -191,7 +191,7 @@ final class Cart
     /**
      * The basket, priced from the database.
      *
-     * @return Collection<int, array{key: string, product: ShopProduct, variant: ShopProductVariant|null, quantity: int, unit_price: float, line_total: float, weight_grams: int, capped_to: int|null}>
+     * @return Collection<int, array{key: string, product: ShopProduct, variant: ShopProductVariant|null, quantity: int, unit_price: float, line_total: float, weight_grams: int, capped_to: int|null}>  weight_grams is per unit
      */
     public static function lines(): Collection
     {
@@ -255,7 +255,18 @@ final class Cart
                 'quantity' => $quantity,
                 'unit_price' => $unit,
                 'line_total' => round($unit * $quantity, 2),
-                'weight_grams' => (int) $product->weight_grams,
+                /*
+                 | Per unit, not per line, which is the same thing unit_price means
+                 | and what ShopOrder::weightGrams() multiplies by the quantity.
+                 |
+                 | Asked of the variant where there is one, so a shirt in 3XL can
+                 | weigh more than the same shirt in S. Before this it was always
+                 | the product's weight, which was harmless while postage was a flat
+                 | rate and wrong the moment a courier is asked for a real price.
+                 */
+                'weight_grams' => $variant !== null
+                    ? $variant->unitWeightGrams()
+                    : (int) $product->weight_grams,
                 'capped_to' => $capped,
             ]);
 
@@ -300,6 +311,42 @@ final class Cart
     public static function itemsTotal(): float
     {
         return round((float) self::lines()->sum('line_total'), 2);
+    }
+
+    /**
+     * What the whole basket weighs, in grams.
+     *
+     * The mirror of ShopOrder::weightGrams(), which cannot be used here because a
+     * quotation is wanted at checkout, before any order row exists. Both multiply
+     * the per unit weight by the quantity, so the figure quoted to the buyer and
+     * the figure recorded against the order agree.
+     *
+     * Zero means nothing in the basket has a weight. That is not the same as a
+     * light parcel and callers have to tell the difference: a courier cannot be
+     * asked to price an unknown weight, so zero is a reason to fall back rather
+     * than a number to send.
+     */
+    public static function parcelWeightGrams(): int
+    {
+        return (int) self::lines()->sum(
+            fn (array $line) => (int) $line['weight_grams'] * (int) $line['quantity']
+        );
+    }
+
+    /**
+     * Whether every line knows what it weighs.
+     *
+     * A single unweighed line makes the whole parcel weight a guess, so this is
+     * asked as a whole rather than per line. Postage would come back priced for
+     * less than is actually being posted otherwise, and the difference is paid by
+     * whoever runs the shop.
+     */
+    public static function hasCompleteWeights(): bool
+    {
+        $lines = self::lines();
+
+        return $lines->isNotEmpty()
+            && $lines->every(fn (array $line) => (int) $line['weight_grams'] > 0);
     }
 
     /* ---------------------------------------------------------------------

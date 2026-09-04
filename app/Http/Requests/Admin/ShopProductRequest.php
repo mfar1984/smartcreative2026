@@ -157,6 +157,17 @@ class ShopProductRequest extends FormRequest
             // Nullable is meaningful: blank means charge the product price.
             'variants.*.price' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
 
+            /*
+             | Blank means use the product's weight, which is what most options
+             | want. Accepted in kilograms because that is what a scale and a
+             | courier both speak, and converted to whole grams once on the way in,
+             | the same as the product field above.
+             |
+             | Three decimals is one gram. Anything finer is beyond what any
+             | courier prices on.
+             */
+            'variants.*.weight_kg' => ['nullable', 'numeric', 'min:0', 'max:999.999'],
+
             // Nullable means unlimited.
             'variants.*.stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
         ];
@@ -180,6 +191,7 @@ class ShopProductRequest extends FormRequest
             'variants.max' => 'A product can carry at most ' . self::MAX_VARIANTS . ' options.',
             'variants.*.label.required' => 'Every option needs a label, for example "Size M".',
             'variants.*.price.numeric' => 'An option price must be a number, or blank to use the product price.',
+            'variants.*.weight_kg.numeric' => 'An option weight must be a number in kilograms, or blank to use the product weight.',
             'variants.*.stock.integer' => 'Option stock must be a whole number, or blank for unlimited.',
         ];
     }
@@ -556,11 +568,30 @@ class ShopProductRequest extends FormRequest
     }
 
     /**
+     * The option rows, with the weight converted the way the product's is.
+     *
+     * The form asks for kilograms because that is what a scale reads and what a
+     * courier quotes in; the column is whole grams. Converting here rather than in
+     * the writer keeps the rule in one place: kilograms in, grams out, rounded
+     * once. Blank stays null, which means "the product weighs this too".
+     *
      * @return array<int, array<string, mixed>>
      */
     public function variantRows(): array
     {
-        return $this->validated()['variants'] ?? [];
+        $rows = $this->validated()['variants'] ?? [];
+
+        return array_map(function (array $row) {
+            $kg = $row['weight_kg'] ?? null;
+
+            $row['weight_grams'] = ($kg === null || $kg === '')
+                ? null
+                : (int) round((float) $kg * 1000);
+
+            unset($row['weight_kg']);
+
+            return $row;
+        }, $rows);
     }
 
     /**

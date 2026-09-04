@@ -58,11 +58,14 @@ class ShopVariantWriter
                     'sku' => $row['sku'] ?? null,
 
                     /*
-                     | Null is meaningful in both of these. A blank price means
-                     | "charge the product price" and a blank stock means
-                     | "unlimited", so neither may be coerced to zero.
+                     | Null is meaningful in all three of these. A blank price means
+                     | "charge the product price", a blank weight means "the product
+                     | weighs this too", and a blank stock means "unlimited", so
+                     | none of them may be coerced to zero. A weight coerced to zero
+                     | in particular would have a courier quote for an empty parcel.
                      */
                     'price' => $row['price'] === null ? null : round((float) $row['price'], 2),
+                    'weight_grams' => $row['weight_grams'] === null ? null : (int) $row['weight_grams'],
                     'stock' => $row['stock'] === null ? null : (int) $row['stock'],
 
                     // Display order follows the order of the form, so dragging a row

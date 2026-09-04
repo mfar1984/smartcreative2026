@@ -10,7 +10,7 @@
     $taken = (int) ($row['stock_taken'] ?? 0);
 @endphp
 
-<div data-variant-row class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem_7rem_2.5rem] gap-2 sm:gap-3 items-start">
+<div data-variant-row class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem_7rem_7rem_2.5rem] gap-2 sm:gap-3 items-start">
 
     {{-- Only present for a saved option, so an edit updates the row in place
          instead of dropping it and losing its stock count. --}}
@@ -47,6 +47,20 @@
                placeholder="Same as product"
                class="{{ $miniInput }} text-right tabular-nums">
         @error("variants.{$index}.price")
+            <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+        @enderror
+    </div>
+
+    <div>
+        <label class="sm:sr-only block text-xs font-semibold text-gray-600 mb-1">Weight (kg)</label>
+        {{-- Blank means the product's weight, which is right for most options. It
+             matters where it differs: a courier prices mainly on weight, so a shirt
+             in 3XL quoted as a shirt in S is postage paid by the shop. --}}
+        <input type="number" name="{{ $name }}[weight_kg]" step="0.001" min="0" max="999.999"
+               value="{{ $row['weight_kg'] ?? '' }}"
+               placeholder="Same as product"
+               class="{{ $miniInput }} text-right tabular-nums">
+        @error("variants.{$index}.weight_kg")
             <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
         @enderror
     </div>
