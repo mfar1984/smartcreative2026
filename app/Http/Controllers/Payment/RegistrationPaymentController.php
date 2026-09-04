@@ -71,6 +71,23 @@ class RegistrationPaymentController extends Controller
             return redirect()->to(self::urlFor($registration));
         }
 
+        /*
+         | Send an impatient payer back to the checkout they already have, rather than
+         | opening a second one.
+         |
+         | This is the fix for the fault that started all of this. Pressing Pay twice
+         | used to create two purchases at the gateway; whichever one settled, the
+         | registration ended up pointing at the other, and a real RM 250 payment went
+         | unmatched. Reusing the live attempt means there is only ever one purchase to
+         | settle.
+         |
+         | Only while the attempt is still open. A failed or expired one is not
+         | reusable, and a payer who abandoned a QR code deserves a fresh page.
+         */
+        if ($reusable = $this->reusableCheckout($registration)) {
+            return redirect()->away($reusable);
+        }
+
         try {
             $gateway = $this->gateways->active();
 
@@ -93,9 +110,53 @@ class RegistrationPaymentController extends Controller
 
         // Recorded before the redirect, so the webhook can find this
         // registration by the gateway's id whatever happens next.
-        $this->updater->markPending($registration, $session->reference, $gateway->label());
+        $this->updater->markPending(
+            $registration,
+            $session->reference,
+            $gateway->label(),
+            $session->checkoutUrl,
+        );
 
         return redirect()->away($session->checkoutUrl);
+    }
+
+    /**
+     * The checkout URL of an attempt that is still open, or null.
+     *
+     * Asks the gateway rather than trusting the stored status, because the stored one
+     * is only as fresh as the last webhook that got through. A purchase the gateway
+     * reports as still awaiting execution is one the payer can go back to.
+     *
+     * Any problem reaching the gateway returns null, so the worst case is the old
+     * behaviour of opening a new checkout rather than a payer stuck at an error.
+     */
+    private function reusableCheckout(EventRegistration $registration): ?string
+    {
+        $latest = $registration->checkouts()->first();
+
+        if ($latest === null || blank($latest->checkout_url)) {
+            return null;
+        }
+
+        try {
+            $payment = $this->gateways->active()->fetchPayment($latest->purchase_id);
+        } catch (PaymentGatewayException) {
+            return null;
+        }
+
+        if ($payment === null) {
+            return null;
+        }
+
+        $status = $payment['status'] ?? null;
+
+        // The states where the payer has somewhere to go back to. Anything settled,
+        // failed or expired is finished with.
+        $open = ['created', 'viewed', 'pending_execute', 'pending_charge'];
+
+        return is_string($status) && in_array($status, $open, true)
+            ? $latest->checkout_url
+            : null;
     }
 
     /**

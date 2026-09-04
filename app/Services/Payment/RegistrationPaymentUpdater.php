@@ -223,6 +223,49 @@ class RegistrationPaymentUpdater
     }
 
     /**
+     * Point the registration at the purchase that actually settled.
+     *
+     * Needed because the stored reference is only the most recent attempt. When an
+     * earlier purchase is the one that got paid, leaving the column alone would mean
+     * every later read-back asks the gateway about the wrong purchase and gets
+     * "overdue" back, and refunding would target a purchase that never took money.
+     *
+     * @param  array<string, mixed>|null  $payment  the gateway's record, when known
+     */
+    public function adoptPurchase(EventRegistration $registration, string $purchaseId, ?array $payment = null): void
+    {
+        if ($registration->payment_reference === $purchaseId) {
+            return;
+        }
+
+        $previous = $registration->payment_reference;
+
+        $registration->payment_reference = $purchaseId;
+
+        if ($payment !== null) {
+            $registration->payment_details = $payment;
+            $registration->payment_synced_at = now();
+        }
+
+        $registration->save();
+
+        // Recorded on both logs: it changes which purchase a refund would go to,
+        // which is not a change anybody should have to guess at later.
+        AdminLogger::activity('payments.reference', sprintf(
+            'Pointed %s at purchase %s, which is the one that settled. It was pointing at %s.',
+            $registration->reference,
+            $purchaseId,
+            $previous ?: 'nothing',
+        ));
+
+        AdminLogger::audit($registration, 'payment.reference-adopted', [
+            'payment_reference' => $previous,
+        ], [
+            'payment_reference' => $purchaseId,
+        ]);
+    }
+
+    /**
      * Keep the gateway's own record of a payment, without touching its status.
      *
      * Used by the webhook, where the pushed body is the purchase object itself,
@@ -240,8 +283,48 @@ class RegistrationPaymentUpdater
     /**
      * Record that a checkout has been opened, without claiming it succeeded.
      */
-    public function markPending(EventRegistration $registration, string $gatewayReference, string $source): void
-    {
+    public function markPending(
+        EventRegistration $registration,
+        string $gatewayReference,
+        string $source,
+        ?string $checkoutUrl = null,
+    ): void {
+        /*
+         | Recorded before the column is overwritten, and this is the whole point.
+         |
+         | payment_reference holds one attempt. A payer who presses Pay twice creates
+         | a second purchase, and if the first is the one that settles then its id is
+         | lost the moment this method runs. That happened: a paid purchase became
+         | unmatchable and its registration read "failed" while the money sat in the
+         | account. The attempt is kept here so nothing can go missing again.
+         */
+        $registration->checkouts()->updateOrCreate(
+            ['purchase_id' => $gatewayReference],
+            [
+                'checkout_url' => $checkoutUrl,
+                'gateway' => 'chip',
+                'opened_at' => now(),
+            ],
+        );
+
+        /*
+         | A settled entry keeps its reference. Overwriting it would point the record
+         | away from the purchase that actually took the money, which is exactly the
+         | fault this guard exists to prevent.
+         */
+        if ($registration->isPaid()) {
+            AdminLogger::activity(
+                'payments.checkout',
+                sprintf(
+                    'Opened a %s checkout for %s, which is already paid. The existing reference was kept.',
+                    $source,
+                    $registration->reference,
+                ),
+            );
+
+            return;
+        }
+
         $registration->payment_reference = $gatewayReference;
         $registration->payment_status = EventRegistration::PAYMENT_PENDING;
 
@@ -341,6 +424,26 @@ class RegistrationPaymentUpdater
          */
         if ($registration->payment_status === EventRegistration::PAYMENT_PAID
             && $status === EventRegistration::PAYMENT_PARTIAL) {
+            return false;
+        }
+
+        /*
+         | Nor to failed. A purchase that has been paid cannot later fail; it can only
+         | be refunded, which is a separate status.
+         |
+         | This guard has teeth. Where a payer opened two checkouts and the first one
+         | settled, the registration can be left pointing at the second, and reading
+         | that one back reports "overdue". Without this, opening the entry in the
+         | admin would quietly mark a paid registration as failed and take the money
+         | out of the takings.
+         */
+        if ($registration->payment_status === EventRegistration::PAYMENT_PAID
+            && $status === EventRegistration::PAYMENT_FAILED) {
+            Log::info('Refused to fail a paid registration.', [
+                'registration' => $registration->reference,
+                'payment_reference' => $registration->payment_reference,
+            ]);
+
             return false;
         }
 

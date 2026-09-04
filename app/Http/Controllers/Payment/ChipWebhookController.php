@@ -74,9 +74,7 @@ class ChipWebhookController extends Controller
             return response()->json(['message' => 'Acknowledged.']);
         }
 
-        $registration = EventRegistration::query()
-            ->where('payment_reference', $purchaseId)
-            ->first();
+        $registration = $this->match($payload, $purchaseId, $event);
 
         if ($registration === null) {
             // Most likely a purchase created outside this site. Acknowledged so
@@ -84,6 +82,7 @@ class ChipWebhookController extends Controller
             Log::info('CHIP webhook ignored: purchase does not match a registration.', [
                 'event' => $event,
                 'purchase_id' => $purchaseId,
+                'reference' => $this->ourReference($payload),
             ]);
 
             return response()->json(['message' => 'Acknowledged.']);
@@ -100,6 +99,16 @@ class ChipWebhookController extends Controller
             return response()->json(['message' => 'Acknowledged.']);
         }
 
+        /*
+         | An outcome that settles or reverses the money decides which purchase this
+         | registration is about. A pending event does not: the stored reference may
+         | well be a newer live attempt, and moving it backwards would send the payer
+         | and the gateway to different places.
+         */
+        if (in_array($status, [EventRegistration::PAYMENT_PAID, EventRegistration::PAYMENT_REFUNDED], true)) {
+            $this->updater->adoptPurchase($registration, $purchaseId);
+        }
+
         // The pushed body is the purchase object itself, so it is kept as the
         // freshest record of the payment for the admin detail screen.
         if (is_string($payload['status'] ?? null)) {
@@ -109,6 +118,91 @@ class ChipWebhookController extends Controller
         $this->updater->apply($registration, $status, $event);
 
         return response()->json(['message' => 'Acknowledged.']);
+    }
+
+    /**
+     * Find the registration this purchase belongs to.
+     *
+     * Three ways, tried in order of how directly each one proves the link.
+     *
+     * The purchase id on the registration is the strongest, and it is what used to be
+     * the only check. It is not enough: a payer who presses Pay twice creates a
+     * second purchase, the column moves to the second, and when the first is the one
+     * that gets paid its webhook arrives describing a purchase nothing points at any
+     * more. That is not a hypothetical. It happened, and a paid purchase went
+     * unmatched while its registration read "failed".
+     *
+     * So the recorded attempts are checked next, and then our own reference, which
+     * CHIP echoes back in the payload because createCheckout() sends it. Matching on
+     * it is safe: the value is one we generated, it is unique, and it never leaves
+     * our control.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function match(array $payload, string $purchaseId, string $event): ?EventRegistration
+    {
+        $byPurchase = EventRegistration::query()
+            ->where('payment_reference', $purchaseId)
+            ->first();
+
+        if ($byPurchase !== null) {
+            return $byPurchase;
+        }
+
+        $byAttempt = EventRegistration::query()
+            ->whereHas('checkouts', fn ($query) => $query->where('purchase_id', $purchaseId))
+            ->first();
+
+        if ($byAttempt !== null) {
+            Log::info('CHIP webhook matched an earlier checkout attempt.', [
+                'event' => $event,
+                'purchase_id' => $purchaseId,
+                'reference' => $byAttempt->reference,
+                'current_reference' => $byAttempt->payment_reference,
+            ]);
+
+            return $byAttempt;
+        }
+
+        $ourReference = $this->ourReference($payload);
+
+        if ($ourReference === null) {
+            return null;
+        }
+
+        $byReference = EventRegistration::query()
+            ->where('reference', $ourReference)
+            ->first();
+
+        if ($byReference !== null) {
+            Log::info('CHIP webhook matched on our own reference.', [
+                'event' => $event,
+                'purchase_id' => $purchaseId,
+                'reference' => $ourReference,
+            ]);
+        }
+
+        return $byReference;
+    }
+
+    /**
+     * Our own reference, as CHIP echoes it back.
+     *
+     * Set on the purchase by createCheckout(), so it is the registration's reference
+     * rather than anything the gateway invented. CHIP also sends a
+     * `reference_generated` of its own, which is deliberately not read here.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function ourReference(array $payload): ?string
+    {
+        foreach ([$payload['reference'] ?? null, $payload['data']['reference'] ?? null] as $candidate) {
+            if (is_string($candidate) && $candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**

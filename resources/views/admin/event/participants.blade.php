@@ -193,6 +193,24 @@
                                             </svg>
                                         </a>
 
+                                        {{-- Tally against the gateway. Offered on anything that
+                                             carries a charge and is not settled, which is exactly
+                                             where the two sides can disagree. Not on a free entry:
+                                             there is no purchase to compare it against. --}}
+                                        @if ($canTally && ! $registration->isFree() && ! $registration->isPaid())
+                                            <button type="button"
+                                                    data-open-tally="{{ $registration->id }}"
+                                                    class="p-1.5 rounded-lg text-purple-600 hover:bg-purple-50 transition"
+                                                    title="Tally {{ $registration->reference }} against the payment gateway"
+                                                    aria-label="Tally {{ $registration->reference }} against the payment gateway">
+                                                {{-- Two arrows reconciling, rather than a tick: this
+                                                     compares two records, it does not assert one. --}}
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                                </svg>
+                                            </button>
+                                        @endif
+
                                         {{-- Record money that arrived outside the gateway. Offered
                                              whenever a balance is owed, which includes a part-paid
                                              entry taking its second instalment. --}}
@@ -276,11 +294,139 @@
     </x-admin.settings-shell>
 
     {{--
-        One dialog per entry that can take a payment.
+        Tally dialogs. One per entry that could disagree with the gateway.
 
-        Rendered outside the table rather than inside the row: a fixed overlay
-        nested in a cell with overflow-x-auto is clipped by it, and the row is
-        already the widest thing on the page.
+        Rendered outside the table rather than inside the row, like the payment
+        dialogs below: a fixed overlay nested in a cell with overflow-x-auto is
+        clipped by it, and the row is already the widest thing on the page.
+
+        A dialog rather than a bare button because of the one case that needs a typed
+        value: a purchase the application never recorded, from before its attempts were
+        tracked. Everything since is found without anybody typing anything, so the box
+        is optional and the button works on its own.
+    --}}
+    @foreach ($registrations as $registration)
+        @continue (! $canTally || $registration->isFree() || $registration->isPaid())
+
+        @php $isTallyReopened = (int) old('tally_for') === (int) $registration->id; @endphp
+
+        <div id="tally-modal-{{ $registration->id }}"
+             data-tally-modal="{{ $registration->id }}"
+             @class(['fixed inset-0 z-50 overflow-y-auto', 'hidden' => ! $isTallyReopened])
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="tally-title-{{ $registration->id }}">
+
+            <div class="fixed inset-0 bg-gray-900/60" data-close-tally></div>
+
+            <div class="relative min-h-full flex items-start justify-center p-4">
+                <div class="relative w-full max-w-lg bg-white rounded-xl shadow-2xl my-8">
+
+                    <div class="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                        <div class="min-w-0">
+                            <h2 id="tally-title-{{ $registration->id }}" class="text-lg font-bold text-gray-900">
+                                Tally against the gateway
+                            </h2>
+                            <p class="text-xs text-gray-500 mt-0.5">
+                                {{ $registration->reference }} &middot; {{ $registration->displayName() }}
+                            </p>
+                        </div>
+
+                        <button type="button" data-close-tally
+                                class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition shrink-0"
+                                aria-label="Close">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <form action="{{ route('admin.event.participants.tally', $registration) }}" method="POST"
+                          class="px-6 py-5 space-y-4">
+                        @csrf
+                        <input type="hidden" name="tally_for" value="{{ $registration->id }}">
+
+                        @if ($isTallyReopened)
+                            @error('tally')
+                                <p class="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-800">{{ $message }}</p>
+                            @enderror
+                        @endif
+
+                        <div class="rounded-lg border border-purple-200 bg-purple-50 px-3.5 py-3">
+                            <p class="text-sm text-purple-900 leading-relaxed">
+                                This asks the gateway about every purchase on record for this entry. If
+                                one of them was paid, the entry is pointed at it and recorded as paid.
+                            </p>
+                            <p class="text-xs text-purple-800 mt-2">
+                                It believes only the gateway, so it cannot mark anything paid that the
+                                gateway does not confirm.
+                            </p>
+                        </div>
+
+                        <dl class="text-sm space-y-1.5">
+                            <div class="flex flex-wrap justify-between gap-2">
+                                <dt class="text-gray-600">Charged</dt>
+                                <dd class="font-semibold text-gray-900 tabular-nums">{{ $registration->amountLabel() }}</dd>
+                            </div>
+                            <div class="flex flex-wrap justify-between gap-2">
+                                <dt class="text-gray-600">Recorded here as</dt>
+                                <dd class="font-semibold text-gray-900">{{ $registration->paymentStatusLabel() }}</dd>
+                            </div>
+                            <div class="flex flex-wrap justify-between gap-2">
+                                <dt class="text-gray-600">Purchases on record</dt>
+                                <dd class="font-semibold text-gray-900 tabular-nums">{{ $registration->checkouts->count() }}</dd>
+                            </div>
+                        </dl>
+
+                        @if ($registration->checkouts->isNotEmpty())
+                            <ul class="space-y-1 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2.5">
+                                @foreach ($registration->checkouts as $attempt)
+                                    <li class="text-xs text-gray-600 break-all">
+                                        <code>{{ $attempt->purchase_id }}</code>
+                                        @if ($attempt->purchase_id === $registration->payment_reference)
+                                            <span class="text-gray-400">&middot; currently pointed at</span>
+                                        @endif
+                                    </li>
+                                @endforeach
+                            </ul>
+                        @endif
+
+                        <div>
+                            <label for="purchase_id_{{ $registration->id }}" class="block text-sm font-semibold text-gray-700 mb-1.5">
+                                Another purchase id
+                            </label>
+                            <input type="text" id="purchase_id_{{ $registration->id }}" name="purchase_id" maxlength="190"
+                                   value="{{ $isTallyReopened ? old('purchase_id') : '' }}"
+                                   placeholder="e.g. dedac8c6-ef56-4862-97cb-d6952332c31d"
+                                   class="{{ $filterInput }} w-full">
+                            <p class="text-xs text-gray-500 mt-1">
+                                Optional. Only needed for a purchase this site never recorded: copy its ID
+                                from the gateway's own payment page and it will be checked as well.
+                            </p>
+                            @if ($isTallyReopened)
+                                @error('purchase_id') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                            @endif
+                        </div>
+
+                        <div class="flex items-center justify-end gap-3 pt-1">
+                            <button type="button" data-close-tally
+                                    class="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                Cancel
+                            </button>
+
+                            <button type="submit"
+                                    class="inline-flex items-center gap-2 bg-purple-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-purple-700 transition shadow-sm">
+                                Check the gateway
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    @endforeach
+
+    {{--
+        One dialog per entry that can take a payment.
 
         Each carries a real POST form, so it works the same way the rest of this
         admin does and the amount cannot be submitted without being on screen.
@@ -530,15 +676,23 @@
      | depends on JavaScript, and a dialog reopened by the server after a failed
      | validation is already visible before this runs.
      */
-    (function () {
-        const dialogs = Array.from(document.querySelectorAll('[data-payment-modal]'));
+    /*
+     | Run once per kind of dialog on this screen. Both behave identically, so the
+     | logic is shared rather than copied: a second copy would be a second place for
+     | the scroll lock or the Escape handler to drift.
+     */
+    [
+        { modal: 'data-payment-modal', open: 'data-open-payment', close: 'data-close-payment' },
+        { modal: 'data-tally-modal', open: 'data-open-tally', close: 'data-close-tally' },
+    ].forEach(function (kind) {
+        const dialogs = Array.from(document.querySelectorAll('[' + kind.modal + ']'));
 
         if (dialogs.length === 0) {
             return;
         }
 
         function dialogFor(id) {
-            return dialogs.find((node) => node.dataset.paymentModal === String(id)) || null;
+            return dialogs.find((node) => node.getAttribute(kind.modal) === String(id)) || null;
         }
 
         function open(dialog) {
@@ -564,9 +718,9 @@
             dialogs.forEach(close);
         }
 
-        document.querySelectorAll('[data-open-payment]').forEach(function (trigger) {
+        document.querySelectorAll('[' + kind.open + ']').forEach(function (trigger) {
             trigger.addEventListener('click', function () {
-                const dialog = dialogFor(trigger.dataset.openPayment);
+                const dialog = dialogFor(trigger.getAttribute(kind.open));
 
                 if (dialog) {
                     closeAll();
@@ -576,7 +730,7 @@
         });
 
         dialogs.forEach(function (dialog) {
-            dialog.querySelectorAll('[data-close-payment]').forEach(function (trigger) {
+            dialog.querySelectorAll('[' + kind.close + ']').forEach(function (trigger) {
                 trigger.addEventListener('click', function () {
                     close(dialog);
                 });

@@ -13,6 +13,7 @@ use App\Services\EventNotifier;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\RegistrationPaymentUpdater;
+use App\Services\Payment\RegistrationTally;
 use App\Support\EventTemplates;
 use App\Support\GatewayPaymentRecord;
 use App\Support\ParticipantOptions;
@@ -67,7 +68,9 @@ class ParticipantController extends Controller
         $eventId = trim((string) $request->query('event'));
 
         $registrations = $this->scoped($tab)
-            ->with(['event', 'participants', 'addonLines'])
+            // checkouts is loaded for the tally dialog, which lists the purchases on
+            // record. Without it the list would query once per row.
+            ->with(['event', 'participants', 'addonLines', 'checkouts'])
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
                 $inner->where('reference', 'like', "%{$search}%")
                     ->orWhere('team_name', 'like', "%{$search}%")
@@ -98,6 +101,7 @@ class ParticipantController extends Controller
             'canNotify' => $request->user()->hasPermission('participants.notify'),
             'canDelete' => $request->user()->hasPermission('participants.delete'),
             'canRecordPayment' => $request->user()->hasPermission('payments.record'),
+            'canTally' => $request->user()->hasPermission('payments.tally'),
 
             // Only events that actually have entries, so the filter never offers
             // a choice that returns nothing.
@@ -254,13 +258,13 @@ class ParticipantController extends Controller
     public function recordPayment(Request $request, EventRegistration $registration)
     {
         if ($registration->isFree()) {
-            return back()->withErrors([
+            return back()->withInput()->withErrors([
                 'record_payment' => sprintf('%s is free of charge, so there is no payment to record.', $registration->reference),
             ]);
         }
 
         if (! $registration->owesBalance()) {
-            return back()->withErrors([
+            return back()->withInput()->withErrors([
                 'record_payment' => sprintf(
                     'Nothing is owed on %s: it is %s.',
                     $registration->reference,
@@ -369,7 +373,7 @@ class ParticipantController extends Controller
             EventRegistration::PAYMENT_PAID,
             EventRegistration::PAYMENT_REFUNDED,
         ], true)) {
-            return back()->withErrors([
+            return back()->withInput()->withErrors([
                 'registration' => sprintf(
                     '%s cannot be deleted because it is marked %s. Refund it at the gateway first, or leave it for the record.',
                     $registration->reference,
@@ -502,6 +506,59 @@ class ParticipantController extends Controller
             // No usable gateway. The stored snapshot is still shown.
             return false;
         }
+    }
+
+    /**
+     * Reconcile this entry against every purchase the gateway holds for it.
+     *
+     * Exists because the two sides can disagree and when they do the money is real
+     * while the record is wrong. A payer who presses Pay twice creates two purchases;
+     * whichever settles, the entry can be left pointing at the other and reading
+     * "failed" with the money already in the account.
+     *
+     * Believes only the gateway. It cannot mark anything paid on a person's word,
+     * which is what separates it from recording a payment by hand, and is why it is
+     * safe to offer wherever an entry looks wrong.
+     */
+    public function tally(Request $request, EventRegistration $registration, RegistrationTally $tally)
+    {
+        if ($registration->isFree()) {
+            return back()->withInput()->withErrors([
+                'tally' => sprintf('%s is free of charge, so there is nothing at the gateway to compare it against.', $registration->reference),
+            ]);
+        }
+
+        $validated = $request->validate([
+            /*
+             | A purchase id typed in from the gateway's own dashboard. For the case
+             | this feature was written for: a purchase the application never recorded,
+             | because the attempt that settled was overwritten before this was
+             | tracked. Everything after that date is found without it.
+             */
+            'purchase_id' => ['nullable', 'string', 'max:190'],
+        ], [
+            'purchase_id.max' => 'That does not look like a purchase id.',
+        ]);
+
+        try {
+            $result = $tally->settle($registration, $validated['purchase_id'] ?? null);
+        } catch (PaymentGatewayException $e) {
+            return back()->withInput()->withErrors([
+                'tally' => 'The gateway could not be reached, so nothing was compared and nothing was changed. ' . $e->publicMessage(),
+            ]);
+        }
+
+        AdminLogger::activity(
+            'payments.tally',
+            sprintf('Tallied %s against the gateway. %s', $registration->reference, $result['message']),
+        );
+
+        // A refusal is not an error: "the gateway says none of these were paid" is a
+        // useful answer, and putting it in the error slot would make it look like the
+        // press failed.
+        return $result['changed']
+            ? back()->with('status', $result['message'])
+            : back()->with('warning', $result['message']);
     }
 
     /**

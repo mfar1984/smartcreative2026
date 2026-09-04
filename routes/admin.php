@@ -132,6 +132,17 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware(['permission:payments.record', 'throttle:20,1'])
                 ->name('participants.payment');
 
+            /*
+             | Reconcile an entry against the gateway. Safer than recording a payment
+             | by hand, because it only ever believes what the gateway reports, but it
+             | still moves money into the takings so it carries its own permission.
+             |
+             | Throttled: each press makes one outbound call per purchase on record.
+             */
+            Route::post('participants/{registration}/tally', [ParticipantController::class, 'tally'])
+                ->middleware(['permission:payments.tally', 'throttle:20,1'])
+                ->name('participants.tally');
+
             Route::post('participants/{registration}/remind', [ParticipantController::class, 'remind'])
                 ->middleware('permission:participants.notify')
                 ->name('participants.remind');

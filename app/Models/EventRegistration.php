@@ -330,6 +330,20 @@ class EventRegistration extends Model
             ->orderByDesc('id');
     }
 
+    /**
+     * Every checkout ever opened at the gateway for this entry, newest first.
+     *
+     * Attempts rather than payments. Kept because `payment_reference` holds only the
+     * most recent one, and a payer who presses Pay twice can have the earlier
+     * attempt be the one that actually settles.
+     */
+    public function checkouts(): HasMany
+    {
+        return $this->hasMany(EventRegistrationCheckout::class, 'event_registration_id')
+            ->orderByDesc('opened_at')
+            ->orderByDesc('id');
+    }
+
     public function amountPaid(): float
     {
         return (float) $this->amount_paid;

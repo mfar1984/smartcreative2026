@@ -11,6 +11,14 @@ use Illuminate\Support\Str;
 
 class AdminLogger
 {
+    /**
+     * How much of a description the column holds.
+     *
+     * 252 rather than 255, so the three characters Str::limit appends to mark the cut
+     * still fit inside varchar(255).
+     */
+    private const DESCRIPTION_LIMIT = 252;
+
     public const LEVEL_INFO = 'info';
     public const LEVEL_WARN = 'warn';
     public const LEVEL_ERROR = 'error';
@@ -56,7 +64,17 @@ class AdminLogger
             'action' => $action,
             'level' => array_key_exists($level, self::LEVELS) ? $level : self::LEVEL_INFO,
             'category' => self::categoryFor($action),
-            'description' => $description,
+
+            /*
+             | Trimmed to the column width, the same way the user agent above already
+             | is. A description assembled from a variable number of parts can run past
+             | 255 characters, and MySQL answers that with an exception rather than a
+             | truncation, which turns a log line into a 500 on the action it was
+             | describing. Recording the action matters more than recording every word
+             | about it, so the sentence is cut and the work stands.
+             */
+            'description' => Str::limit($description, self::DESCRIPTION_LIMIT, '...'),
+
             'ip_address' => Request::ip(),
             'user_agent' => substr((string) Request::userAgent(), 0, 512),
         ]);

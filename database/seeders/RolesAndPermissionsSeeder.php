@@ -184,6 +184,14 @@ class RolesAndPermissionsSeeder extends Seeder
                  | as being trusted to declare it arrived.
                  */
                 'send' => ['payments.record', 'Record a payment received by hand'],
+
+                /*
+                 | Reconciling an entry against the gateway. Its own permission because
+                 | it can move an entry into the takings, but kept apart from
+                 | payments.record: this one only ever believes the gateway, so it
+                 | asserts nothing on a person's word and is the safer of the two.
+                 */
+                'restore' => ['payments.tally', 'Tally an entry against the gateway'],
             ],
             'Refunds' => [
                 'view' => ['payments.refunds.view', 'View refunded entries'],
@@ -384,6 +392,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'payments.export',
                 'payments.refund',
                 'payments.record',
+                'payments.tally',
 
                 'campaigns.view',
                 'campaigns.create',
