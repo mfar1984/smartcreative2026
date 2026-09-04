@@ -390,7 +390,12 @@ class IntegrationController extends Controller
             'panels' => [
                 'EasyParcel' => [
                     'icon' => 'plug',
-                    'fields' => ['easyparcel_enabled', 'easyparcel_mode', 'easyparcel_api_key'],
+                    'fields' => [
+                        'easyparcel_enabled',
+                        'easyparcel_client_id',
+                        'easyparcel_client_secret',
+                        'easyparcel_api_key',
+                    ],
                 ],
                 'Collection Address' => [
                     'icon' => 'building',
@@ -422,19 +427,44 @@ class IntegrationController extends Controller
                     'rules' => ['nullable', 'boolean'],
                     'help' => 'Off means every order is charged the flat rate below. On means EasyParcel is asked first, and the flat rate is still used if it cannot answer.',
                 ],
-                'easyparcel_mode' => [
-                    'label' => 'Mode',
-                    'type' => 'select',
-                    'options' => ['demo' => 'Demo / Test', 'live' => 'Live'],
-                    'rules' => ['required', 'in:demo,live'],
-                    'help' => 'Demo books nothing real. Note that EasyParcel serves its demo endpoint over plain HTTP, so do not put a live key against Demo.',
+                /*
+                 | There is deliberately no demo/live selector.
+                 |
+                 | Next Gen decides the environment from the EasyParcel account that
+                 | authorises the connection, not from the endpoint and not from the
+                 | application: one Client ID serves both, and an access token issued
+                 | by a sandbox account can only ever reach sandbox. A selector here
+                 | would be a control that changes nothing, which is worse than no
+                 | control at all. Sign in with the sandbox account to test and the
+                 | live account to go live.
+                 */
+                /*
+                 | EasyParcel has two generations, and an account is on one or the
+                 | other. Next Gen issues a Client ID and Client Secret and expects
+                 | OAuth; Classic issues a single API key. Both are offered because
+                 | which one applies is decided by the account, not by us, and an
+                 | account that has not migrated cannot produce a Client ID at all.
+                 */
+                'easyparcel_client_id' => [
+                    'label' => 'Client ID',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:255'],
+                    'placeholder' => '00000000-0000-0000-0000-000000000000',
+                    'help' => 'Next Gen accounts only. Found on the app you created under Integrations, on the same screen as the Client Secret.',
                 ],
-                'easyparcel_api_key' => [
-                    'label' => 'API Key',
+                'easyparcel_client_secret' => [
+                    'label' => 'Client Secret',
                     'type' => 'password',
                     'secret' => true,
                     'rules' => ['nullable', 'string', 'max:255'],
-                    'help' => 'Registered under Integrations in your EasyParcel account. The account has to be verified before a key can be issued.',
+                    'help' => 'Next Gen accounts only. Shown beside the Client ID on the app screen. Rotate it there if it has ever been pasted anywhere it should not have been.',
+                ],
+                'easyparcel_api_key' => [
+                    'label' => 'API Key (Classic)',
+                    'type' => 'password',
+                    'secret' => true,
+                    'rules' => ['nullable', 'string', 'max:255'],
+                    'help' => 'Classic accounts only. Leave this blank if you have a Client ID above: a Next Gen account does not issue an API key, and pasting the Client ID here will not work.',
                 ],
 
                 /* ---- Where parcels are collected from ---- */

@@ -19,6 +19,7 @@ use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
 use App\Http\Controllers\Admin\Shop\SettingsController as ShopSettingsController;
 use App\Http\Controllers\Admin\Event\RegistrationController as EventRegistrationController;
 use App\Http\Controllers\Admin\Event\SettingsController as EventSettingsController;
+use App\Http\Controllers\Admin\Settings\EasyParcelController;
 use App\Http\Controllers\Admin\Settings\GeneralConfigController;
 use App\Http\Controllers\Admin\Settings\IntegrationController;
 use App\Http\Controllers\Admin\Settings\LoggingController;
@@ -642,6 +643,35 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware(['permission:settings.integration.update', 'throttle:6,1'])
                 ->name('integration.telegram.test');
 
+            /*
+             | EasyParcel authorisation. Three legs of one redirect, so they are
+             | routes rather than part of the settings form.
+             |
+             | The callback path is registered in the EasyParcel developer hub as an
+             | Allowed Redirect URI and is compared character for character on the
+             | way out and again during the token exchange. Renaming it here breaks
+             | the connection until the dashboard is edited to match.
+             |
+             | GET on the callback because that is how the administrator's browser
+             | arrives back; the state check in the controller is what stands in for
+             | CSRF protection on it.
+             */
+            Route::get('integration/easyparcel/connect', [EasyParcelController::class, 'connect'])
+                ->middleware(['permission:settings.integration.update', 'throttle:10,1'])
+                ->name('integration.easyparcel.connect');
+
+            Route::get('integration/easyparcel/callback', [EasyParcelController::class, 'callback'])
+                ->middleware(['permission:settings.integration.update', 'throttle:10,1'])
+                ->name('integration.easyparcel.callback');
+
+            Route::delete('integration/easyparcel', [EasyParcelController::class, 'disconnect'])
+                ->middleware('permission:settings.integration.update')
+                ->name('integration.easyparcel.disconnect');
+
+            /*
+             | Last of the integration routes on purpose. {tab} would otherwise
+             | swallow the easyparcel segments above.
+             */
             Route::put('integration/{tab}', [IntegrationController::class, 'update'])
                 ->middleware('permission:settings.integration.update')
                 ->name('integration.update');

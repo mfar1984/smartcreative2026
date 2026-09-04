@@ -157,8 +157,112 @@
             </div>
         </form>
 
-        {{-- Sits outside the settings form, because a form cannot be nested
-             inside another one. --}}
+        {{-- Sits outside the settings form for the same reason the test blocks
+             below do: a form cannot be nested inside another one. --}}
+        @if ($activeTab === 'shipping')
+            @php
+                $epConnected = \App\Support\ShippingSettings::isConnected();
+                $epHasApp = \App\Support\ShippingSettings::hasApplication();
+                $epAccessExpiry = \App\Support\ShippingSettings::accessTokenExpiresAt();
+                $epRefreshExpiry = \App\Support\ShippingSettings::refreshTokenExpiresAt();
+                $epConnectedAt = \App\Support\ShippingSettings::connectedAt();
+            @endphp
+
+            <div class="mt-5">
+                <x-admin.panel title="Account Connection" icon="plug">
+                    <div class="px-5 py-4">
+                        @if (session('easyparcel_error'))
+                            {{-- EasyParcel's own words where it gave any. A tidied up
+                                 message would hide the detail that makes this
+                                 diagnosable, and only an administrator sees this. --}}
+                            <div role="alert" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                                <div class="flex items-start gap-3">
+                                    <svg class="w-5 h-5 shrink-0 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                    </svg>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold text-red-900 mb-1">Could not connect</p>
+                                        <pre class="text-xs text-red-800 whitespace-pre-wrap break-words font-mono bg-red-100/60 rounded p-2">{{ session('easyparcel_error') }}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        @endif
+
+                        <div class="flex flex-wrap items-start justify-between gap-4">
+                            <div class="min-w-0">
+                                @if ($epConnected)
+                                    <p class="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                                        <x-admin.badge tone="green">Connected</x-admin.badge>
+                                    </p>
+                                    <dl class="text-xs text-gray-600 mt-2 space-y-1">
+                                        @if ($epConnectedAt)
+                                            <div><dt class="inline text-gray-500">Connected</dt>
+                                                <dd class="inline">{{ $epConnectedAt->toDayDateTimeString() }}</dd></div>
+                                        @endif
+                                        <div><dt class="inline text-gray-500">Access token expires</dt>
+                                            <dd class="inline">{{ $epAccessExpiry?->toDayDateTimeString() ?? 'unstated' }}</dd></div>
+                                        <div><dt class="inline text-gray-500">Reconnection needed by</dt>
+                                            <dd class="inline">{{ $epRefreshExpiry?->toFormattedDayDateString() ?? 'unstated' }}</dd></div>
+                                    </dl>
+                                    <p class="text-xs text-gray-500 mt-2">
+                                        The access token is renewed automatically as it nears expiry. You
+                                        only need to reconnect if the date above passes, or to switch
+                                        between your sandbox and live accounts.
+                                    </p>
+                                @elseif ($epHasApp)
+                                    <p><x-admin.badge tone="amber">Not connected</x-admin.badge></p>
+                                    <p class="text-sm text-gray-600 mt-2">
+                                        The Client ID and Secret are saved, but no EasyParcel account has
+                                        authorised this application yet, so no rate can be requested.
+                                    </p>
+                                @else
+                                    <p><x-admin.badge tone="gray">No application</x-admin.badge></p>
+                                    <p class="text-sm text-gray-600 mt-2">
+                                        Fill in the Client ID and Client Secret above and save, then come
+                                        back here to connect an account.
+                                    </p>
+                                @endif
+                            </div>
+
+                            @if ($canUpdate && $epHasApp)
+                                <div class="flex flex-wrap items-center gap-2 shrink-0">
+                                    <a href="{{ route('admin.settings.integration.easyparcel.connect') }}"
+                                       class="inline-flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">
+                                        {{ $epConnected ? 'Reconnect' : 'Connect Account' }}
+                                    </a>
+
+                                    @if ($epConnected)
+                                        <form action="{{ route('admin.settings.integration.easyparcel.disconnect') }}"
+                                              method="POST"
+                                              onsubmit="return confirm('Disconnect the EasyParcel account? Orders fall back to the flat rate until an account is connected again.');">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit"
+                                                    class="inline-flex items-center gap-2 border border-gray-300 text-gray-700 px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 transition">
+                                                Disconnect
+                                            </button>
+                                        </form>
+                                    @endif
+                                </div>
+                            @endif
+                        </div>
+
+                        <div class="mt-4 pt-4 border-t border-gray-100">
+                            <p class="text-xs text-gray-500">
+                                Sandbox or live is decided by the EasyParcel account you sign in with,
+                                not by a setting here. One application serves both.
+                            </p>
+                            <p class="text-xs text-gray-500 mt-1.5">
+                                This address has to be listed under Allowed Redirect URIs on the app in
+                                your EasyParcel developer hub, character for character:
+                            </p>
+                            <code class="block text-xs font-mono bg-gray-50 border border-gray-200 rounded px-2.5 py-1.5 mt-1.5 break-all">{{ route('admin.settings.integration.easyparcel.callback') }}</code>
+                        </div>
+                    </div>
+                </x-admin.panel>
+            </div>
+        @endif
+
         @if ($activeTab === 'email' && $canUpdate)
             <div class="mt-5">
                 <x-admin.panel title="Send a Test Email" icon="send">
