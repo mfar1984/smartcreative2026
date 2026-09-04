@@ -7,6 +7,7 @@ use App\Models\Event;
 use App\Models\EventAddonVariant;
 use App\Models\EventParticipant;
 use App\Models\EventRegistration;
+use App\Models\EventRegistrationPayment;
 use App\Services\AdminLogger;
 use App\Services\EventNotifier;
 use App\Services\Payment\PaymentGatewayException;
@@ -48,6 +49,9 @@ class ParticipantController extends Controller
     ];
 
     private const PER_PAGE = 20;
+
+    /** Where transfer slips attached to hand-recorded payments live. */
+    private const PAYMENT_PROOF_DIRECTORY = 'registration-payment-proof';
 
     public function __construct(
         private readonly PaymentGatewayManager $gateways,
@@ -276,6 +280,22 @@ class ParticipantController extends Controller
             'reference' => ['nullable', 'string', 'max:190'],
             'note' => ['nullable', 'string', 'max:255'],
 
+            /*
+             | The transfer slip or screenshot. Optional and staying optional: cash
+             | across a counter has no slip, and refusing the payment without a file
+             | would push somebody into either not recording it or attaching something
+             | irrelevant.
+             |
+             | mimes checks the type guessed from the file's own contents rather than
+             | the extension it arrived with, so a renamed file is caught.
+             */
+            'proof' => [
+                'nullable',
+                'file',
+                'mimes:' . EventRegistrationPayment::PROOF_MIMES,
+                'max:' . EventRegistrationPayment::PROOF_MAX_KB,
+            ],
+
             'settlement' => ['required', 'in:full,partial'],
 
             /*
@@ -290,6 +310,8 @@ class ParticipantController extends Controller
             'received_date.before_or_equal' => 'The money cannot have arrived in the future.',
             'received_time.required' => 'Enter the time the money arrived.',
             'received_time.date_format' => 'Enter the time as HH:MM, for example 14:30.',
+            'proof.mimes' => 'Attach a PDF or a picture: PDF, PNG, JPG or JPEG.',
+            'proof.max' => 'That file is too large. Please keep it under 8 MB.',
             'settlement.required' => 'Say whether this settles the whole balance or part of it.',
             'amount.required_if' => 'Enter how much arrived.',
             'amount.max' => sprintf(
@@ -304,12 +326,16 @@ class ParticipantController extends Controller
 
         $receivedAt = sprintf('%s %s:00', Carbon::parse($validated['received_date'])->toDateString(), $validated['received_time']);
 
+        $proof = $request->file('proof');
+
         $this->updater->recordManualPayment(
             registration: $registration,
             amount: $amount,
             receivedAt: $receivedAt,
             reference: $validated['reference'] ?? null,
             note: $validated['note'] ?? null,
+            proofPath: $proof?->store(self::PAYMENT_PROOF_DIRECTORY, 'public'),
+            proofName: $proof === null ? null : $this->displayFileName($proof->getClientOriginalName()),
         );
 
         $registration->refresh();
@@ -352,12 +378,22 @@ class ParticipantController extends Controller
             ]);
         }
 
-        $registration->load(['event', 'participants', 'addonLines']);
+        $registration->load(['event', 'participants', 'addonLines', 'payments']);
 
         $reference = $registration->reference;
         $name = $registration->displayName();
         $logoPath = $registration->logo_path;
         $headCount = $registration->participants->count();
+
+        /*
+         | Collected before the delete. The receipt rows go with the registration
+         | through the cascading foreign key, and once they are gone there is nothing
+         | left to tell us which files on disk belonged to them.
+         */
+        $proofPaths = $registration->payments
+            ->pluck('proof_path')
+            ->filter()
+            ->all();
 
         AdminLogger::audit($registration, 'deleted', [
             'reference' => $reference,
@@ -410,6 +446,13 @@ class ParticipantController extends Controller
             Storage::disk('public')->delete($logoPath);
         }
 
+        // Same reasoning as the logo: after the row is definitely gone, because a
+        // rolled back transaction would otherwise leave the record pointing at a
+        // file that had already been removed.
+        if ($proofPaths !== []) {
+            Storage::disk('public')->delete($proofPaths);
+        }
+
         AdminLogger::activity(
             'participants.delete',
             sprintf('Deleted registration %s (%s), releasing %d seat(s).', $reference, $name, $headCount),
@@ -459,6 +502,24 @@ class ParticipantController extends Controller
             // No usable gateway. The stored snapshot is still shown.
             return false;
         }
+    }
+
+    /**
+     * Reduce an uploaded filename to something safe to store and show.
+     *
+     * The name is display only and never reaches the filesystem: the stored path
+     * carries a hashed name so uploads cannot collide. It strips directory parts
+     * anyway in case a later change does build a path from it, drops control
+     * characters, and trims to the column width so a long name cannot fail the
+     * insert.
+     */
+    private function displayFileName(?string $name): string
+    {
+        $name = basename(str_replace('\\', '/', (string) $name));
+        $name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name) ?? '';
+        $name = trim($name);
+
+        return $name === '' ? 'proof' : str($name)->limit(250, '')->toString();
     }
 
     private function resolveTab(?string $tab): string

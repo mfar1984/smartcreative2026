@@ -287,6 +287,17 @@
                                         @if (filled($receipt->note))
                                             <span class="block text-xs text-gray-500 mt-0.5">{{ $receipt->note }}</span>
                                         @endif
+
+                                        @if ($receipt->hasProof())
+                                            {{-- Linked rather than shown inline here. This page is a
+                                                 record to read; the counter screen is where somebody
+                                                 needs the slip in front of them. --}}
+                                            <a href="{{ $receipt->proofUrl() }}" target="_blank" rel="noopener"
+                                               class="mt-1.5 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+                                                <x-admin.icon name="clipboard" class="w-3.5 h-3.5" />
+                                                <span class="break-all">{{ $receipt->proofName() }}</span>
+                                            </a>
+                                        @endif
                                     </td>
 
                                     <td class="px-5 py-3 whitespace-nowrap">

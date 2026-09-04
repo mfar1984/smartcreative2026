@@ -414,6 +414,10 @@ class AttendanceController extends Controller
             'participants.attendance.recordedBy',
             'participants.changes',
             'addonLines',
+
+            // The receipts, so the counter can see the proof behind a payment that
+            // was recorded by hand rather than taking the badge on trust.
+            'payments',
         ];
     }
 

@@ -179,6 +179,84 @@
             </div>
         </div>
 
+        {{--
+            What was paid, and the proof behind it.
+
+            The counter is where an argument about money actually happens, so the
+            receipts are in front of whoever is standing there rather than one click
+            away on the full record. A slip is shown as a picture when it is one: a
+            person with a queue behind them should not have to open a second tab to
+            check a transfer.
+
+            Only rendered when a payment was recorded by hand. A gateway payment needs
+            no defending, and an entry nobody has paid anything towards has nothing to
+            show, which the warning strip below already says.
+        --}}
+        @php $handRecorded = $open->payments->where('source', 'manual'); @endphp
+
+        @if ($handRecorded->isNotEmpty())
+            <div class="border-b border-gray-200 bg-blue-50/40 px-5 py-4">
+                <div class="flex flex-wrap items-baseline justify-between gap-2 mb-2.5">
+                    <p class="text-xs font-bold uppercase tracking-wide text-gray-600">
+                        Payments recorded by hand
+                    </p>
+                    <p class="text-xs text-gray-600">
+                        <span class="font-bold text-green-700 tabular-nums">{{ $open->amountPaidLabel() }}</span>
+                        received of {{ $open->amountLabel() }}
+                        @if ($open->outstandingAmount() > 0.005)
+                            <span class="text-gray-300 mx-1">&middot;</span>
+                            <span class="font-bold text-amber-700 tabular-nums">{{ $open->outstandingAmountLabel() }}</span>
+                            outstanding
+                        @endif
+                    </p>
+                </div>
+
+                <ul class="space-y-2">
+                    @foreach ($handRecorded as $receipt)
+                        <li class="rounded-lg border border-gray-200 bg-white px-3.5 py-2.5">
+                            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                                <span class="text-sm font-bold text-gray-900 tabular-nums">{{ $receipt->amountLabel() }}</span>
+                                <span class="text-xs text-gray-500">
+                                    {{ $receipt->received_at?->format('d M Y, g:i a') }}
+                                </span>
+                            </div>
+
+                            @if (filled($receipt->reference))
+                                <p class="text-xs text-gray-600 mt-0.5">
+                                    Reference <code class="break-all">{{ $receipt->reference }}</code>
+                                </p>
+                            @endif
+
+                            @if (filled($receipt->note))
+                                <p class="text-xs text-gray-500 mt-0.5">{{ $receipt->note }}</p>
+                            @endif
+
+                            @if ($receipt->hasProof())
+                                @if ($receipt->proofIsImage())
+                                    <a href="{{ $receipt->proofUrl() }}" target="_blank" rel="noopener"
+                                       class="mt-2 block rounded-lg border border-gray-200 overflow-hidden hover:border-blue-400 transition max-w-xs">
+                                        <img src="{{ $receipt->proofUrl() }}"
+                                             alt="Proof of payment for {{ $open->reference }}"
+                                             class="w-full h-auto">
+                                    </a>
+                                @endif
+
+                                <a href="{{ $receipt->proofUrl() }}" target="_blank" rel="noopener"
+                                   class="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+                                    <x-admin.icon name="eye" class="w-3.5 h-3.5" />
+                                    {{ $receipt->proofIsImage() ? 'Open full size' : $receipt->proofName() }}
+                                </a>
+                            @else
+                                <p class="text-xs text-amber-700 mt-1.5">
+                                    No proof was attached to this one.
+                                </p>
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
+
         {{-- Things the counter should know before letting them in. Shown, not
              enforced: taking cash at the door is a normal thing to do. --}}
         @if ($warnings !== [])

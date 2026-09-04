@@ -326,6 +326,7 @@
                     </div>
 
                     <form action="{{ route('admin.event.participants.payment', $registration) }}" method="POST"
+                          enctype="multipart/form-data"
                           class="px-6 py-5 space-y-4">
                         @csrf
 
@@ -453,6 +454,31 @@
                                 @endif
                             </div>
                         </fieldset>
+
+                        <div>
+                            <label for="proof_{{ $registration->id }}" class="block text-sm font-semibold text-gray-700 mb-1.5">
+                                Proof of payment
+                            </label>
+                            <input type="file" id="proof_{{ $registration->id }}" name="proof"
+                                   accept="application/pdf,.pdf,image/png,image/jpeg"
+                                   class="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700 file:cursor-pointer">
+                            <p class="text-xs text-gray-500 mt-1">
+                                PDF, PNG, JPG or JPEG, up to 8 MB. The transfer slip or the screenshot they
+                                sent. Optional, because cash across a counter has none, but it is what makes
+                                this figure traceable later, and the counter can see it at check-in.
+                            </p>
+                            {{-- A file input cannot be repopulated after a failed submit,
+                                 so say so rather than leaving somebody to notice. --}}
+                            @if ($isReopened)
+                                @error('proof')
+                                    <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                                @else
+                                    <p class="text-xs text-amber-700 mt-1">
+                                        Browsers cannot refill a file box, so please choose the file again.
+                                    </p>
+                                @enderror
+                            @endif
+                        </div>
 
                         <div>
                             <label for="note_{{ $registration->id }}" class="block text-sm font-semibold text-gray-700 mb-1.5">

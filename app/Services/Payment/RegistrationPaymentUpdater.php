@@ -136,6 +136,8 @@ class RegistrationPaymentUpdater
         string $receivedAt,
         ?string $reference = null,
         ?string $note = null,
+        ?string $proofPath = null,
+        ?string $proofName = null,
     ): EventRegistrationPayment {
         $user = Auth::user();
 
@@ -144,12 +146,14 @@ class RegistrationPaymentUpdater
             'amount_paid' => (float) $registration->amount_paid,
         ];
 
-        $payment = DB::transaction(function () use ($registration, $amount, $receivedAt, $reference, $note, $user) {
+        $payment = DB::transaction(function () use ($registration, $amount, $receivedAt, $reference, $note, $proofPath, $proofName, $user) {
             $payment = $registration->payments()->create([
                 'amount' => $amount,
                 'received_at' => $receivedAt,
                 'reference' => $reference,
                 'note' => $note,
+                'proof_path' => $proofPath,
+                'proof_name' => $proofName,
                 'source' => EventRegistrationPayment::SOURCE_MANUAL,
                 'recorded_by' => $user?->id,
                 'actor_label' => $user?->logLabel(),
@@ -195,6 +199,10 @@ class RegistrationPaymentUpdater
             'outstanding' => $registration->outstandingAmount(),
             'received_at' => $receivedAt,
             'reference' => $reference,
+
+            // Recorded so the trail shows whether the assertion came with anything
+            // behind it, which is the first thing anybody asks months later.
+            'proof' => $proofName,
         ]);
 
         /*

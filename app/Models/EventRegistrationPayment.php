@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * One receipt against a registration.
@@ -29,12 +30,19 @@ class EventRegistrationPayment extends Model
         self::SOURCE_MANUAL => 'Recorded by hand',
     ];
 
+    /** What may be attached as proof, and how big. */
+    public const PROOF_MIMES = 'pdf,png,jpg,jpeg';
+
+    public const PROOF_MAX_KB = 8192;
+
     protected $fillable = [
         'event_registration_id',
         'amount',
         'received_at',
         'reference',
         'note',
+        'proof_path',
+        'proof_name',
         'source',
         'recorded_by',
         'actor_label',
@@ -85,5 +93,54 @@ class EventRegistrationPayment extends Model
         return $this->actor_label
             ?? $this->recordedBy?->name
             ?? ($this->isManual() ? 'Recorded by hand' : 'Gateway');
+    }
+
+    /* ---------------------------------------------------------------------
+     | The attached proof
+     * ------------------------------------------------------------------ */
+
+    public function hasProof(): bool
+    {
+        return filled($this->proof_path);
+    }
+
+    public function proofUrl(): ?string
+    {
+        return $this->hasProof()
+            ? Storage::disk('public')->url($this->proof_path)
+            : null;
+    }
+
+    /**
+     * The name to show for the attachment.
+     *
+     * Falls back to the stored filename, which is hashed and therefore ugly, only
+     * for a row written by hand. Nothing in the application can produce that state.
+     */
+    public function proofName(): ?string
+    {
+        if (! $this->hasProof()) {
+            return null;
+        }
+
+        return filled($this->proof_name)
+            ? $this->proof_name
+            : basename((string) $this->proof_path);
+    }
+
+    /**
+     * Whether the proof can be shown inline rather than only linked.
+     *
+     * Matters at the counter more than anywhere else: somebody with a queue in front
+     * of them should be able to see a transfer slip without opening a second tab.
+     */
+    public function proofIsImage(): bool
+    {
+        return $this->hasProof()
+            && in_array(
+                strtolower(pathinfo((string) $this->proof_path, PATHINFO_EXTENSION)),
+                ['png', 'jpg', 'jpeg'],
+                true,
+            );
     }
 }
