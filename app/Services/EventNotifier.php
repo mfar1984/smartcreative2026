@@ -32,6 +32,24 @@ use Throwable;
  */
 class EventNotifier
 {
+    /**
+     * Seconds between one player notice and the next.
+     *
+     * Without this the whole squad left at once. A seven player entry produced
+     * twenty two emails inside half a second, Gmail deferred most of them as an
+     * unusual rate from a domain with almost no sending history, and cPanel's Exim
+     * then discarded the remainder on reaching its own ceiling of five deferrals an
+     * hour for the domain. The bounce named the ceiling, which made it look like a
+     * mail server limit rather than the burst that provoked it. The registration
+     * was saved and correct throughout; only the messages were lost, which is the
+     * kind of failure nobody notices until a participant says they were never told.
+     *
+     * Only the player notices are spaced. The manager copy carries the payment link
+     * and goes out immediately, because the person who has just submitted the form
+     * is sitting there waiting to pay.
+     */
+    private const PLAYER_SPACING_SECONDS = 10;
+
     public function __construct(private readonly EventTemplateRenderer $renderer)
     {
     }
@@ -348,8 +366,27 @@ class EventNotifier
             ->filter(fn (EventParticipant $person) => filled($person->email))
             ->groupBy(fn (EventParticipant $person) => mb_strtolower(trim($person->email)));
 
+        $delay = 0;
+
         foreach ($groups as $address => $group) {
-            $queued += $this->queue($registration, $template, (string) $address, $group->sortBy('id')->values(), null, $userId);
+            $accepted = $this->queue(
+                $registration,
+                $template,
+                (string) $address,
+                $group->sortBy('id')->values(),
+                null,
+                $userId,
+                $delay,
+            );
+
+            $queued += $accepted;
+
+            // Advanced only for a message the queue actually took. A run of
+            // failures would otherwise push the survivors minutes into the future
+            // for messages that were never going to be sent.
+            if ($accepted > 0) {
+                $delay += self::PLAYER_SPACING_SECONDS;
+            }
         }
 
         return $queued;
@@ -367,6 +404,7 @@ class EventNotifier
         Collection $recipients,
         ?string $paymentLink,
         ?int $userId,
+        int $delaySeconds = 0,
     ): int {
         $rendered = $this->renderer->render($template, $registration, $recipients, $paymentLink);
 
@@ -380,14 +418,22 @@ class EventNotifier
             $userId,
         );
 
+        $mailable = new EventTemplateMail(
+            renderedSubject: $rendered['subject'],
+            renderedBody: $rendered['body'],
+            notificationId: $notification->id,
+        );
+
         try {
-            // queue() rather than send(): the form must not wait on SMTP, and a
+            // Queued rather than sent inline: the form must not wait on SMTP, and a
             // squad of eight is nine messages.
-            Mail::to($address)->queue(new EventTemplateMail(
-                renderedSubject: $rendered['subject'],
-                renderedBody: $rendered['body'],
-                notificationId: $notification->id,
-            ));
+            //
+            // later() where a delay was asked for, which only sets available_at on
+            // the job. The worker still decides when it runs, so a delay is the
+            // earliest a message may leave, never a promise of when it will.
+            $delaySeconds > 0
+                ? Mail::to($address)->later($delaySeconds, $mailable)
+                : Mail::to($address)->queue($mailable);
         } catch (Throwable $exception) {
             // Failing to queue is different from failing to send. This is a
             // broken queue connection, so it is recorded and swallowed rather

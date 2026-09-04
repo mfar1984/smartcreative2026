@@ -136,10 +136,102 @@ change any CSS or JavaScript, run `npm run build` locally and commit the result.
 
 ## Queue
 
-`QUEUE_CONNECTION=database`, but nothing in the application relies on a worker:
-scoring, draw generation and publishing all run inside the request that asked for
-them. Campaign sending is the one thing that queues. If you want it to drain
-without a worker, keep using Send Now, which dispatches synchronously.
+`QUEUE_CONNECTION=database`, and a worker is required. Without one, every
+registration confirmation, payment reminder and text message is written to the
+`jobs` table and sits there. The registration itself is saved and correct; only the
+messages are stranded, which is a failure nobody notices until a participant says
+they were never told.
+
+What needs the worker:
+
+| Sent by | Queued | Needs a worker |
+| --- | --- | --- |
+| Participant and manager email | `Mail::to()->queue()` in `EventNotifier::queue()` | Yes |
+| Participant and manager SMS | `SendTemplateSms::dispatch()` | Yes |
+| Campaign messages | `SendCampaignMessage::dispatch()` | Yes, unless Send Now |
+| Telegram staff alerts | not queued, `TelegramNotifier::post()` calls the API inline | No |
+
+Scoring, draw generation and publishing all run inside the request that asked for
+them, so those are unaffected. Campaign Send Now uses `dispatchSync` and also does
+not need a worker.
+
+The message log on a registration reports **Queued** until the worker runs. Status
+becomes `sent` in `EventTemplateMail::build()` for email and
+`SendTemplateSms::handle()` for SMS, both of which only execute inside the worker.
+A row stuck on Queued therefore means the worker is not running, not that the
+message was refused.
+
+### Running the worker on cPanel
+
+Shared cPanel hosting has no Supervisor, and a `queue:work` started over SSH dies
+with the session. Use a cron job that drains the table and exits.
+
+Resolve the PHP binary first. Do not assume a version:
+
+```bash
+readlink -f $(command -v php)     # the real binary, symlinks followed
+command -v flock                  # confirm flock exists
+```
+
+`readlink -f` matters because `/usr/local/bin/php` on cPanel is often a wrapper that
+picks a MultiPHP version from the working directory, and cron does not run in the
+same directory or with the same `PATH` as your shell. Resolve it once and put the
+absolute path in the cron line.
+
+cPanel, **Advanced**, **Cron Jobs**, **Once Per Minute** (`* * * * *`):
+
+```bash
+<FLOCK> -n <HOME>/queue.lock <PHP> <HOME>/public_html/artisan queue:work --stop-when-empty --tries=3 --timeout=60 >> <HOME>/public_html/storage/logs/queue.log 2>&1
+```
+
+Substitute the paths the two commands above printed. Use absolute paths throughout
+rather than `~`: cPanel's cron does not reliably expand a tilde, and a cron line that
+fails on path expansion fails silently.
+
+- `--stop-when-empty` drains the table then exits, so no process is left hanging.
+- `flock -n` makes a run exit immediately if the previous one is still going.
+  Without it a slow batch stacks a new PHP process every minute until the host
+  suspends the account. `flock` creates the lock file itself; it does not need to
+  exist beforehand.
+- `--tries=3` matches `$tries` on `EventTemplateMail` and `SendTemplateSms`. After
+  three failures the job lands in `failed_jobs` and the notification row turns
+  **Failed** carrying the reason, written by the `failed()` method on each class.
+- Redirecting output is not optional. Without it cPanel emails the cron output every
+  minute.
+
+On the current deployment those two commands resolved to `/usr/local/bin/php`
+(PHP 8.3.33) and `/bin/flock`, with the home directory at `/home/smartcre`, giving:
+
+```bash
+/bin/flock -n /home/smartcre/queue.lock /usr/local/bin/php /home/smartcre/public_html/artisan queue:work --stop-when-empty --tries=3 --timeout=60 >> /home/smartcre/public_html/storage/logs/queue.log 2>&1
+```
+
+Note `/bin/flock`, not `/usr/bin/flock`. Resolve both again on any other host instead
+of copying these.
+
+Run that line by hand once before saving it as a cron job. `/usr/local/bin/php` is a
+regular file rather than a symlink on cPanel, which means it can be a wrapper that
+selects a MultiPHP version from the working directory. `cd / && /usr/local/bin/php -v`
+proves which version cron will actually get.
+
+If `flock` is missing, drop it and bound the run by time instead, which prevents
+pile-up in a different way:
+
+```bash
+<PHP> <HOME>/public_html/artisan queue:work --max-time=50 --tries=3 --timeout=60 >> <HOME>/public_html/storage/logs/queue.log 2>&1
+```
+
+Check it took:
+
+```bash
+cd ~/public_html
+php artisan queue:work --once -v            # force one job, watch what happens
+php artisan tinker --execute="echo DB::table('jobs')->count();"
+tail -20 storage/logs/queue.log
+```
+
+Jobs in the table do not expire, so messages stranded before the cron existed go out
+on its first run without anyone pressing Send Again.
 
 ## Upgrading
 
@@ -150,9 +242,21 @@ git pull
 composer install --no-dev --optimize-autoloader
 php artisan migrate --force
 php artisan db:seed --class=RolesAndPermissionsSeeder --force
+php artisan route:clear && php artisan view:clear && php artisan config:clear
 php artisan config:cache && php artisan route:cache && php artisan view:cache
+php artisan queue:restart
 php artisan up
 ```
+
+The clear line comes before the cache line, and skipping it is how a deployment
+half-lands. A cached route table survives `git pull`, so a release that adds a route
+serves the old table and the new view referencing the new route throws
+`Route [...] not defined` on a screen that worked a minute ago. Caching on top of a
+stale cache does not replace it.
+
+`queue:restart` tells running workers to exit after their current job so the next one
+starts on the new code. A worker holds the application in memory and will otherwise
+keep running the version it booted with.
 
 The seeder line is not optional, and leaving it out fails in a way that looks like
 missing work rather than a missing step.
