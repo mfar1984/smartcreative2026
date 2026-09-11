@@ -519,6 +519,7 @@
                                     :position="$rowPosition ?? 'manager_only'"
                                     :removable="$event->isManagerMode() && ! $isFirstRow && $index > $minPlayers"
                                     :title="$rowTitle"
+                                    :questions="$event->questions->all()"
                                     :ign-fields="$event->ignFormFields()" />
                             @endforeach
                         </div>
@@ -536,6 +537,10 @@
                                     role="player"
                                     :removable="true"
                                     title="Player"
+                                    {{-- The clone template carries the questions too, so a
+                                         player added by the button is asked the same things
+                                         as one that was on the page from the start. --}}
+                                    :questions="$event->questions->all()"
                                     :ign-fields="$event->ignFormFields()" />
                             </template>
                         @endif

@@ -336,6 +336,12 @@
                 </x-admin.field-row>
             </x-admin.panel>
 
+            {{-- ---------------- Registration questions ---------------- --}}
+            @include('admin.event.partials.questions', [
+                'event' => $event,
+                'input' => $input,
+            ])
+
             {{-- ---------------- Paid add-ons ---------------- --}}
             @include('admin.event.partials.addons', [
                 'event' => $event,
@@ -615,6 +621,87 @@
             toggle.addEventListener('change', sync);
         });
 
+    })();
+</script>
+
+<script>
+    /* ---------------------------------------------------------------------
+     | Registration questions builder
+     |
+     | Same clone pattern as the add-ons below: rows come from a <template> with
+     | __QINDEX__ swapped for a counter that only ever goes up, so removing a row
+     | and adding another cannot collide with a name still on the page.
+     * ------------------------------------------------------------------ */
+    (function () {
+        const list = document.getElementById('question-list');
+        const emptyState = document.getElementById('question-empty');
+        const addButton = document.getElementById('question-add');
+        const template = document.getElementById('question-template');
+
+        if (!list || !addButton || !template) {
+            return;
+        }
+
+        function nextIndex() {
+            let highest = -1;
+
+            list.querySelectorAll('[data-question-row] input[name], [data-question-row] textarea[name]').forEach(function (field) {
+                const match = field.name.match(/^questions\[(\d+)\]/);
+
+                if (match) {
+                    highest = Math.max(highest, parseInt(match[1], 10));
+                }
+            });
+
+            return highest + 1;
+        }
+
+        function syncEmpty() {
+            emptyState?.classList.toggle('hidden', list.querySelectorAll('[data-question-row]').length > 0);
+        }
+
+        addButton.addEventListener('click', function () {
+            const markup = template.innerHTML.replace(/__QINDEX__/g, String(nextIndex()));
+            const holder = document.createElement('div');
+
+            holder.innerHTML = markup.trim();
+
+            const row = holder.firstElementChild;
+
+            if (row) {
+                list.appendChild(row);
+                row.querySelector('input[type="text"]')?.focus();
+            }
+
+            syncEmpty();
+        });
+
+        list.addEventListener('click', function (event) {
+            const remove = event.target.closest('[data-question-remove]');
+
+            if (!remove) {
+                return;
+            }
+
+            /*
+             | Answers survive the question being deleted, because the row keeps its
+             | own copy of the wording. The warning is still shown, because deleting
+             | it takes the question off the form for everyone after this and that is
+             | worth being sure about.
+             */
+            const answered = remove.getAttribute('data-question-answered');
+
+            if (answered && !window.confirm(
+                answered + ' person(s) have already answered this question.\n\n' +
+                'Removing it takes it off the form. Their existing answers are kept, ' +
+                'along with the wording they were shown.\n\nRemove it?'
+            )) {
+                return;
+            }
+
+            remove.closest('[data-question-row]').remove();
+            syncEmpty();
+        });
     })();
 </script>
 

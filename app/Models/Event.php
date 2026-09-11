@@ -523,6 +523,21 @@ class Event extends Model
      * ------------------------------------------------------------------ */
 
     /**
+     * Questions this event adds to its own registration form, in order.
+     */
+    public function questions(): HasMany
+    {
+        return $this->hasMany(EventQuestion::class)
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
+    public function hasQuestions(): bool
+    {
+        return $this->questions->isNotEmpty();
+    }
+
+    /**
      * Every poster, in the order the organiser arranged them.
      */
     public function posters(): HasMany

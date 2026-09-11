@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\EventRequest;
 use App\Models\Event;
 use App\Services\AdminLogger;
 use App\Services\EventAddonWriter;
+use App\Services\EventQuestionWriter;
 use App\Support\ParticipantOptions;
 use App\Support\PaymentSettings;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -91,7 +92,7 @@ class RegistrationController extends Controller
         ]), 'create'));
     }
 
-    public function store(EventRequest $request, EventAddonWriter $addons)
+    public function store(EventRequest $request, EventAddonWriter $addons, EventQuestionWriter $questions)
     {
         $event = new Event($request->eventAttributes());
         $event->slug = $this->resolveSlug($request->input('slug'), $request->input('title'));
@@ -102,6 +103,7 @@ class RegistrationController extends Controller
         $this->syncPosters($request, $event);
 
         $addons->sync($event, $request->addonRows());
+        $questions->sync($event, $request->questionRows());
 
         AdminLogger::activity('events.create', sprintf('Created event %s.', $event->title));
         AdminLogger::audit($event, 'created', null, [
@@ -138,7 +140,7 @@ class RegistrationController extends Controller
         return view('admin.event.form', $this->formData($event, 'edit'));
     }
 
-    public function update(EventRequest $request, Event $event, EventAddonWriter $addons)
+    public function update(EventRequest $request, Event $event, EventAddonWriter $addons, EventQuestionWriter $questions)
     {
         $before = [
             'title' => $event->title,
@@ -162,6 +164,7 @@ class RegistrationController extends Controller
         $this->syncPosters($request, $event);
 
         $addons->sync($event, $request->addonRows());
+        $questions->sync($event, $request->questionRows());
 
         AdminLogger::activity('events.update', sprintf('Updated event %s.', $event->title));
         AdminLogger::audit($event, 'updated', $before, [

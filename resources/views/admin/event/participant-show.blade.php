@@ -407,6 +407,40 @@
                                 @endif
                             </td>
                         </tr>
+
+                        {{-- The organiser's own questions, as this person answered
+                             them. The wording shown is the copy stored with the
+                             answer, not the question's current text, so editing the
+                             terms afterwards cannot rewrite this. --}}
+                        @foreach ($participant->answers as $answer)
+                            <tr>
+                                <th scope="row" class="{{ $label }} text-left">
+                                    {{ $answer->question_title }}
+                                    @if ($answer->was_required)
+                                        <span class="block text-xs font-normal text-gray-400">Compulsory</span>
+                                    @endif
+                                </th>
+                                <td class="{{ $value }}">
+                                    @if ($answer->answered)
+                                        <x-admin.badge tone="green">Yes</x-admin.badge>
+                                        @if ($answer->answered_at)
+                                            <span class="text-xs text-gray-400 ml-1">{{ $answer->answered_at->format('d M Y, g:ia') }}</span>
+                                        @endif
+                                    @else
+                                        <x-admin.badge tone="gray">No</x-admin.badge>
+                                    @endif
+
+                                    @if (filled($answer->question_body))
+                                        <details class="mt-1.5">
+                                            <summary class="text-xs text-blue-600 cursor-pointer hover:underline">
+                                                What they were shown
+                                            </summary>
+                                            <p class="text-xs text-gray-600 mt-1.5 whitespace-pre-line leading-relaxed border-l-2 border-gray-200 pl-3">{{ $answer->question_body }}</p>
+                                        </details>
+                                    @endif
+                                </td>
+                            </tr>
+                        @endforeach
                     </tbody>
                 </table>
             </x-admin.panel>

@@ -104,6 +104,10 @@ class RegistrationController extends Controller
         // Event::registrationAmount().
         $headCount = count($participants);
 
+        // Keyed by position so the answers can be matched back to the people once
+        // they have been written and have ids.
+        $participants = array_values($participants);
+
         // Stored before the transaction opens: a file write cannot be rolled back
         // with the database, so doing it inside would risk holding a lock while
         // waiting on disk. An orphaned file is cleaned up below if the entry is
@@ -169,16 +173,29 @@ class RegistrationController extends Controller
             // recorded are the ones the entry was actually saved with.
             $consentIp = $request->ip();
 
-            $participants = array_map(function (array $person) use ($consentIp) {
+            /*
+             | Answers are lifted out before the people are written. They belong on
+             | their own table, and leaving the key in would rely on mass assignment
+             | quietly discarding it, which is not a guarantee worth depending on.
+             */
+            $answers = [];
+
+            $participants = array_map(function (array $person, int $position) use ($consentIp, &$answers) {
+                $answers[$position] = (array) ($person['answers'] ?? []);
+
+                unset($person['answers']);
+
                 $consented = (bool) ($person['marketing_consent'] ?? false);
 
                 return $person + [
                     'consent_recorded_at' => $consented ? now() : null,
                     'consent_ip' => $consented ? $consentIp : null,
                 ];
-            }, $participants);
+            }, $participants, array_keys($participants));
 
-            $registration->participants()->createMany($participants);
+            $saved = $registration->participants()->createMany($participants);
+
+            $this->recordAnswers($locked, $saved, $answers);
 
             if ($order->hasLines()) {
                 $registration->addonLines()->createMany($order->lines);
@@ -277,7 +294,7 @@ class RegistrationController extends Controller
     private function resolveTab(?string $tab, ?string $slug): string
     {
         if (filled($slug)) {
-            $event = Event::query()->publiclyListed()->with('posters')->where('slug', $slug)->first();
+            $event = Event::query()->publiclyListed()->with(['posters', 'questions'])->where('slug', $slug)->first();
 
             if ($event !== null) {
                 foreach (self::TABS as $candidate => $definition) {
@@ -291,6 +308,50 @@ class RegistrationController extends Controller
         return array_key_exists((string) $tab, self::TABS) ? (string) $tab : 'open';
     }
 
+    /**
+     * Record what each person answered, with the wording they were shown.
+     *
+     * The snapshot is the point. An answer that read its question back through a
+     * relation would change meaning every time the organiser edited their terms,
+     * and a consent record that can be rewritten afterwards is evidence of
+     * nothing. Same reasoning as the snapshots on shop_order_items, and it matters
+     * more here.
+     *
+     * Every question is written, ticked or not. A missing row and a "no" are
+     * different facts, and only one of them can be told apart later.
+     *
+     * @param  \Illuminate\Support\Collection<int, EventParticipant>  $saved
+     * @param  array<int, array<int|string, mixed>>  $answers  keyed by position
+     */
+    private function recordAnswers(Event $event, $saved, array $answers): void
+    {
+        $questions = $event->questions;
+
+        if ($questions->isEmpty()) {
+            return;
+        }
+
+        $now = now();
+
+        foreach ($saved->values() as $position => $participant) {
+            $given = $answers[$position] ?? [];
+            $rows = [];
+
+            foreach ($questions as $question) {
+                $ticked = filter_var($given[$question->id] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+                $rows[] = $question->snapshot() + [
+                    'answered' => $ticked,
+                    // Only stamped for a yes. "When did they decline" is not a fact
+                    // this needs, and a timestamp on a no would imply otherwise.
+                    'answered_at' => $ticked ? $now : null,
+                ];
+            }
+
+            $participant->answers()->createMany($rows);
+        }
+    }
+
     private function scoped(string $tab): Builder
     {
         /*
@@ -301,7 +362,7 @@ class RegistrationController extends Controller
          | Harmless on the count() calls in tabsWithCounts(), which never hydrate a
          | model, so the load is not paid for there.
          */
-        $query = Event::query()->publiclyListed()->with('posters');
+        $query = Event::query()->publiclyListed()->with(['posters', 'questions']);
 
         return match ($tab) {
             'ongoing' => $query->ongoing(),

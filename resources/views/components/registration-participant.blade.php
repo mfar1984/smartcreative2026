@@ -35,6 +35,7 @@
     'positions' => [],
     'position' => 'manager_only',
     'alsoPlays' => false,
+    'questions' => [],
 ])
 
 @php
@@ -311,4 +312,64 @@
             </span>
         </label>
     </div>
+
+    {{--
+        The organiser's own questions, asked of this person.
+
+        Rendered here rather than once at the foot of the form because the answers
+        belong to people, not to the entry: a squad of seven gives seven answers.
+        Being inside this component also means the rows JavaScript clones carry the
+        questions too, which a block added further down the page would not.
+
+        A hidden 0 goes before each box for the same reason as the consent above: an
+        unticked box sends nothing, and the absence would read as unanswered rather
+        than as "no".
+    --}}
+    @if ($questions !== [])
+        <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
+            @foreach ($questions as $question)
+                @php
+                    $qName = "participants[{$index}][answers][{$question->id}]";
+                    $qId = "q-{$question->id}-{$index}";
+                    $submitted = $value('answers')[$question->id] ?? null;
+                @endphp
+
+                <div>
+                    <input type="hidden" name="{{ $qName }}" value="0">
+
+                    <label for="{{ $qId }}" class="flex items-start gap-2.5 cursor-pointer group">
+                        <input type="checkbox"
+                               id="{{ $qId }}"
+                               name="{{ $qName }}"
+                               value="1"
+                               @checked((bool) $submitted)
+                               class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+
+                        <span class="text-xs text-gray-700 group-hover:text-gray-900">
+                            {{ $question->title }}
+                            @if ($question->is_required)
+                                <span class="text-red-600" aria-hidden="true">*</span>
+                                <span class="sr-only">(required)</span>
+                            @endif
+
+                            @if (filled($question->body))
+                                {{-- The organiser's wording, shown in full rather than
+                                     behind a link. A term nobody reads because it was
+                                     one click away is not agreed to in any real sense. --}}
+                                <span class="block text-gray-500 mt-1 whitespace-pre-line leading-relaxed">{{ $question->body }}</span>
+                            @endif
+
+                            @unless ($question->is_required)
+                                <span class="block text-gray-400 mt-0.5">Optional.</span>
+                            @endunless
+                        </span>
+                    </label>
+
+                    @error("participants.{$index}.answers.{$question->id}")
+                        <p class="text-xs text-red-600 mt-1 ml-6.5">{{ $message }}</p>
+                    @enderror
+                </div>
+            @endforeach
+        </div>
+    @endif
 </fieldset>

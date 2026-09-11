@@ -105,6 +105,62 @@
             </x-admin.panel>
         </div>
 
+        {{-- Responses to the questions organisers added to their own forms --}}
+        @if ($questionResponses->isNotEmpty())
+            <x-admin.panel title="Responses" icon="check" :flush="true" class="mt-5">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-left">
+                            <tr>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Event</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Question</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Asked</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Yes</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Share</th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-gray-100">
+                            @foreach ($questionResponses as $question)
+                                @php
+                                    $share = $question->answers_total > 0
+                                        ? (int) round($question->answers_yes / $question->answers_total * 100)
+                                        : 0;
+                                @endphp
+
+                                <tr class="hover:bg-blue-50/40">
+                                    <td class="px-5 py-3 text-gray-700">{{ $question->event?->title ?? '—' }}</td>
+
+                                    <td class="px-5 py-3">
+                                        <span class="text-gray-900">{{ $question->title }}</span>
+                                        @if ($question->is_required)
+                                            <span class="block text-xs text-gray-400">Compulsory, so everyone had to agree</span>
+                                        @endif
+                                    </td>
+
+                                    <td class="px-5 py-3 tabular-nums text-gray-700">{{ number_format($question->answers_total) }}</td>
+                                    <td class="px-5 py-3 tabular-nums text-gray-700">{{ number_format($question->answers_yes) }}</td>
+
+                                    <td class="px-5 py-3">
+                                        <span class="tabular-nums text-gray-900">{{ $share }}%</span>
+                                        <span class="block w-24 h-1.5 bg-gray-200 rounded-full overflow-hidden mt-1" aria-hidden="true">
+                                            <span class="block h-full bg-blue-600 rounded-full" style="width: {{ $share }}%"></span>
+                                        </span>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+
+                <p class="px-5 py-3 text-xs text-gray-500 border-t border-gray-100">
+                    Counted per person, so an entry of seven players contributes seven
+                    answers. A compulsory question always reads 100%, because the form
+                    could not be submitted without it.
+                </p>
+            </x-admin.panel>
+        @endif
+
         {{-- Per event breakdown --}}
         <x-admin.panel title="Per Event" icon="clipboard" :flush="true" class="mt-5">
             @if ($events->isEmpty())

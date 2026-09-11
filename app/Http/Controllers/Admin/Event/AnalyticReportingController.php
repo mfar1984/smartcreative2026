@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin\Event;
 use App\Http\Controllers\Controller;
 use App\Models\ContactMessage;
 use App\Models\Event;
+use App\Models\EventQuestion;
 use Illuminate\Http\Request;
 
 class AnalyticReportingController extends Controller
@@ -16,6 +17,7 @@ class AnalyticReportingController extends Controller
         $events = Event::query()->withCount('registrations')->get();
 
         return view('admin.event.reporting', [
+            'questionResponses' => $this->questionResponses(),
             'summary' => [
                 [
                     'label' => 'Total Events',
@@ -62,5 +64,35 @@ class AnalyticReportingController extends Controller
 
             'events' => $events->sortBy('starts_at'),
         ]);
+    }
+
+    /**
+     * How each event's own questions were answered.
+     *
+     * Counted in the database rather than by loading every answer, because a
+     * popular event produces one row per person per question and this screen only
+     * wants the totals.
+     *
+     * A compulsory question will always read 100%, since nobody could submit
+     * without it. That is not a useful figure and the view says so rather than
+     * presenting it as a finding; the optional ones are what this panel is for.
+     *
+     * @return \Illuminate\Support\Collection<int, EventQuestion>
+     */
+    private function questionResponses()
+    {
+        return EventQuestion::query()
+            ->with('event:id,title')
+            ->withCount([
+                'answers as answers_total',
+                'answers as answers_yes' => fn ($query) => $query->where('answered', true),
+            ])
+            ->orderBy('event_id')
+            ->orderBy('sort_order')
+            ->get()
+            // Nothing to report on a question nobody has reached yet, and a list of
+            // zeroes buries the ones that do have answers.
+            ->filter(fn (EventQuestion $question) => $question->answers_total > 0)
+            ->values();
     }
 }

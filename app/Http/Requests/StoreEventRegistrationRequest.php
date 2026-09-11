@@ -77,6 +77,15 @@ class StoreEventRegistrationRequest extends FormRequest
             // marketed at, so the absence of an answer is a refusal.
             'participants.*.marketing_consent' => ['nullable', 'boolean'],
 
+            /*
+             | The organiser's own questions, keyed by question id. Shape only here;
+             | which of them had to be ticked is settled in checkAnswers() against
+             | the database, because a posted "this one was optional" would be
+             | worth nothing.
+             */
+            'participants.*.answers' => ['nullable', 'array'],
+            'participants.*.answers.*' => ['nullable', 'boolean'],
+
             'participants.*.gender' => ['required', Rule::in(array_keys(ParticipantOptions::GENDERS))],
             'participants.*.race' => ['required', Rule::in(array_keys(ParticipantOptions::RACES))],
             'participants.*.emergency_contact_name' => ['nullable', 'string', 'max:180'],
@@ -257,7 +266,51 @@ class StoreEventRegistrationRequest extends FormRequest
             fn (Validator $validator) => $this->checkDuplicateIdentityCards($validator),
             fn (Validator $validator) => $this->checkSeatsAvailable($validator),
             fn (Validator $validator) => $this->checkAddons($validator),
+            fn (Validator $validator) => $this->checkAnswers($validator),
         ];
+    }
+
+    /**
+     * Refuse the form until every compulsory question is ticked, by everybody.
+     *
+     * Checked here rather than trusted from the markup. The required attribute on
+     * the box is a convenience for whoever is filling the form in, and anybody can
+     * delete it from their own browser in seconds, so it cannot be the thing that
+     * enforces a term.
+     *
+     * Read from the event's own questions, not from the posted keys, so a
+     * submission that simply omits a question it did not like is refused rather
+     * than passing by absence.
+     */
+    private function checkAnswers(Validator $validator): void
+    {
+        $required = $this->event()->questions->where('is_required', true);
+
+        if ($required->isEmpty()) {
+            return;
+        }
+
+        $participants = (array) $this->input('participants', []);
+
+        foreach ($participants as $index => $person) {
+            $answers = (array) ($person['answers'] ?? []);
+
+            foreach ($required as $question) {
+                if (filter_var($answers[$question->id] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                    continue;
+                }
+
+                /*
+                 | Named per person and per question, so the message lands on the box
+                 | that needs ticking rather than at the top of a long form where
+                 | nobody can tell which of seven people it refers to.
+                 */
+                $validator->errors()->add(
+                    "participants.{$index}.answers.{$question->id}",
+                    sprintf('"%s" has to be ticked to continue.', $question->title),
+                );
+            }
+        }
     }
 
     /**

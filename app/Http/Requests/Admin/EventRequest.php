@@ -25,6 +25,12 @@ class EventRequest extends FormRequest
      */
     public const MAX_POSTERS = 10;
 
+    /**
+     * How many questions one form may ask. Every person on an entry answers all
+     * of them, so a long list is a long form and a squad feels it most.
+     */
+    public const MAX_QUESTIONS = 10;
+
     /** @var Collection<int, EventAddon>|null */
     private ?Collection $existingAddons = null;
 
@@ -93,6 +99,18 @@ class EventRequest extends FormRequest
              | through. Ten is a generous ceiling for one event and stops a stray
              | multiple selection filling the disk.
              */
+            /*
+             | Questions the organiser adds to their own form. The title is what
+             | appears beside the box, so it is the one part that cannot be blank;
+             | the body carries the terms and is optional because a one line
+             | question needs no explanation.
+             */
+            'questions' => ['nullable', 'array', 'max:' . self::MAX_QUESTIONS],
+            'questions.*.id' => ['nullable', 'integer'],
+            'questions.*.title' => ['required', 'string', 'max:190'],
+            'questions.*.body' => ['nullable', 'string', 'max:5000'],
+            'questions.*.is_required' => ['nullable', 'boolean'],
+
             'posters' => ['nullable', 'array', 'max:' . self::MAX_POSTERS],
             'posters.*' => ['file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:4096'],
 
@@ -147,6 +165,9 @@ class EventRequest extends FormRequest
 
             'rules_file.mimes' => 'The rules attachment must be a PDF file.',
             'rules_file.max' => 'The rules attachment cannot be larger than 8 MB.',
+
+            'questions.max' => 'An event can ask at most ' . self::MAX_QUESTIONS . ' questions.',
+            'questions.*.title.required' => 'Every question needs a title, which is the text beside the box.',
 
             'posters.max' => 'An event can carry at most ' . self::MAX_POSTERS . ' posters.',
             'posters.*.mimes' => 'A poster must be a JPG, PNG, WebP or PDF file.',
@@ -597,6 +618,7 @@ class EventRequest extends FormRequest
     public function eventAttributes(): array
     {
         $data = $this->safe()->except([
+            'questions',
             'posters',
             'remove_posters',
             'rules_file',
@@ -623,5 +645,15 @@ class EventRequest extends FormRequest
     public function addonRows(): array
     {
         return $this->validated()['addons'] ?? [];
+    }
+
+    /**
+     * The question rows, in the order the form submitted them.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function questionRows(): array
+    {
+        return $this->validated()['questions'] ?? [];
     }
 }

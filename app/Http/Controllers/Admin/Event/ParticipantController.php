@@ -136,7 +136,7 @@ class ParticipantController extends Controller
      */
     public function show(Request $request, EventRegistration $registration)
     {
-        $registration->load(['event', 'participants', 'addonLines', 'notifications.triggeredBy', 'payments.recordedBy']);
+        $registration->load(['event', 'participants.answers', 'addonLines', 'notifications.triggeredBy', 'payments.recordedBy']);
 
         $reachedGateway = $this->refreshPayment($registration);
 

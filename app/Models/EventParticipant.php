@@ -65,6 +65,17 @@ class EventParticipant extends Model
         return $this->hasMany(EventParticipantChange::class, 'event_participant_id')->latest();
     }
 
+    /**
+     * What this person answered to the event's own questions.
+     *
+     * Ordered by id, which is the order they were asked in, because the question
+     * they came from may since have been deleted and cannot be sorted on.
+     */
+    public function answers(): HasMany
+    {
+        return $this->hasMany(EventParticipantAnswer::class, 'event_participant_id')->orderBy('id');
+    }
+
     public function hasCheckedIn(): bool
     {
         return $this->attendance !== null;
