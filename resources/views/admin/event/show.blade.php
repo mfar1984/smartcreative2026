@@ -101,8 +101,8 @@
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-5">
-            {{-- Poster --}}
-            <x-admin.panel title="Poster" icon="grid" :flush="true">
+            {{-- Posters --}}
+            <x-admin.panel title="Posters" icon="grid" :flush="true">
                 @if ($event->posterUrl())
                     <img src="{{ $event->posterUrl() }}" alt="Poster for {{ $event->title }}" class="w-full h-auto">
                 @else

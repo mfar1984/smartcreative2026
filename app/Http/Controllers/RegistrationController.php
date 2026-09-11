@@ -277,7 +277,7 @@ class RegistrationController extends Controller
     private function resolveTab(?string $tab, ?string $slug): string
     {
         if (filled($slug)) {
-            $event = Event::query()->publiclyListed()->where('slug', $slug)->first();
+            $event = Event::query()->publiclyListed()->with('posters')->where('slug', $slug)->first();
 
             if ($event !== null) {
                 foreach (self::TABS as $candidate => $definition) {
@@ -293,7 +293,15 @@ class RegistrationController extends Controller
 
     private function scoped(string $tab): Builder
     {
-        $query = Event::query()->publiclyListed();
+        /*
+         | Posters are eager loaded because the card asks posterUrl() and the
+         | gallery asks for the list, both of which read the relation. Without this
+         | a page of events costs one query per card.
+         |
+         | Harmless on the count() calls in tabsWithCounts(), which never hydrate a
+         | model, so the load is not paid for there.
+         */
+        $query = Event::query()->publiclyListed()->with('posters');
 
         return match ($tab) {
             'ongoing' => $query->ongoing(),

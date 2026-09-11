@@ -19,6 +19,12 @@ class EventRequest extends FormRequest
     private const MAX_ADDONS = 20;
     private const MAX_VARIANTS = 40;
 
+    /**
+     * How many posters one event may carry. Generous for a real event, and low
+     * enough that a stray multiple selection cannot fill the disk.
+     */
+    public const MAX_POSTERS = 10;
+
     /** @var Collection<int, EventAddon>|null */
     private ?Collection $existingAddons = null;
 
@@ -76,9 +82,23 @@ class EventRequest extends FormRequest
             'registration_opens_at' => ['nullable', 'date'],
             'registration_closes_at' => ['nullable', 'date', 'after_or_equal:registration_opens_at'],
 
-            // 4 MB keeps posters usable without letting a huge upload through.
-            'poster' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
-            'remove_poster' => ['nullable', 'boolean'],
+            /*
+             | Several posters, and a PDF is allowed among them.
+             |
+             | Not the 'image' rule, which would reject the PDF. The mimes list is
+             | the whole guard, and it is checked against the file's own type rather
+             | than its extension.
+             |
+             | 4 MB each keeps a poster usable without letting a huge upload
+             | through. Ten is a generous ceiling for one event and stops a stray
+             | multiple selection filling the disk.
+             */
+            'posters' => ['nullable', 'array', 'max:' . self::MAX_POSTERS],
+            'posters.*' => ['file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:4096'],
+
+            // Ids of stored posters the operator ticked for removal.
+            'remove_posters' => ['nullable', 'array'],
+            'remove_posters.*' => ['integer'],
 
             // PDF only. A rulebook is read, not edited, and accepting Word or
             // spreadsheets would hand entrants a file they may not be able to
@@ -128,6 +148,10 @@ class EventRequest extends FormRequest
             'rules_file.mimes' => 'The rules attachment must be a PDF file.',
             'rules_file.max' => 'The rules attachment cannot be larger than 8 MB.',
 
+            'posters.max' => 'An event can carry at most ' . self::MAX_POSTERS . ' posters.',
+            'posters.*.mimes' => 'A poster must be a JPG, PNG, WebP or PDF file.',
+            'posters.*.max' => 'Each poster must be 4 MB or smaller.',
+
             'addons.max' => 'An event can carry at most ' . self::MAX_ADDONS . ' add-ons.',
             'addons.*.name.required' => 'Every add-on needs a name.',
             'addons.*.price.required' => 'Every add-on needs a price. Enter 0 for a free extra.',
@@ -175,7 +199,7 @@ class EventRequest extends FormRequest
         $this->merge($flags + [
             'title' => is_string($this->title) ? trim($this->title) : $this->title,
             'slug' => filled($this->slug) ? str($this->slug)->slug()->toString() : null,
-            'remove_poster' => $this->boolean('remove_poster'),
+
             'remove_rules_file' => $this->boolean('remove_rules_file'),
             // An empty fee box means free, not zero-that-was-typed.
             'fee' => $this->input('fee') === '' ? null : $this->input('fee'),
@@ -573,8 +597,8 @@ class EventRequest extends FormRequest
     public function eventAttributes(): array
     {
         $data = $this->safe()->except([
-            'poster',
-            'remove_poster',
+            'posters',
+            'remove_posters',
             'rules_file',
             'remove_rules_file',
             'slug',

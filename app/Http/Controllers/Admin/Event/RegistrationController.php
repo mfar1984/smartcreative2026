@@ -49,6 +49,9 @@ class RegistrationController extends Controller
 
         $events = $this->scoped($tab)
             ->withCount('registrations')
+            // Eager loaded because posterUrl() reads the relation, and a page of
+            // twenty events would otherwise be twenty extra queries.
+            ->with('posters')
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
                 $inner->where('title', 'like', "%{$search}%")
                     ->orWhere('slug', 'like', "%{$search}%")
@@ -92,9 +95,11 @@ class RegistrationController extends Controller
     {
         $event = new Event($request->eventAttributes());
         $event->slug = $this->resolveSlug($request->input('slug'), $request->input('title'));
-        $event->poster_path = $this->storePoster($request);
         $this->applyRulesFile($request, $event);
         $event->save();
+
+        // After the save, because a poster row needs an event id to belong to.
+        $this->syncPosters($request, $event);
 
         $addons->sync($event, $request->addonRows());
 
@@ -150,15 +155,11 @@ class RegistrationController extends Controller
             $event->slug = $this->resolveSlug($request->input('slug'), $request->input('title'), $event->id);
         }
 
-        $poster = $this->storePoster($request, $event);
-
-        if ($poster !== null || $request->boolean('remove_poster')) {
-            $event->poster_path = $poster;
-        }
-
         $this->applyRulesFile($request, $event);
 
         $event->save();
+
+        $this->syncPosters($request, $event);
 
         $addons->sync($event, $request->addonRows());
 
@@ -203,8 +204,15 @@ class RegistrationController extends Controller
 
         $title = $event->title;
 
-        if ($event->poster_path) {
-            Storage::disk('public')->delete($event->poster_path);
+        /*
+         | Collected before the delete. The rows go with the event through the
+         | cascading foreign key, and once they are gone nothing is left to say
+         | which files on disk belonged to them.
+         */
+        $posterPaths = $event->posters()->pluck('path')->all();
+
+        if ($posterPaths !== []) {
+            Storage::disk('public')->delete($posterPaths);
         }
 
         if ($event->rules_file_path) {
@@ -279,23 +287,64 @@ class RegistrationController extends Controller
      * uploaded. Replacing a poster removes the old file so the disk does not
      * fill with orphans.
      */
-    private function storePoster(EventRequest $request, ?Event $event = null): ?string
+    /**
+     * Apply the poster changes on the form: remove what was ticked, add what was
+     * chosen.
+     *
+     * Removals happen first, so replacing all ten in one save is possible without
+     * tripping the ceiling halfway through.
+     *
+     * Files are deleted from the disk only after the row is gone. The other way
+     * round would leave a row pointing at nothing if the delete failed, which
+     * reads as a broken poster rather than an absent one.
+     */
+    private function syncPosters(EventRequest $request, Event $event): void
     {
-        if ($request->boolean('remove_poster') && $event?->poster_path) {
-            Storage::disk('public')->delete($event->poster_path);
+        $removeIds = array_map('intval', $request->input('remove_posters', []));
 
-            return null;
+        if ($removeIds !== []) {
+            /*
+             | Scoped through the relation, so an id belonging to another event
+             | cannot be deleted even if the posted value were tampered with.
+             */
+            $doomed = $event->posters()->whereKey($removeIds)->get();
+
+            $event->posters()->whereKey($doomed->pluck('id'))->delete();
+
+            if ($doomed->isNotEmpty()) {
+                Storage::disk('public')->delete($doomed->pluck('path')->all());
+            }
+
+            $event->unsetRelation('posters');
         }
 
-        if (! $request->hasFile('poster')) {
-            return $event?->poster_path;
+        $files = array_filter((array) $request->file('posters'));
+
+        if ($files === []) {
+            return;
         }
 
-        if ($event?->poster_path) {
-            Storage::disk('public')->delete($event->poster_path);
+        // Carries on from the highest existing position, so newly added posters
+        // land after the ones already there rather than jumping to the front.
+        $position = (int) $event->posters()->max('sort_order');
+
+        foreach ($files as $file) {
+            $event->posters()->create([
+                'path' => $file->store(self::POSTER_DIRECTORY, 'public'),
+                // Trimmed to the column width, and it is display only.
+                'original_name' => mb_substr((string) $file->getClientOriginalName(), 0, 190),
+                /*
+                 | getMimeType() reads the file rather than trusting the name the
+                 | browser sent, which is the same value the mimes rule validated
+                 | against.
+                 */
+                'mime_type' => $file->getMimeType(),
+                'size_bytes' => $file->getSize(),
+                'sort_order' => ++$position,
+            ]);
         }
 
-        return $request->file('poster')->store(self::POSTER_DIRECTORY, 'public');
+        $event->unsetRelation('posters');
     }
 
     /**

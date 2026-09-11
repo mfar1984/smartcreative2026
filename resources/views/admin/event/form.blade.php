@@ -57,36 +57,87 @@
                 description="What the event is, when it runs, and where."
                 icon="clipboard" />
 
-            {{-- ---------------- Poster ---------------- --}}
-            <x-admin.panel title="Poster" icon="grid">
+            {{-- ---------------- Posters ---------------- --}}
+            <x-admin.panel title="Posters" icon="grid">
+                @php
+                    $storedPosters = $event->exists ? $event->posters : collect();
+                @endphp
+
                 <x-admin.field-row
-                    label="Event Poster"
-                    help="JPG, PNG or WebP up to 4 MB. Shown at the top of the event card."
-                    for="poster"
-                    error="poster">
+                    label="Event Posters"
+                    help="JPG, PNG, WebP or PDF up to 4 MB each, {{ \App\Http\Requests\Admin\EventRequest::MAX_POSTERS }} at most. Visitors see the whole list; the first image is the picture on the event card."
+                    for="posters"
+                    error="posters">
 
-                    <div class="flex flex-wrap items-start gap-4">
-                        <div class="w-40 h-28 shrink-0 rounded-lg border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center">
-                            <img id="poster-preview"
-                                 src="{{ $event->posterUrl() ?? '' }}"
-                                 alt="Poster preview"
-                                 @class(['w-full h-full object-cover', 'hidden' => ! $event->posterUrl()])>
-                            <span id="poster-empty"
-                                  @class(['text-xs text-gray-400 px-3 text-center', 'hidden' => (bool) $event->posterUrl()])>
-                                No poster uploaded
-                            </span>
-                        </div>
+                    <input type="file" id="posters" name="posters[]" multiple
+                           accept="image/jpeg,image/png,image/webp,application/pdf"
+                           class="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700 file:cursor-pointer">
 
-                        <div class="flex-1 min-w-48 space-y-2">
-                            <input type="file" id="poster" name="poster" accept="image/jpeg,image/png,image/webp"
-                                   class="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700 file:cursor-pointer">
+                    <p class="text-xs text-gray-500 mt-2">
+                        Choosing files adds to the list below rather than replacing it. Hold Ctrl
+                        or Cmd to pick several at once.
+                    </p>
 
-                            @if ($event->posterUrl())
-                                <x-admin.toggle name="remove_poster" :checked="old('remove_poster')" label="Remove the current poster" />
-                            @endif
-                        </div>
-                    </div>
+                    {{-- Errors are per file, so the index is named rather than
+                         collapsed into one message the operator cannot act on. --}}
+                    @foreach ($errors->get('posters.*') as $field => $messages)
+                        @foreach ($messages as $message)
+                            <p class="text-xs text-red-600 mt-1">
+                                File {{ (int) filter_var($field, FILTER_SANITIZE_NUMBER_INT) + 1 }}: {{ $message }}
+                            </p>
+                        @endforeach
+                    @endforeach
                 </x-admin.field-row>
+
+                @if ($storedPosters->isNotEmpty())
+                    <div class="px-5 py-4 border-t border-gray-100">
+                        <p class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3">
+                            Uploaded ({{ $storedPosters->count() }})
+                        </p>
+
+                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                            @foreach ($storedPosters as $poster)
+                                <div class="rounded-lg border border-gray-200 overflow-hidden">
+                                    <div class="h-28 bg-gray-50 flex items-center justify-center">
+                                        @if ($poster->isImage())
+                                            <img src="{{ $poster->url() }}"
+                                                 alt="{{ $poster->label() }}"
+                                                 class="w-full h-full object-cover">
+                                        @else
+                                            {{-- A PDF has no thumbnail to show, so it is named
+                                                 instead of left as an empty box. --}}
+                                            <div class="text-center px-2">
+                                                <x-admin.icon name="clipboard" class="w-6 h-6 mx-auto text-red-600" />
+                                                <span class="block text-xs font-semibold text-gray-600 mt-1">PDF</span>
+                                            </div>
+                                        @endif
+                                    </div>
+
+                                    <div class="px-2.5 py-2">
+                                        <p class="text-xs text-gray-700 truncate" title="{{ $poster->label() }}">
+                                            {{ $poster->label() }}
+                                        </p>
+                                        <p class="text-xs text-gray-400 mt-0.5">
+                                            {{ $poster->kindLabel() }}@if ($poster->sizeLabel()) &middot; {{ $poster->sizeLabel() }}@endif
+                                        </p>
+
+                                        <label class="flex items-center gap-1.5 mt-2 text-xs text-red-700 cursor-pointer">
+                                            <input type="checkbox" name="remove_posters[]" value="{{ $poster->id }}"
+                                                   @checked(in_array($poster->id, (array) old('remove_posters', [])))
+                                                   class="rounded border-gray-300 text-red-600 focus:ring-red-500">
+                                            Remove
+                                        </label>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+
+                        <p class="text-xs text-gray-500 mt-3">
+                            Ticked posters are deleted when you save. The order shown is the order
+                            visitors see.
+                        </p>
+                    </div>
+                @endif
             </x-admin.panel>
 
             {{-- ---------------- Identity ---------------- --}}
@@ -564,24 +615,6 @@
             toggle.addEventListener('change', sync);
         });
 
-        // Local preview so the operator sees the poster before saving.
-        const posterInput = document.getElementById('poster');
-        const preview = document.getElementById('poster-preview');
-        const empty = document.getElementById('poster-empty');
-
-        if (posterInput && preview) {
-            posterInput.addEventListener('change', function () {
-                const file = posterInput.files && posterInput.files[0];
-
-                if (!file) {
-                    return;
-                }
-
-                preview.src = URL.createObjectURL(file);
-                preview.classList.remove('hidden');
-                empty?.classList.add('hidden');
-            });
-        }
     })();
 </script>
 

@@ -74,7 +74,6 @@ class Event extends Model
         'registration_opens_at',
         'registration_closes_at',
         'image',
-        'poster_path',
         'rules_file_path',
         'rules_file_name',
     ];
@@ -519,9 +518,47 @@ class Event extends Model
         return min(100, (int) round($this->seats_taken / $this->seats_total * 100));
     }
 
+    /* ---------------------------------------------------------------------
+     | Posters
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Every poster, in the order the organiser arranged them.
+     */
+    public function posters(): HasMany
+    {
+        return $this->hasMany(EventPoster::class)
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
+    /**
+     * The picture at the top of the event card, or null when there is none.
+     *
+     * The first poster that is actually an image, not simply the first poster. A
+     * PDF cannot go in an img tag, so an event whose first upload is a fixture
+     * list in PDF still shows its announcement image on the card rather than a
+     * broken picture or a gradient.
+     */
     public function posterUrl(): ?string
     {
-        return $this->poster_path ? Storage::disk('public')->url($this->poster_path) : null;
+        return $this->posters->first(fn (EventPoster $poster) => $poster->isImage())?->url();
+    }
+
+    /**
+     * How many posters there are, for a button that says so.
+     *
+     * A button reading "View Posters" gives a visitor no reason to press it. One
+     * reading "View Posters (3)" does.
+     */
+    public function posterCount(): int
+    {
+        return $this->posters->count();
+    }
+
+    public function hasPosters(): bool
+    {
+        return $this->posterCount() > 0;
     }
 
     /**
