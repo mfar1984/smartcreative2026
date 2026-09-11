@@ -136,6 +136,88 @@
         </div>
     </section>
 
+    {{-- ==================== Poster galleries ====================
+         Every listed event, not only the ones open for registration. A finished
+         event still has a fixture list somebody may want to look back at, which is
+         why there is no @continue here as there is on the modals below.
+    --}}
+    @foreach ($events as $event)
+
+        @continue(! $event->hasPosters())
+
+        <div id="poster-modal-{{ $event->slug }}"
+             class="fixed inset-0 z-50 overflow-y-auto hidden"
+             role="dialog" aria-modal="true"
+             aria-labelledby="poster-title-{{ $event->slug }}"
+             data-poster-modal="{{ $event->slug }}">
+
+            <div class="fixed inset-0 bg-gray-900/70" data-close-posters></div>
+
+            <div class="relative min-h-full flex items-start justify-center p-4">
+                <div class="relative w-full max-w-4xl bg-white rounded-xl shadow-2xl my-8">
+
+                    <div class="sticky top-0 z-10 flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200 bg-white rounded-t-xl">
+                        <div class="min-w-0">
+                            <h2 id="poster-title-{{ $event->slug }}" class="text-base font-bold text-gray-900">
+                                {{ $event->title }}
+                            </h2>
+                            <p class="text-xs text-gray-500 mt-0.5">
+                                {{ $event->posterCount() }} {{ $event->posterCount() === 1 ? 'poster' : 'posters' }}
+                            </p>
+                        </div>
+
+                        <button type="button" data-close-posters
+                                class="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition shrink-0"
+                                aria-label="Close">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="px-6 py-5 space-y-5">
+                        @foreach ($event->posters as $poster)
+                            @if ($poster->isImage())
+                                {{-- Shown whole rather than cropped, which is the
+                                     point of this gallery: the card already crops. --}}
+                                <figure>
+                                    <a href="{{ $poster->url() }}" target="_blank" rel="noopener">
+                                        <img src="{{ $poster->url() }}"
+                                             alt="{{ $poster->label() }} for {{ $event->title }}"
+                                             loading="lazy"
+                                             class="w-full h-auto rounded-lg border border-gray-200">
+                                    </a>
+                                    <figcaption class="text-xs text-gray-500 mt-1.5">
+                                        Tap to open full size in a new tab.
+                                    </figcaption>
+                                </figure>
+                            @else
+                                {{-- A PDF cannot be an img, so it is offered as a
+                                     link. Same treatment the rulebook already gets. --}}
+                                <a href="{{ $poster->url() }}" target="_blank" rel="noopener"
+                                   class="flex items-start gap-3 rounded-lg border border-gray-200 px-4 py-3.5 hover:bg-gray-50 transition">
+                                    <svg class="w-6 h-6 shrink-0 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                                    </svg>
+                                    <span class="min-w-0">
+                                        <span class="block text-sm font-semibold text-gray-900 truncate">{{ $poster->label() }}</span>
+                                        <span class="block text-xs text-gray-500 mt-0.5">
+                                            {{-- Built as one expression rather than
+                                                 with @ if, because a directive that
+                                                 follows a word character is not
+                                                 compiled and "PDF@if" breaks. --}}
+                                            {{ $poster->sizeLabel() ? 'PDF, ' . $poster->sizeLabel() : 'PDF' }} &middot; opens in a new tab
+                                        </span>
+                                    </span>
+                                </a>
+                            @endif
+                        @endforeach
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endforeach
+
     {{-- ==================== Registration modals ==================== --}}
     @foreach ($events as $event)
         @continue($event->registrationBlockedReason() !== null)
@@ -587,9 +669,47 @@
             trigger.addEventListener('click', closeAll);
         });
 
+        /* ---- Poster galleries ------------------------------------------------
+         | Kept in the same closure as the registration modal so both are shut by
+         | one Escape handler and neither can be left open behind the other.
+         * -------------------------------------------------------------------- */
+
+        function closePosters() {
+            document.querySelectorAll('[data-poster-modal]').forEach(function (modal) {
+                modal.classList.add('hidden');
+            });
+            document.body.classList.remove('overflow-hidden');
+        }
+
+        document.querySelectorAll('[data-open-posters]').forEach(function (trigger) {
+            trigger.addEventListener('click', function () {
+                const modal = document.querySelector(
+                    '[data-poster-modal="' + trigger.dataset.openPosters + '"]'
+                );
+
+                if (!modal) {
+                    return;
+                }
+
+                // Shut the registration modal first. Opening a gallery from a card
+                // behind an open form would otherwise stack the two.
+                closeAll();
+                closePosters();
+
+                modal.classList.remove('hidden');
+                document.body.classList.add('overflow-hidden');
+                modal.querySelector('[data-close-posters]')?.focus();
+            });
+        });
+
+        document.querySelectorAll('[data-close-posters]').forEach(function (trigger) {
+            trigger.addEventListener('click', closePosters);
+        });
+
         document.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
                 closeAll();
+                closePosters();
             }
         });
 
