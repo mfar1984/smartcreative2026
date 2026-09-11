@@ -520,6 +520,7 @@
                                     :removable="$event->isManagerMode() && ! $isFirstRow && $index > $minPlayers"
                                     :title="$rowTitle"
                                     :questions="$event->questions->all()"
+                                    :per-person-addons="$event->addons->filter(fn ($a) => $a->isPerParticipant() && $a->isPurchasable())->values()->all()"
                                     :ign-fields="$event->ignFormFields()" />
                             @endforeach
                         </div>
@@ -541,6 +542,7 @@
                                          player added by the button is asked the same things
                                          as one that was on the page from the start. --}}
                                     :questions="$event->questions->all()"
+                                    :per-person-addons="$event->addons->filter(fn ($a) => $a->isPerParticipant() && $a->isPurchasable())->values()->all()"
                                     :ign-fields="$event->ignFormFields()" />
                             </template>
                         @endif

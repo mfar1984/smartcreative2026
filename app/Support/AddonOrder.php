@@ -36,8 +36,12 @@ class AddonOrder
 
     /**
      * @param  mixed  $input  the raw addons input: [addonId => [variantId|'base' => qty]]
+     * @param  array<int, array<string, mixed>>  $participants  the submitted people,
+     *         whose own [addons][addonId] => variantId choices feed the per person
+     *         add-ons. Passed separately because those live inside each person's
+     *         block on the form, not in the shared addons map.
      */
-    public static function build(Event $event, mixed $input): self
+    public static function build(Event $event, mixed $input, array $participants = []): self
     {
         $lines = [];
         $errors = [];
@@ -53,6 +57,16 @@ class AddonOrder
             if ($addon === null) {
                 $errors["addons.{$addonId}"] = 'One of the extras is no longer available. Please reload the page.';
 
+                continue;
+            }
+
+            /*
+             | A per person add-on is not ordered here. Its choices arrive inside
+             | each person's block and are read below, so a quantity posted against
+             | it is either a stale form or a tampered one; either way ignoring it
+             | is right, because honouring it would double the order.
+             */
+            if ($addon->isPerParticipant()) {
                 continue;
             }
 
@@ -73,9 +87,131 @@ class AddonOrder
             $errors = array_merge($errors, $addonErrors);
         }
 
+        [$perPersonLines, $perPersonErrors] = self::buildPerParticipant($event, $participants);
+
+        $lines = array_merge($lines, $perPersonLines);
+        $errors = array_merge($errors, $perPersonErrors);
+
         $errors = array_merge($errors, self::checkRequired($event, $lines));
 
         return new self($lines, $errors);
+    }
+
+    /**
+     * Lines for the add-ons chosen one person at a time.
+     *
+     * Carries participant_index rather than an id, because this runs during
+     * validation before anybody has been written. The controller swaps the index
+     * for the real id once the people exist, and strips the key before insert.
+     *
+     * @param  array<int, array<string, mixed>>  $participants
+     * @return array{0: array<int, array<string, mixed>>, 1: array<string, string>}
+     */
+    private static function buildPerParticipant(Event $event, array $participants): array
+    {
+        $perPerson = $event->addons->filter(fn (EventAddon $addon) => $addon->isPerParticipant());
+
+        if ($perPerson->isEmpty()) {
+            return [[], []];
+        }
+
+        $lines = [];
+        $errors = [];
+
+        foreach ($perPerson as $addon) {
+            if (! $addon->is_active) {
+                continue;
+            }
+
+            $variants = $addon->variants->keyBy('id');
+            $taken = 0;
+
+            foreach (array_values($participants) as $index => $person) {
+                $path = "participants.{$index}.addons.{$addon->id}";
+                $choice = $person['addons'][$addon->id] ?? null;
+
+                // Nothing chosen. Refused only when the add-on is compulsory, which
+                // checkRequired() cannot say for this shape because it counts the
+                // order as a whole rather than person by person.
+                if (blank($choice)) {
+                    if ($addon->is_required) {
+                        $errors[$path] = sprintf('Choose an option for "%s".', $addon->name);
+                    }
+
+                    continue;
+                }
+
+                $variant = $variants->get((int) $choice);
+
+                if ($variant === null) {
+                    $errors[$path] = sprintf('That option for "%s" is no longer available.', $addon->name);
+
+                    continue;
+                }
+
+                /*
+                 | Stock is counted across everybody on this entry, not per person,
+                 | so seven people cannot each take the last large.
+                 */
+                $available = $variant->stockLeft();
+                $wantedSoFar = 1 + self::countVariant($lines, $variant->id);
+
+                if ($available !== null && $wantedSoFar > $available) {
+                    $errors[$path] = $available === 0
+                        ? sprintf('%s is sold out.', $variant->label)
+                        : sprintf('Only %d of %s left, and more than that were chosen.', $available, $variant->label);
+
+                    continue;
+                }
+
+                $line = self::line($addon, $variant, $variant->unitPrice(), 1);
+                $line['participant_index'] = $index;
+
+                $lines[] = $line;
+                $taken++;
+            }
+
+            /*
+             | The add-on's own price is charged once for the entry, exactly as it is
+             | on the bulk path. Marking an add-on per person changes who each size
+             | belongs to, not what the entry costs, so an organiser can switch an
+             | existing shirt over without anybody's total moving.
+             */
+            if ($taken > 0 && $addon->unitPrice() > 0) {
+                $lines[] = self::line($addon, null, $addon->unitPrice(), 1);
+            }
+
+            $cap = $addon->perOrderCap();
+
+            if ($cap !== null && $taken > $cap) {
+                $errors["addons.{$addon->id}"] = sprintf(
+                    'At most %d of "%s" per registration. %d were chosen.',
+                    $cap,
+                    $addon->name,
+                    $taken,
+                );
+            }
+        }
+
+        return [$lines, $errors];
+    }
+
+    /**
+     * How many of one variant the lines already hold.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     */
+    private static function countVariant(array $lines, int $variantId): int
+    {
+        $total = 0;
+
+        foreach ($lines as $line) {
+            if (($line['event_addon_variant_id'] ?? null) === $variantId) {
+                $total += (int) $line['quantity'];
+            }
+        }
+
+        return $total;
     }
 
     /**
@@ -201,6 +337,16 @@ class AddonOrder
 
         foreach ($event->addons as $addon) {
             if (! $addon->is_required || ! $addon->isPurchasable()) {
+                continue;
+            }
+
+            /*
+             | Per person add-ons are already checked one person at a time in
+             | buildPerParticipant(), which can say who has not chosen. Repeating it
+             | here would add a second message about the order as a whole that the
+             | visitor cannot act on.
+             */
+            if ($addon->isPerParticipant()) {
                 continue;
             }
 

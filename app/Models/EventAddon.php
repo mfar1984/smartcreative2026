@@ -15,6 +15,7 @@ class EventAddon extends Model
         'description',
         'price',
         'is_required',
+        'per_participant',
         'is_checked_by_default',
         'uncheck_reminder',
         'max_quantity',
@@ -27,6 +28,7 @@ class EventAddon extends Model
         return [
             'price' => 'decimal:2',
             'is_required' => 'boolean',
+            'per_participant' => 'boolean',
             'is_checked_by_default' => 'boolean',
             'is_active' => 'boolean',
             'max_quantity' => 'integer',
@@ -46,6 +48,18 @@ class EventAddon extends Model
      * same fact on screen, and the buyer would be offered a tick box they are not
      * allowed to clear.
      */
+    /**
+     * Whether this is chosen once per person rather than as a bulk quantity.
+     *
+     * Only meaningful with options to choose between: "one per person" of a thing
+     * with no variants is just a quantity equal to the head count, which the bulk
+     * path already does. A shirt has sizes, and the sizes are the whole point.
+     */
+    public function isPerParticipant(): bool
+    {
+        return $this->per_participant && $this->hasVariants();
+    }
+
     public function isCheckedByDefault(): bool
     {
         return ! $this->is_required

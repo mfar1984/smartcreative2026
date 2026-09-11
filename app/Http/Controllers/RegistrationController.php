@@ -140,7 +140,7 @@ class RegistrationController extends Controller
                 ->with(['variants' => fn ($query) => $query->lockForUpdate()])
                 ->get());
 
-            $order = AddonOrder::build($locked, $request->input('addons'));
+            $order = AddonOrder::build($locked, $request->input('addons'), $participants);
 
             if (! $order->isValid()) {
                 return ['error' => reset($order->errors) ?: 'One of the extras is no longer available. Please try again.'];
@@ -183,7 +183,13 @@ class RegistrationController extends Controller
             $participants = array_map(function (array $person, int $position) use ($consentIp, &$answers) {
                 $answers[$position] = (array) ($person['answers'] ?? []);
 
-                unset($person['answers']);
+                /*
+                 | Both of these belong on other tables. The add-on choices were
+                 | already turned into order lines by AddonOrder, so the copy here
+                 | has done its work and would only be discarded by mass assignment
+                 | if it were left in.
+                 */
+                unset($person['answers'], $person['addons']);
 
                 $consented = (bool) ($person['marketing_consent'] ?? false);
 
@@ -198,7 +204,9 @@ class RegistrationController extends Controller
             $this->recordAnswers($locked, $saved, $answers);
 
             if ($order->hasLines()) {
-                $registration->addonLines()->createMany($order->lines);
+                $registration->addonLines()->createMany(
+                    $this->attachParticipants($order->lines, $saved)
+                );
             }
 
             // Stock moves now rather than on payment, so a held place cannot be
@@ -306,6 +314,39 @@ class RegistrationController extends Controller
         }
 
         return array_key_exists((string) $tab, self::TABS) ? (string) $tab : 'open';
+    }
+
+    /**
+     * Swap the participant index on each order line for the real id.
+     *
+     * AddonOrder runs during validation, before anybody has been written, so a per
+     * person line can only say "the third person on this form". The people exist by
+     * the time this runs, and createMany returns them in the order they were given.
+     *
+     * The index is removed either way, because it is not a column and leaving it
+     * would rely on mass assignment quietly discarding it.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @param  \Illuminate\Support\Collection<int, EventParticipant>  $saved
+     * @return array<int, array<string, mixed>>
+     */
+    private function attachParticipants(array $lines, $saved): array
+    {
+        $people = $saved->values();
+
+        return array_map(function (array $line) use ($people) {
+            $index = $line['participant_index'] ?? null;
+
+            unset($line['participant_index']);
+
+            if ($index !== null) {
+                // Null rather than guessing if the index somehow has no person, so a
+                // line is never attributed to the wrong one.
+                $line['event_participant_id'] = $people[$index]->id ?? null;
+            }
+
+            return $line;
+        }, $lines);
     }
 
     /**

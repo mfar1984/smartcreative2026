@@ -51,6 +51,7 @@ class EventAddonWriter
             'price' => round((float) $row['price'], 2),
             'max_quantity' => $row['max_quantity'] ?? null,
             'is_required' => (bool) ($row['is_required'] ?? false),
+            'per_participant' => (bool) ($row['per_participant'] ?? false),
 
             // Already reconciled against is_required by the form request, so this
             // writes what was decided rather than deciding again.

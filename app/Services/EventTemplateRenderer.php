@@ -166,10 +166,66 @@ class EventTemplateRenderer
                 'participant_ic_masked' => $this->maskCard($first->ic_number),
                 'participant_ign' => $first->ignLabel(),
                 'participant_role' => $first->roleLabel(),
+
+                /*
+                 | What was chosen for this person, for the message that goes to
+                 | them. Empty when the event has no per person extras, so a
+                 | template carrying the placeholder simply renders nothing rather
+                 | than the word "none" on an event where it makes no sense.
+                 */
+                'participant_addons' => $this->participantAddons($registration, $first),
             ];
         }
 
+        /*
+         | Every person's choice, one per line, for the message that goes to a
+         | manager or to staff. This is the list somebody reads while counting out
+         | shirts, so it names the person before the size.
+         */
+        $values['participant_addon_list'] = $this->addonListByPerson($registration);
+
         return $values;
+    }
+
+    /**
+     * The per person extras recorded against one participant, comma separated.
+     */
+    private function participantAddons(EventRegistration $registration, EventParticipant $participant): string
+    {
+        return $registration->addonLines
+            ->where('event_participant_id', $participant->id)
+            ->map(fn ($line) => filled($line->variant_label)
+                ? sprintf('%s: %s', $line->name, $line->variant_label)
+                : $line->name)
+            ->implode(', ');
+    }
+
+    /**
+     * Everyone's per person extras, one person to a line.
+     *
+     * Only the lines that name somebody, because a bulk quantity has no person to
+     * put against it and would read as an unattributed row in the middle of a list
+     * whose whole purpose is attribution.
+     */
+    private function addonListByPerson(EventRegistration $registration): string
+    {
+        $lines = $registration->addonLines->whereNotNull('event_participant_id');
+
+        if ($lines->isEmpty()) {
+            return '';
+        }
+
+        $people = $registration->participants->keyBy('id');
+
+        return $lines
+            ->map(function ($line) use ($people) {
+                $name = $people->get($line->event_participant_id)?->full_name ?? 'Unnamed';
+
+                return filled($line->variant_label)
+                    ? sprintf('%s - %s: %s', $name, $line->name, $line->variant_label)
+                    : sprintf('%s - %s', $name, $line->name);
+            })
+            ->implode("\n");
     }
 
     /**
@@ -246,6 +302,8 @@ class EventTemplateRenderer
             'participant_ic_masked' => $this->maskCard('010415135502'),
             'participant_ign' => '5211480932 on Asia',
             'participant_role' => 'Player',
+            'participant_addons' => 'Event Tee: Size L',
+            'participant_addon_list' => "AZHAR BIN SULAIMAN - Event Tee: Size L\nTAN WEI LIANG - Event Tee: Size 2XL",
 
             // Staff only, so the Telegram templates preview as something real.
             'contact_name' => 'MOHD RIZAL BIN ABDULLAH 0138801201',

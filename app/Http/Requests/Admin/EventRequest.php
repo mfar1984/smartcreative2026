@@ -139,6 +139,7 @@ class EventRequest extends FormRequest
 
             'addons.*.max_quantity' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'addons.*.is_required' => ['boolean'],
+            'addons.*.per_participant' => ['boolean'],
             'addons.*.is_checked_by_default' => ['boolean'],
             'addons.*.uncheck_reminder' => ['nullable', 'string', 'max:500'],
             'addons.*.is_active' => ['boolean'],
@@ -285,6 +286,7 @@ class EventRequest extends FormRequest
                 'price' => $price === '' ? null : $price,
                 'max_quantity' => blank($row['max_quantity'] ?? null) ? null : (int) $row['max_quantity'],
                 'is_required' => $required,
+                'per_participant' => (bool) ($row['per_participant'] ?? false),
                 'is_checked_by_default' => $ticked,
                 'uncheck_reminder' => $ticked ? $reminder : null,
                 'is_active' => (bool) ($row['is_active'] ?? false),

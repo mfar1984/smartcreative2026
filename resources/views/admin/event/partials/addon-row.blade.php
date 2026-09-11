@@ -15,6 +15,7 @@
     // sell it. Required is off, because most extras are optional.
     $isActive = array_key_exists('is_active', $row) ? (bool) $row['is_active'] : true;
     $isRequired = (bool) ($row['is_required'] ?? false);
+    $isPerParticipant = (bool) ($row['per_participant'] ?? false);
     $isTicked = (bool) ($row['is_checked_by_default'] ?? false);
     $reminder = (string) ($row['uncheck_reminder'] ?? '');
 
@@ -128,8 +129,34 @@
                     <span @class(['text-xs font-semibold', $isRequired ? 'text-gray-400' : 'text-gray-700'])
                           data-addon-ticked-label>Ticked by default, can be unticked</span>
                 </label>
+
+                {{-- One choice per person instead of a quantity per option.
+
+                     Without this a squad orders three larges and two 2XLs and
+                     nothing says who wears what, so the shirts arrive as a pile of
+                     sizes with no names against them.
+
+                     Needs options to choose between: "one each" of a thing with no
+                     variants is only a quantity equal to the head count, which the
+                     ordinary path already does. --}}
+                <input type="hidden" name="{{ $name }}[per_participant]" value="0">
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="{{ $name }}[per_participant]" value="1"
+                           @checked($isPerParticipant)
+                           class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span class="text-xs font-semibold text-gray-700">Choose one per person, not a quantity</span>
+                </label>
             </div>
         </div>
+
+        @if ($isPerParticipant)
+            <p class="text-xs text-gray-500 mt-2">
+                Each person on the entry picks their own option, and it is recorded
+                against them. Only works once this add-on has options below. The price
+                is unchanged: still charged once for the entry, with any option
+                surcharges on top.
+            </p>
+        @endif
 
         {{-- Reminder, shown only while the add-on is offered ticked. This is what
              somebody sees when they clear the box on the registration form, so it

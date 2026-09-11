@@ -408,6 +408,25 @@
                             </td>
                         </tr>
 
+                        {{-- Extras chosen for this person. This is the row that
+                             answers "what size does this player wear", which a bulk
+                             quantity on the entry cannot. --}}
+                        @php
+                            $ownLines = $registration->addonLines->where('event_participant_id', $participant->id);
+                        @endphp
+
+                        @foreach ($ownLines as $line)
+                            <tr>
+                                <th scope="row" class="{{ $label }} text-left">{{ $line->name }}</th>
+                                <td class="{{ $value }}">
+                                    <span class="font-semibold text-gray-900">{{ $line->variant_label ?: '—' }}</span>
+                                    @if ((float) $line->unit_price > 0)
+                                        <span class="text-xs text-gray-400 ml-1">+{{ $line->unitPriceLabel() }}</span>
+                                    @endif
+                                </td>
+                            </tr>
+                        @endforeach
+
                         {{-- The organiser's own questions, as this person answered
                              them. The wording shown is the copy stored with the
                              answer, not the question's current text, so editing the

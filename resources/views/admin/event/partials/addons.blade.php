@@ -28,6 +28,7 @@
                 'price' => $addon->price,
                 'max_quantity' => $addon->max_quantity,
                 'is_required' => $addon->is_required ? '1' : '0',
+                'per_participant' => $addon->per_participant ? '1' : '0',
                 'is_checked_by_default' => $addon->is_checked_by_default ? '1' : '0',
                 'uncheck_reminder' => $addon->uncheck_reminder,
                 'is_active' => $addon->is_active ? '1' : '0',

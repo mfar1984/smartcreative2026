@@ -96,6 +96,8 @@ class EventTemplates
         'participant_ic_masked' => 'Their identity card with the last digits hidden',
         'participant_ign' => 'Their in-game Player ID and Server ID',
         'participant_role' => 'Manager or Player',
+        'participant_addons' => 'Extras chosen for this person, such as their shirt size',
+        'participant_addon_list' => 'Everyone on the entry with the extras chosen for them, one per line',
 
         // Staff only. These describe things no participant is ever told about,
         // so they appear on the Telegram templates and nowhere else.
@@ -129,6 +131,7 @@ class EventTemplates
         'recipient_players', 'recipient_count',
         'participant_name', 'participant_ic', 'participant_ic_masked',
         'participant_ign', 'participant_role',
+        'participant_addons', 'participant_addon_list',
     ];
 
     /** Money, which only the person paying needs spelled out. */

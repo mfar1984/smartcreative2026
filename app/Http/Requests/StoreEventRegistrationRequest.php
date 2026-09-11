@@ -86,6 +86,15 @@ class StoreEventRegistrationRequest extends FormRequest
             'participants.*.answers' => ['nullable', 'array'],
             'participants.*.answers.*' => ['nullable', 'boolean'],
 
+            /*
+             | Which option each person picked of a per person add-on, as
+             | [addonId => variantId]. Shape only: whether the id is real, in stock
+             | and belongs to this event is settled by AddonOrder against the
+             | database, which is also where the message is worded.
+             */
+            'participants.*.addons' => ['nullable', 'array'],
+            'participants.*.addons.*' => ['nullable', 'integer'],
+
             'participants.*.gender' => ['required', Rule::in(array_keys(ParticipantOptions::GENDERS))],
             'participants.*.race' => ['required', Rule::in(array_keys(ParticipantOptions::RACES))],
             'participants.*.emergency_contact_name' => ['nullable', 'string', 'max:180'],
@@ -323,6 +332,9 @@ class StoreEventRegistrationRequest extends FormRequest
         return $this->addonOrder ??= AddonOrder::build(
             $this->event()->loadMissing('addons.variants'),
             $this->input('addons'),
+            // Per person choices arrive inside each person's block, so the people
+            // have to be handed over as well as the shared quantities.
+            (array) $this->input('participants', []),
         );
     }
 

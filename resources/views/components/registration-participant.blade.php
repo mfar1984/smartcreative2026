@@ -36,6 +36,7 @@
     'position' => 'manager_only',
     'alsoPlays' => false,
     'questions' => [],
+    'perPersonAddons' => [],
 ])
 
 @php
@@ -312,6 +313,61 @@
             </span>
         </label>
     </div>
+
+    {{--
+        Extras chosen for this person rather than as a quantity for the entry.
+
+        A shirt size is the reason this exists. Ordering three larges and two 2XLs
+        as bulk quantities is a correct order that nobody can act on, because the
+        shirts arrive with no names against the sizes.
+    --}}
+    @if ($perPersonAddons !== [])
+        <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
+            @foreach ($perPersonAddons as $addon)
+                @php
+                    $aName = "participants[{$index}][addons][{$addon->id}]";
+                    $aId = "pa-{$addon->id}-{$index}";
+                    $chosen = $value('addons')[$addon->id] ?? null;
+                @endphp
+
+                <div>
+                    <label for="{{ $aId }}" class="block text-xs font-semibold text-gray-700 mb-1">
+                        {{ $addon->name }}
+                        @if ($addon->is_required)
+                            <span class="text-red-600" aria-hidden="true">*</span>
+                            <span class="sr-only">(required)</span>
+                        @endif
+                    </label>
+
+                    <select id="{{ $aId }}" name="{{ $aName }}"
+                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                        {{-- Always offered, even when compulsory, so an unanswered
+                             form is refused with a message rather than quietly
+                             defaulting somebody to the first size on the list. --}}
+                        <option value="">{{ $addon->is_required ? 'Choose one' : 'None' }}</option>
+
+                        @foreach ($addon->variants as $variant)
+                            @php $sold = $variant->stockLeft() === 0; @endphp
+
+                            <option value="{{ $variant->id }}"
+                                    @selected((int) $chosen === $variant->id)
+                                    @disabled($sold)>
+                                {{ $variant->label }}@if ($variant->unitPrice() > 0) &nbsp;+RM {{ number_format($variant->unitPrice(), 2) }}@endif @if ($sold) &nbsp;(sold out)@endif
+                            </option>
+                        @endforeach
+                    </select>
+
+                    @if (filled($addon->description))
+                        <p class="text-xs text-gray-500 mt-1">{{ $addon->description }}</p>
+                    @endif
+
+                    @error("participants.{$index}.addons.{$addon->id}")
+                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                    @enderror
+                </div>
+            @endforeach
+        </div>
+    @endif
 
     {{--
         The organiser's own questions, asked of this person.
