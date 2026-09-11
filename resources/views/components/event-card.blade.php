@@ -122,28 +122,35 @@
             </div>
         @endif
 
-        {{-- Fee and call to action --}}
-        <div class="flex items-center justify-between gap-4 pt-4 border-t border-gray-100 @if ($event->seats_total <= 0) mt-auto @endif">
-            <div>
-                <span class="block text-xs text-gray-500">Registration fee</span>
-                <span class="block text-base font-bold text-gray-900">{{ $event->feeLabel() }}</span>
+        {{-- Fee and call to action
+
+             Stacked rather than sat side by side. Three cards to a row leaves each
+             about 370px, and a fee beside two buttons squeezed the price onto two
+             lines: "RM" above "200.00". Stacking gives both the full width and
+             keeps three events to a row, which widening the cards would have cost.
+        --}}
+        <div class="pt-4 border-t border-gray-100 @if ($event->seats_total <= 0) mt-auto @endif">
+            <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-3">
+                <span class="text-xs text-gray-500">Registration fee</span>
+                <span class="text-base font-bold text-gray-900 whitespace-nowrap">{{ $event->feeLabel() }}</span>
                 @unless ($event->isFree())
-                    <span class="block text-xs text-gray-500">{{ $event->feeBasisLabel() }}</span>
+                    <span class="text-xs text-gray-500">{{ $event->feeBasisLabel() }}</span>
                 @endunless
             </div>
 
-            {{-- Posters sit beside Register rather than replacing the card picture,
+            {{-- Posters sits beside Register rather than replacing the card picture,
                  which is cropped to a strip and unreadable for anything with words
                  on it. Offered whatever the registration state is: a closed or
-                 finished event still has a fixture list worth reading. --}}
-            {{-- Grouped so the pair stays together on the right of the fee, and
-                 wraps as a unit on a narrow card rather than splitting. --}}
-            <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                 finished event still has a fixture list worth reading.
+
+                 Equal widths, so the pair reads as one deliberate row rather than
+                 two buttons that happen to be next to each other. --}}
+            <div class="flex items-stretch gap-2">
             @if ($event->hasPosters())
                 <button type="button"
                         data-open-posters="{{ $event->slug }}"
-                        class="inline-flex items-center gap-1.5 border border-gray-300 text-gray-700 text-sm px-4 py-2.5 rounded-full font-semibold hover:bg-gray-50 transition">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        class="flex-1 inline-flex items-center justify-center gap-1.5 border border-gray-300 text-gray-700 text-sm px-3 py-2.5 rounded-full font-semibold hover:bg-gray-50 transition whitespace-nowrap">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                     </svg>
                     Posters ({{ $event->posterCount() }})
@@ -154,7 +161,7 @@
             @if ($blocked === null)
                 <button type="button"
                         data-open-registration="{{ $event->slug }}"
-                        class="inline-flex items-center gap-2 bg-blue-600 text-white text-sm px-5 py-2.5 rounded-full font-semibold hover:bg-blue-700 transition shadow-md">
+                        class="flex-1 inline-flex items-center justify-center gap-2 bg-blue-600 text-white text-sm px-3 py-2.5 rounded-full font-semibold hover:bg-blue-700 transition shadow-md whitespace-nowrap">
                     Register
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
@@ -162,7 +169,7 @@
                     <span class="sr-only">for {{ $event->title }}</span>
                 </button>
             @else
-                <span class="inline-flex items-center bg-gray-200 text-gray-500 text-sm px-5 py-2.5 rounded-full font-semibold cursor-not-allowed text-right"
+                <span class="flex-1 inline-flex items-center justify-center bg-gray-200 text-gray-500 text-sm px-3 py-2.5 rounded-full font-semibold cursor-not-allowed whitespace-nowrap"
                       aria-disabled="true"
                       title="{{ $blocked }}">
                     @if ($lifecycle === 'completed')
