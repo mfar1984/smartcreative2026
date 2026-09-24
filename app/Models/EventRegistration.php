@@ -400,6 +400,26 @@ class EventRegistration extends Model
         return self::STATUSES[$this->status] ?? $this->status;
     }
 
+    /**
+     * Whether money has actually changed hands over this entry.
+     *
+     * Not the same as being marked paid. A free entry is marked paid the moment it
+     * is submitted, because nothing is owed, and that flag then triggered the
+     * protections meant for real money: it could not be deleted and it could not be
+     * moved, on the grounds that the books would disagree with the gateway. There
+     * were no books and no gateway.
+     *
+     * Three things can each mean money: a charge, a receipt on record, or a
+     * purchase at the gateway. Any one of them is enough.
+     */
+    public function hasMoneyOnRecord(): bool
+    {
+        return (float) $this->amount > 0
+            || (float) $this->amount_paid > 0
+            || filled($this->payment_reference)
+            || $this->payments()->exists();
+    }
+
     public function paymentStatusLabel(): string
     {
         return self::PAYMENT_STATUSES[$this->payment_status] ?? $this->payment_status;

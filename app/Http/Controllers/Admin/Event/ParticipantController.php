@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\EventAddonVariant;
 use App\Models\EventParticipant;
+use App\Models\EventParticipantAnswer;
 use App\Models\EventRegistration;
 use App\Models\EventRegistrationPayment;
 use App\Services\AdminLogger;
@@ -103,6 +104,18 @@ class ParticipantController extends Controller
             'canRecordPayment' => $request->user()->hasPermission('payments.record'),
             'canTally' => $request->user()->hasPermission('payments.tally'),
             'canExport' => $request->user()->hasPermission('participants.export'),
+            'canTransfer' => $request->user()->hasPermission('participants.transfer'),
+
+            /*
+             | Events an entry could be moved to. Only those still accepting entries,
+             | because moving one onto a finished event would create something the
+             | organiser cannot run. The mode is carried so the dialog can say which
+             | shape each one takes rather than leaving the refusal until submit.
+             */
+            'transferTargets' => Event::query()
+                ->whereIn('status', Event::REGISTERABLE)
+                ->orderBy('title')
+                ->get(['id', 'title', 'registration_mode', 'fee']),
 
             // Only events that actually have entries, so the filter never offers
             // a choice that returns nothing.
@@ -370,15 +383,21 @@ class ParticipantController extends Controller
         // A settled payment is a financial record, and the money still sits with
         // the gateway. Refunding and cancelling is the honest path; deleting
         // would leave the books disagreeing with the gateway's dashboard.
-        if (in_array($registration->payment_status, [
-            EventRegistration::PAYMENT_PAID,
-            EventRegistration::PAYMENT_REFUNDED,
-        ], true)) {
+        /*
+         | Judged on whether money moved, not on the payment_status flag.
+         |
+         | A free entry is marked paid the instant it is submitted, because nothing
+         | is owed. Reading that flag as "settled financial record" meant a free
+         | entry could never be deleted, on the grounds that the books would
+         | disagree with the gateway. There are no books and no gateway on an entry
+         | that cost nothing.
+         */
+        if ($registration->hasMoneyOnRecord()) {
             return back()->withInput()->withErrors([
                 'registration' => sprintf(
-                    '%s cannot be deleted because it is marked %s. Refund it at the gateway first, or leave it for the record.',
+                    '%s cannot be deleted because %s has been taken for it. Refund it at the gateway first, or leave it for the record.',
                     $registration->reference,
-                    strtolower($registration->paymentStatusLabel()),
+                    $registration->amountLabel(),
                 ),
             ]);
         }
@@ -491,6 +510,202 @@ class ParticipantController extends Controller
                     ? $registration->event?->seatUnit() ?? 'place'
                     : $registration->event?->seatUnitPlural() ?? 'places',
             ));
+    }
+
+    /**
+     * Move a whole entry to a different event.
+     *
+     * For the entry filed against the wrong event, which happens when two of them
+     * are open at once and look alike. The alternative is deleting and asking seven
+     * people to type their details again.
+     *
+     * Four things are refused rather than guessed at:
+     *
+     * Money. Moving a paid entry changes what it should have cost, and this cannot
+     * refund the difference or collect it. Refund at the gateway and re-enter.
+     *
+     * A different mode. A squad entry has a manager and players; an individual entry
+     * has neither. Moving between the two would leave roles that the target event
+     * does not use.
+     *
+     * A head count outside the target's bounds. A squad of seven does not fit an
+     * event that caps at five, and pretending otherwise produces an entry the
+     * organiser cannot run.
+     *
+     * No room. The target's capacity is checked under a lock, the same way the
+     * public form checks it, because two administrators moving entries at once must
+     * not both be told yes.
+     *
+     * Two things are dropped, and the message says how many. Add-on lines point at
+     * the old event's catalogue and answers point at its questions; neither exists
+     * on the target. Carrying them would leave rows referring to a shirt nobody is
+     * selling and a question nobody asked.
+     */
+    public function transfer(Request $request, EventRegistration $registration)
+    {
+        $data = $request->validate([
+            'event_id' => ['required', 'integer', 'exists:events,id'],
+        ], [
+            'event_id.required' => 'Choose the event to move this entry to.',
+        ]);
+
+        $registration->loadMissing(['event', 'participants']);
+
+        if ($registration->hasMoneyOnRecord()) {
+            return back()->withInput()->withErrors(['transfer' => sprintf(
+                '%s cannot be moved because %s has been taken for it. Refund it at the gateway, then enter it on the other event.',
+                $registration->reference,
+                $registration->amountLabel(),
+            )]);
+        }
+
+        if ((int) $data['event_id'] === (int) $registration->event_id) {
+            return back()->withErrors(['transfer' => 'That is the event it is already on.']);
+        }
+
+        $headCount = $registration->participants->count();
+        $from = $registration->event;
+
+        $outcome = DB::transaction(function () use ($registration, $data, $headCount, $from) {
+            /** @var Event $target */
+            $target = Event::query()->whereKey($data['event_id'])->lockForUpdate()->firstOrFail();
+
+            if ($target->registration_mode !== $registration->mode) {
+                return ['error' => sprintf(
+                    '%s takes %s entries and this one is %s. The two shapes are not interchangeable.',
+                    $target->title,
+                    $target->isManagerMode() ? 'squad' : 'individual',
+                    $registration->mode === Event::MODE_MANAGER ? 'a squad' : 'individual',
+                )];
+            }
+
+            [$min, $max] = $target->playerBounds();
+
+            if ($target->isManagerMode()) {
+                // The manager occupies one of the rows, so the playing count is the
+                // head count less one unless they also play.
+                $players = $registration->participants
+                    ->filter(fn (EventParticipant $person) => $person->isPlaying())
+                    ->count();
+
+                if ($players < $min || ($max !== null && $players > $max)) {
+                    return ['error' => sprintf(
+                        '%s takes between %d and %s players and this entry has %d.',
+                        $target->title,
+                        $min,
+                        $max === null ? 'any number of' : $max,
+                        $players,
+                    )];
+                }
+            }
+
+            $wanted = $target->seatsForEntry($headCount);
+
+            if ($target->seats_total > 0 && $wanted > $target->seatsLeft()) {
+                return ['error' => sprintf('%s is fully booked.', $target->title)];
+            }
+
+            // Give the place back before taking the new one, so an event cannot
+            // appear to hold the same entry twice while this runs.
+            if ($from !== null) {
+                $released = $from->seatsForEntry($headCount);
+
+                Event::query()->whereKey($from->id)->lockForUpdate()->first()?->forceFill([
+                    'seats_taken' => max(0, $from->seats_taken - $released),
+                ])->save();
+            }
+
+            if ($wanted > 0) {
+                $target->increment('seats_taken', $wanted);
+            }
+
+            $droppedAddons = $registration->addonLines()->count();
+            $droppedAnswers = EventParticipantAnswer::query()
+                ->whereIn('event_participant_id', $registration->participants->pluck('id'))
+                ->count();
+
+            $registration->addonLines()->delete();
+
+            EventParticipantAnswer::query()
+                ->whereIn('event_participant_id', $registration->participants->pluck('id'))
+                ->delete();
+
+            /*
+             | The amount is rewritten from the target's fee. Extras are gone, and
+             | the entry fee is the target's now, not the one it arrived with. Only
+             | reachable when no money moved, so nothing is being written over a
+             | figure somebody actually paid.
+             */
+            $fee = $target->registrationAmount();
+
+            $registration->forceFill([
+                'event_id' => $target->id,
+                'registration_fee' => $fee,
+                'addons_total' => 0,
+                'amount' => $fee,
+                'status' => $fee <= 0
+                    ? EventRegistration::STATUS_CONFIRMED
+                    : EventRegistration::STATUS_PENDING,
+                'payment_status' => $fee <= 0
+                    ? EventRegistration::PAYMENT_PAID
+                    : EventRegistration::PAYMENT_UNPAID,
+            ])->save();
+
+            return [
+                'target' => $target,
+                'dropped_addons' => $droppedAddons,
+                'dropped_answers' => $droppedAnswers,
+            ];
+        });
+
+        if (isset($outcome['error'])) {
+            return back()->withInput()->withErrors(['transfer' => $outcome['error']]);
+        }
+
+        /** @var Event $target */
+        $target = $outcome['target'];
+
+        AdminLogger::activity('participants.transfer', sprintf(
+            'Moved %s from %s to %s.',
+            $registration->reference,
+            $from?->title ?? 'an unknown event',
+            $target->title,
+        ));
+
+        AdminLogger::audit($registration, 'transferred', [
+            'event' => $from?->title,
+            'amount' => $from?->registrationAmount(),
+        ], [
+            'event' => $target->title,
+            'amount' => $target->registrationAmount(),
+            'addon_lines_dropped' => $outcome['dropped_addons'],
+            'answers_dropped' => $outcome['dropped_answers'],
+        ]);
+
+        $notes = [];
+
+        if ($outcome['dropped_addons'] > 0) {
+            $notes[] = sprintf(
+                '%d extra %s removed, because they belonged to the old event',
+                $outcome['dropped_addons'],
+                $outcome['dropped_addons'] === 1 ? 'line was' : 'lines were',
+            );
+        }
+
+        if ($outcome['dropped_answers'] > 0) {
+            $notes[] = sprintf(
+                '%d %s cleared, because the questions belonged to the old event',
+                $outcome['dropped_answers'],
+                $outcome['dropped_answers'] === 1 ? 'answer was' : 'answers were',
+            );
+        }
+
+        return back()->with('status', sprintf(
+            '%s moved to %s.%s',
+            $registration->reference,
+            $target->title,
+            $notes === [] ? '' : ' ' . ucfirst(implode('. ', $notes)) . '.',
+        ));
     }
 
     /**

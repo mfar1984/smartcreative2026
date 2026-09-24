@@ -48,6 +48,10 @@ class RolesAndPermissionsSeeder extends Seeder
                 // it, and an export puts every person's identity card number and
                 // address into a file that leaves the building.
                 'export' => ['participants.export', 'Export the participant list for an event'],
+
+                // Separate again: it moves an entry between two events, changing the
+                // seat count on both and discarding whatever belonged to the old one.
+                'transfer' => ['participants.transfer', 'Move a registration to a different event'],
             ],
             'Attendance' => [
                 'view' => ['attendance.view', 'View attendance'],
@@ -383,6 +387,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'participants.notify',
                 'participants.delete',
                 'participants.export',
+                'participants.transfer',
                 'attendance.view',
                 'attendance.update',
                 'attendance.remove-player',

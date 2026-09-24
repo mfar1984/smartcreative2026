@@ -160,6 +160,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:participants.notify')
                 ->name('participants.remind');
 
+            /*
+             | Its own permission: it moves an entry between two events, changing the
+             | seat count on both and discarding the add-on lines and answers that
+             | belonged to the old one. Throttled because each press writes to two
+             | events under a lock.
+             */
+            Route::post('participants/{registration}/transfer', [ParticipantController::class, 'transfer'])
+                ->middleware(['permission:participants.transfer', 'throttle:20,1'])
+                ->name('participants.transfer');
+
             // Its own permission: permanent, and it takes the personal data of
             // everyone named on the entry with it.
             Route::delete('participants/{registration}', [ParticipantController::class, 'destroy'])
