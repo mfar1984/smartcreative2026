@@ -156,7 +156,20 @@ class RegistrationController extends Controller
                 'mode' => $locked->registration_mode,
                 'team_name' => $request->input('team_name'),
                 'logo_path' => $logoPath,
-                'status' => EventRegistration::STATUS_PENDING,
+                /*
+                 | Nothing to pay means nothing to wait for, so a free entry is
+                 | confirmed on arrival rather than left pending.
+                 |
+                 | STATUS_CONFIRMED is otherwise set in exactly one place,
+                 | RegistrationPaymentUpdater, which runs when a payment reaches
+                 | paid. A free entry never goes near it, so it used to be born
+                 | "Paid" and "Pending" and stay that way for ever: the screen
+                 | showed an amber badge on an entry that owed nothing and had
+                 | nothing outstanding to chase.
+                 */
+                'status' => $total <= 0
+                    ? EventRegistration::STATUS_CONFIRMED
+                    : EventRegistration::STATUS_PENDING,
                 'payment_status' => $total <= 0
                     ? EventRegistration::PAYMENT_PAID
                     : EventRegistration::PAYMENT_UNPAID,
