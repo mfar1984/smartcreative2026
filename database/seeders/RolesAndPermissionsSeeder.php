@@ -52,6 +52,14 @@ class RolesAndPermissionsSeeder extends Seeder
                 // Separate again: it moves an entry between two events, changing the
                 // seat count on both and discarding whatever belonged to the old one.
                 'transfer' => ['participants.transfer', 'Move a registration to a different event'],
+
+                // Correcting one person's details on an entry. Separate from
+                // deleting the entry, and from taking somebody off it.
+                'update' => ['participants.update', "Correct a person's details on a registration"],
+
+                // Separate from update: this destroys a record rather than fixing
+                // one, and takes the person's answers and their own extras with it.
+                'remove' => ['participants.remove', 'Take one person off a registration'],
             ],
             'Attendance' => [
                 'view' => ['attendance.view', 'View attendance'],
@@ -388,6 +396,8 @@ class RolesAndPermissionsSeeder extends Seeder
                 'participants.delete',
                 'participants.export',
                 'participants.transfer',
+                'participants.update',
+                'participants.remove',
                 'attendance.view',
                 'attendance.update',
                 'attendance.remove-player',

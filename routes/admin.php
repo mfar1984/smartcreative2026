@@ -170,6 +170,24 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware(['permission:participants.transfer', 'throttle:20,1'])
                 ->name('participants.transfer');
 
+            /*
+             | One person on an entry, rather than the entry itself. Keyed by both so
+             | the registration the screen and the permission were resolved against
+             | stays the authority, and a person id belonging to another entry cannot
+             | be posted against this URL.
+             |
+             | Two permissions, not one. Correcting a misspelt name fixes a record;
+             | taking somebody off destroys one, along with their answers and
+             | whatever was ordered in their size.
+             */
+            Route::put('participants/{registration}/people/{participant}', [ParticipantController::class, 'updateParticipant'])
+                ->middleware(['permission:participants.update', 'throttle:30,1'])
+                ->name('participants.person.update');
+
+            Route::delete('participants/{registration}/people/{participant}', [ParticipantController::class, 'removeParticipant'])
+                ->middleware(['permission:participants.remove', 'throttle:30,1'])
+                ->name('participants.person.remove');
+
             // Its own permission: permanent, and it takes the personal data of
             // everyone named on the entry with it.
             Route::delete('participants/{registration}', [ParticipantController::class, 'destroy'])

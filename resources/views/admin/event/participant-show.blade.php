@@ -15,6 +15,18 @@
 @section('content')
     @php
         use App\Models\EventRegistration;
+        use App\Support\ParticipantOptions;
+
+        /*
+         | Which person's correction dialog was open when validation failed, so that
+         | one dialog reopens with its messages and its typed values still in place.
+         | Without it a rejected card number would close the form and leave an error
+         | on screen with nothing attached to it.
+         */
+        $reopenPersonFor = old('editing_person');
+
+        $personInput = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
+        $personLabel = 'block text-xs font-semibold text-gray-700 mb-1';
 
         $regTones = [
             EventRegistration::STATUS_PENDING => 'amber',
@@ -90,6 +102,10 @@
                 </form>
             @endif
         </x-slot:actions>
+
+        {{-- Correcting and removing a person both come back here, so this is where
+             the outcome has to be readable. Same partial the rest of the admin uses. --}}
+        @include('admin.partials.flash')
 
         {{-- ---------------- Registration ---------------- --}}
         <x-admin.section-intro
@@ -341,7 +357,62 @@
             accent="purple" />
 
         @forelse ($registration->participants as $participant)
-            <x-admin.panel :title="$participant->roleLabel() . ' — ' . $participant->full_name" icon="users">
+            @php
+                // Taking somebody off is the model's decision, not this screen's, so
+                // the counter and this page cannot drift apart on who may go. The
+                // reason is kept because a disabled control that says why is more
+                // use than one that has silently vanished.
+                $removalBlocked = $participant->removalBlockedReason();
+            @endphp
+
+            <x-admin.panel :title="$participant->roleLabel() . ' — ' . $participant->full_name" icon="users"
+                           :id="'person-' . $participant->id">
+
+                @if ($canUpdatePerson || $canRemovePerson)
+                    <x-slot:actions>
+                        @if ($canUpdatePerson)
+                            <button type="button"
+                                    data-open-person="{{ $participant->id }}"
+                                    class="p-1.5 rounded-lg text-blue-600 hover:bg-blue-100 transition"
+                                    title="Correct {{ $participant->full_name }}'s details"
+                                    aria-label="Correct {{ $participant->full_name }}'s details">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                </svg>
+                            </button>
+                        @endif
+
+                        @if ($canRemovePerson)
+                            @if ($removalBlocked === null)
+                                <form action="{{ route('admin.event.participants.person.remove', [$registration, $participant]) }}" method="POST"
+                                      onsubmit="return confirm('Remove {{ addslashes($participant->full_name) }} from {{ addslashes($registration->reference) }}?\n\nThis cannot be undone. Their answers and anything ordered in their size go with them.');">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit"
+                                            class="p-1.5 rounded-lg text-red-600 hover:bg-red-100 transition"
+                                            title="Remove {{ $participant->full_name }} from this entry"
+                                            aria-label="Remove {{ $participant->full_name }} from this entry">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                        </svg>
+                                    </button>
+                                </form>
+                            @else
+                                {{-- Shown disabled with the reason on hover rather than
+                                     hidden, so somebody looking for the control is told
+                                     why it will not work instead of hunting for it. --}}
+                                <span class="p-1.5 rounded-lg text-gray-300 cursor-not-allowed"
+                                      title="{{ $removalBlocked }}"
+                                      aria-label="Cannot remove {{ $participant->full_name }}: {{ $removalBlocked }}">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                    </svg>
+                                </span>
+                            @endif
+                        @endif
+                    </x-slot:actions>
+                @endif
+
                 <table class="w-full text-sm">
                     <tbody class="divide-y divide-gray-100">
                         <tr>
@@ -468,6 +539,278 @@
                 <p class="px-5 py-6 text-sm text-gray-500">No people are recorded on this registration.</p>
             </x-admin.panel>
         @endforelse
+
+        {{--
+            One correction dialog per person, drawn outside the panels above.
+
+            A fixed overlay nested inside a card gets clipped by the card's own
+            overflow rule, so these live at the end of the page and are matched to
+            their button by id.
+
+            Which fields appear is the event's decision, not this screen's: a game
+            account field the event never asked for is not drawn, so it cannot be
+            filled in by accident and would not be validated if it were.
+        --}}
+        @if ($canUpdatePerson)
+            @foreach ($registration->participants as $participant)
+                @php
+                    $isPersonReopened = (int) $reopenPersonFor === (int) $participant->id;
+
+                    // old() only belongs to the one dialog that failed. Reading it on
+                    // the others would put one person's typed name into everybody's
+                    // form the moment a single card number was rejected.
+                    $valueOf = fn (string $field, $fallback = null) => $isPersonReopened
+                        ? old($field, $fallback)
+                        : $fallback;
+                @endphp
+
+                <div id="person-modal-{{ $participant->id }}"
+                     data-person-modal="{{ $participant->id }}"
+                     @class(['fixed inset-0 z-50 overflow-y-auto', 'hidden' => ! $isPersonReopened])
+                     role="dialog"
+                     aria-modal="true"
+                     aria-labelledby="person-title-{{ $participant->id }}">
+
+                    <div class="fixed inset-0 bg-gray-900/60" data-close-person></div>
+
+                    <div class="relative min-h-full flex items-center justify-center p-4">
+                        <div class="relative w-full max-w-2xl bg-white rounded-xl shadow-2xl my-8">
+
+                            <div class="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                                <div class="min-w-0">
+                                    <h2 id="person-title-{{ $participant->id }}" class="text-lg font-bold text-gray-900">
+                                        Correct this person's details
+                                    </h2>
+                                    <p class="text-xs text-gray-500 mt-0.5">
+                                        {{ $participant->roleLabel() }} on {{ $registration->reference }}
+                                    </p>
+                                </div>
+
+                                <button type="button" data-close-person
+                                        class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition shrink-0"
+                                        aria-label="Close">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <form action="{{ route('admin.event.participants.person.update', [$registration, $participant]) }}" method="POST"
+                                  class="px-6 py-5 space-y-4">
+                                @csrf
+                                @method('PUT')
+
+                                {{-- Tells the server which dialog to reopen if anything
+                                     is rejected. --}}
+                                <input type="hidden" name="editing_person" value="{{ $participant->id }}">
+
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div class="sm:col-span-2">
+                                        <label for="full_name_{{ $participant->id }}" class="{{ $personLabel }}">
+                                            Full name <span class="text-red-600" aria-hidden="true">*</span>
+                                        </label>
+                                        <input type="text" id="full_name_{{ $participant->id }}" name="full_name" required
+                                               value="{{ $valueOf('full_name', $participant->full_name) }}"
+                                               class="{{ $personInput }}">
+                                        @if ($isPersonReopened)
+                                            @error('full_name') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div>
+                                        <label for="ic_number_{{ $participant->id }}" class="{{ $personLabel }}">
+                                            Identity card <span class="text-red-600" aria-hidden="true">*</span>
+                                        </label>
+                                        <input type="text" id="ic_number_{{ $participant->id }}" name="ic_number" required
+                                               value="{{ $valueOf('ic_number', $participant->ic_number) }}"
+                                               class="{{ $personInput }} tabular-nums">
+                                        <p class="text-xs text-gray-400 mt-1">Stored without spaces or hyphens.</p>
+                                        @if ($isPersonReopened)
+                                            @error('ic_number') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div>
+                                        <label for="date_of_birth_{{ $participant->id }}" class="{{ $personLabel }}">Date of birth</label>
+                                        <input type="date" id="date_of_birth_{{ $participant->id }}" name="date_of_birth"
+                                               value="{{ $valueOf('date_of_birth', $participant->date_of_birth?->format('Y-m-d')) }}"
+                                               class="{{ $personInput }}">
+                                        @if ($isPersonReopened)
+                                            @error('date_of_birth') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    {{-- Only the game account fields this event asks for. --}}
+                                    @foreach ($event?->ignFieldsAsked() ?? [] as $field => $ignLabel)
+                                        <div>
+                                            <label for="{{ $field }}_{{ $participant->id }}" class="{{ $personLabel }}">
+                                                {{ $ignLabel }}
+                                                @if ($event->requiresIgnField($field))
+                                                    <span class="text-red-600" aria-hidden="true">*</span>
+                                                @endif
+                                            </label>
+                                            <input type="text" id="{{ $field }}_{{ $participant->id }}" name="{{ $field }}"
+                                                   value="{{ $valueOf($field, $participant->{$field}) }}"
+                                                   class="{{ $personInput }}">
+                                            @if ($isPersonReopened)
+                                                @error($field) <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                            @endif
+                                        </div>
+                                    @endforeach
+
+                                    <div>
+                                        <label for="gender_{{ $participant->id }}" class="{{ $personLabel }}">Gender</label>
+                                        <select id="gender_{{ $participant->id }}" name="gender" class="{{ $personInput }}">
+                                            <option value="">Not recorded</option>
+                                            @foreach (ParticipantOptions::GENDERS as $key => $text)
+                                                <option value="{{ $key }}" @selected($valueOf('gender', $participant->gender) === $key)>{{ $text }}</option>
+                                            @endforeach
+                                        </select>
+                                        @if ($isPersonReopened)
+                                            @error('gender') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div>
+                                        <label for="race_{{ $participant->id }}" class="{{ $personLabel }}">Race</label>
+                                        <select id="race_{{ $participant->id }}" name="race" class="{{ $personInput }}">
+                                            <option value="">Not recorded</option>
+                                            @foreach (ParticipantOptions::RACES as $key => $text)
+                                                <option value="{{ $key }}" @selected($valueOf('race', $participant->race) === $key)>{{ $text }}</option>
+                                            @endforeach
+                                        </select>
+                                        @if ($isPersonReopened)
+                                            @error('race') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div>
+                                        <label for="phone_{{ $participant->id }}" class="{{ $personLabel }}">
+                                            Telephone <span class="text-red-600" aria-hidden="true">*</span>
+                                        </label>
+                                        <input type="text" id="phone_{{ $participant->id }}" name="phone" required
+                                               value="{{ $valueOf('phone', $participant->phone) }}"
+                                               class="{{ $personInput }}">
+                                        @if ($isPersonReopened)
+                                            @error('phone') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div>
+                                        <label for="email_{{ $participant->id }}" class="{{ $personLabel }}">
+                                            Email <span class="text-red-600" aria-hidden="true">*</span>
+                                        </label>
+                                        <input type="email" id="email_{{ $participant->id }}" name="email" required
+                                               value="{{ $valueOf('email', $participant->email) }}"
+                                               class="{{ $personInput }}">
+                                        @if ($isPersonReopened)
+                                            @error('email') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div class="sm:col-span-2">
+                                        <label for="address_line_1_{{ $participant->id }}" class="{{ $personLabel }}">Address line 1</label>
+                                        <input type="text" id="address_line_1_{{ $participant->id }}" name="address_line_1"
+                                               value="{{ $valueOf('address_line_1', $participant->address_line_1) }}"
+                                               class="{{ $personInput }}">
+                                        @if ($isPersonReopened)
+                                            @error('address_line_1') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div class="sm:col-span-2">
+                                        <label for="address_line_2_{{ $participant->id }}" class="{{ $personLabel }}">Address line 2</label>
+                                        <input type="text" id="address_line_2_{{ $participant->id }}" name="address_line_2"
+                                               value="{{ $valueOf('address_line_2', $participant->address_line_2) }}"
+                                               class="{{ $personInput }}">
+                                    </div>
+
+                                    <div>
+                                        <label for="postcode_{{ $participant->id }}" class="{{ $personLabel }}">Postcode</label>
+                                        <input type="text" id="postcode_{{ $participant->id }}" name="postcode"
+                                               value="{{ $valueOf('postcode', $participant->postcode) }}"
+                                               class="{{ $personInput }} tabular-nums">
+                                    </div>
+
+                                    <div>
+                                        <label for="city_{{ $participant->id }}" class="{{ $personLabel }}">City</label>
+                                        <input type="text" id="city_{{ $participant->id }}" name="city"
+                                               value="{{ $valueOf('city', $participant->city) }}"
+                                               class="{{ $personInput }}">
+                                        @if ($isPersonReopened)
+                                            @error('city') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div>
+                                        <label for="state_{{ $participant->id }}" class="{{ $personLabel }}">State</label>
+                                        <select id="state_{{ $participant->id }}" name="state" class="{{ $personInput }}">
+                                            <option value="">Not recorded</option>
+                                            @foreach (ParticipantOptions::STATES as $key => $text)
+                                                <option value="{{ $key }}" @selected($valueOf('state', $participant->state) === $key)>{{ $text }}</option>
+                                            @endforeach
+                                        </select>
+                                        @if ($isPersonReopened)
+                                            @error('state') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div>
+                                        <label for="country_{{ $participant->id }}" class="{{ $personLabel }}">Country</label>
+                                        <select id="country_{{ $participant->id }}" name="country" class="{{ $personInput }}">
+                                            <option value="">Not recorded</option>
+                                            @foreach (ParticipantOptions::COUNTRIES as $key => $text)
+                                                <option value="{{ $key }}" @selected($valueOf('country', $participant->country) === $key)>{{ $text }}</option>
+                                            @endforeach
+                                        </select>
+                                        @if ($isPersonReopened)
+                                            @error('country') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+
+                                    <div>
+                                        <label for="emergency_contact_name_{{ $participant->id }}" class="{{ $personLabel }}">Emergency contact</label>
+                                        <input type="text" id="emergency_contact_name_{{ $participant->id }}" name="emergency_contact_name"
+                                               value="{{ $valueOf('emergency_contact_name', $participant->emergency_contact_name) }}"
+                                               class="{{ $personInput }}">
+                                    </div>
+
+                                    <div>
+                                        <label for="emergency_contact_phone_{{ $participant->id }}" class="{{ $personLabel }}">Emergency number</label>
+                                        <input type="text" id="emergency_contact_phone_{{ $participant->id }}" name="emergency_contact_phone"
+                                               value="{{ $valueOf('emergency_contact_phone', $participant->emergency_contact_phone) }}"
+                                               class="{{ $personInput }}">
+                                        @if ($isPersonReopened)
+                                            @error('emergency_contact_phone') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        @endif
+                                    </div>
+                                </div>
+
+                                {{-- Said plainly, because somebody looking for it here is
+                                     the most likely person to need it and the least
+                                     likely to guess where it lives. --}}
+                                <p class="text-xs text-gray-500 leading-relaxed pt-1 border-t border-gray-100">
+                                    This corrects the same person's details. It does not change whether they
+                                    are the manager or a player, because that decides how many playing places
+                                    this entry fills and is checked against the event's own limits.
+                                </p>
+
+                                <div class="flex items-center justify-end gap-2 pt-1">
+                                    <button type="button" data-close-person
+                                            class="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                        Cancel
+                                    </button>
+                                    <button type="submit"
+                                            class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                        Save Changes
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            @endforeach
+        @endif
 
         {{-- ---------------- Payment ---------------- --}}
         <x-admin.section-intro
@@ -901,6 +1244,74 @@
                 }, 2500);
             }
         });
+    })();
+
+    /*
+     | Opening and closing the per person correction dialogs.
+     |
+     | One dialog per person, each holding an ordinary PUT form. The script only
+     | shows and hides them; nothing about the submission depends on JavaScript,
+     | and a dialog reopened by the server after a failed validation is already
+     | visible before this runs.
+     */
+    (function () {
+        const dialogs = Array.from(document.querySelectorAll('[data-person-modal]'));
+
+        if (dialogs.length === 0) {
+            return;
+        }
+
+        function dialogFor(id) {
+            return dialogs.find((node) => node.getAttribute('data-person-modal') === String(id)) || null;
+        }
+
+        function close(dialog) {
+            dialog.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+        }
+
+        function closeAll() {
+            dialogs.forEach(close);
+        }
+
+        document.querySelectorAll('[data-open-person]').forEach(function (trigger) {
+            trigger.addEventListener('click', function () {
+                const dialog = dialogFor(trigger.getAttribute('data-open-person'));
+
+                if (!dialog) {
+                    return;
+                }
+
+                closeAll();
+                dialog.classList.remove('hidden');
+
+                // The scroll lock belongs to whichever dialog is open, and only one
+                // can be, so it is set rather than counted.
+                document.body.classList.add('overflow-hidden');
+
+                dialog.querySelector('input:not([type=hidden]):not([disabled])')?.focus();
+            });
+        });
+
+        dialogs.forEach(function (dialog) {
+            dialog.querySelectorAll('[data-close-person]').forEach(function (trigger) {
+                trigger.addEventListener('click', function () {
+                    close(dialog);
+                });
+            });
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                closeAll();
+            }
+        });
+
+        // A server-reopened dialog is visible from the markup, so the scroll lock
+        // has to be applied to match it.
+        if (dialogs.some((dialog) => !dialog.classList.contains('hidden'))) {
+            document.body.classList.add('overflow-hidden');
+        }
     })();
 </script>
 @endpush

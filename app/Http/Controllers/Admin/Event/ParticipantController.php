@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Admin\Event;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdateParticipantRequest;
 use App\Models\Event;
 use App\Models\EventAddonVariant;
 use App\Models\EventParticipant;
 use App\Models\EventParticipantAnswer;
+use App\Models\EventParticipantChange;
 use App\Models\EventRegistration;
 use App\Models\EventRegistrationPayment;
 use App\Services\AdminLogger;
@@ -167,6 +169,11 @@ class ParticipantController extends Controller
 
             'canNotify' => $request->user()->hasPermission('participants.notify'),
             'canDelete' => $request->user()->hasPermission('participants.delete'),
+
+            // Correcting one person and taking one person off are separate acts:
+            // the first fixes a record, the second destroys one.
+            'canUpdatePerson' => $request->user()->hasPermission('participants.update'),
+            'canRemovePerson' => $request->user()->hasPermission('participants.remove'),
 
             // The gateway record, verbatim. Null when there has never been one.
             'payment' => GatewayPaymentRecord::make($registration->payment_details),
@@ -706,6 +713,212 @@ class ParticipantController extends Controller
             $target->title,
             $notes === [] ? '' : ' ' . ucfirst(implode('. ', $notes)) . '.',
         ));
+    }
+
+    /**
+     * Correct the details of one person already named on an entry.
+     *
+     * A misspelt name, a mistyped card number, a phone number that has changed
+     * since. Until now the only way to fix any of it was to delete the whole entry
+     * and ask everybody to type their details again, or to use the counter's swap,
+     * which is for a different person arriving and deliberately wipes the fields
+     * that described the outgoing one.
+     *
+     * Deliberately does not change who this person is on the entry. Their role and
+     * whether a manager also plays decide the squad's playing count, which the
+     * event's own bounds are measured against; moving that is a different act from
+     * fixing a spelling and would need the whole entry re-checked.
+     *
+     * Every field is compared before and after and only the differences are
+     * recorded, so an audit row is a list of what actually changed rather than a
+     * copy of the whole person.
+     */
+    public function updateParticipant(UpdateParticipantRequest $request, EventRegistration $registration, EventParticipant $participant)
+    {
+        $participant->loadMissing(['registration.event']);
+
+        $fields = array_keys($request->validated());
+
+        $before = $participant->only($fields);
+
+        $participant->fill($request->validated());
+
+        // Nothing was typed differently, so there is nothing to write and nothing
+        // worth putting in the log either.
+        if (! $participant->isDirty()) {
+            return redirect()
+                ->route('admin.event.participants.show', $registration)
+                ->with('status', sprintf('Nothing was changed for %s.', $participant->full_name));
+        }
+
+        $changed = array_keys($participant->getDirty());
+
+        $participant->save();
+
+        $after = $participant->only($fields);
+
+        AdminLogger::activity('participants.person-updated', sprintf(
+            'Updated %s on %s: %s.',
+            $participant->full_name,
+            $registration->reference,
+            implode(', ', $changed),
+        ));
+
+        AdminLogger::audit(
+            $participant,
+            'updated',
+            array_intersect_key($before, array_flip($changed)),
+            array_intersect_key($after, array_flip($changed)),
+        );
+
+        return redirect()
+            ->route('admin.event.participants.show', $registration)
+            ->with('status', sprintf(
+                '%s updated. %d %s changed.',
+                $participant->full_name,
+                count($changed),
+                count($changed) === 1 ? 'field' : 'fields',
+            ));
+    }
+
+    /**
+     * Take one person off an entry that is staying.
+     *
+     * The same act the counter performs, offered here because a filing mistake is
+     * usually noticed on the record rather than at the desk. It reuses the model's
+     * own rules about who may be taken off: nobody who has checked in, not the
+     * manager, and never the last person on an entry, because an entry describing
+     * no one would still hold its place with nothing left on screen to undo it.
+     *
+     * The change row is written before the delete. Once the participant row is gone
+     * its id cannot be recorded, and that row is the only surviving trace that this
+     * person was ever named.
+     *
+     * No place is given back on a squad event. The place belongs to the entry, and
+     * the entry is still coming; releasing one every time a squad dropped a player
+     * is what handed a thirty two team event extra capacity.
+     */
+    public function removeParticipant(Request $request, EventRegistration $registration, EventParticipant $participant)
+    {
+        $participant->loadMissing(['registration.event', 'attendance']);
+
+        if ((int) $participant->event_registration_id !== (int) $registration->id) {
+            return back()->withErrors(['participant' => 'That person is not on this registration.']);
+        }
+
+        // Asked of the model so this screen and the counter cannot drift apart on
+        // who may be taken off.
+        $blocked = $participant->removalBlockedReason();
+
+        if ($blocked !== null) {
+            return back()->withErrors(['participant' => sprintf(
+                '%s cannot be removed. %s',
+                $participant->full_name,
+                $blocked,
+            )]);
+        }
+
+        $reason = trim((string) $request->input('reason')) ?: null;
+        $name = $participant->full_name;
+        $card = $participant->ic_number;
+
+        $before = $participant->only([
+            'role', 'also_plays', 'full_name', 'ic_number',
+            'ign_player_id', 'ign_server_id', 'ign_name',
+            'address_line_1', 'address_line_2', 'postcode', 'city', 'state',
+            'country', 'phone', 'email', 'gender', 'race', 'date_of_birth',
+            'emergency_contact_name', 'emergency_contact_phone',
+        ]);
+
+        DB::transaction(function () use ($registration, $participant, $before, $name, $card, $reason, $request) {
+            EventParticipantChange::create([
+                'event_id' => $registration->event_id,
+                'event_registration_id' => $registration->id,
+                'event_participant_id' => $participant->id,
+                'type' => EventParticipantChange::TYPE_REMOVED,
+                'previous_name' => $name,
+                'previous_ic' => $card,
+                // Nobody arrives in their place. That is what separates this from a
+                // substitution.
+                'new_name' => null,
+                'new_ic' => null,
+                'details_before' => $before,
+                'details_after' => null,
+                'reason' => $reason,
+                'changed_by' => $request->user()->id,
+            ]);
+
+            /*
+             | Only an individual event gets a place back. seatsForEntry() answers
+             | what a whole entry occupies, which is not the question here: this is
+             | one person leaving an entry that stays, and on a squad event the squad
+             | still holds its single place.
+             */
+            $event = $registration->event;
+
+            if ($event !== null && ! $event->isManagerMode()) {
+                Event::query()->whereKey($event->id)->lockForUpdate()->first()?->forceFill([
+                    'seats_taken' => max(0, $event->seats_taken - 1),
+                ])->save();
+            }
+
+            // Their answers and their own add-on lines go with them: the answers by
+            // cascade, the add-on lines explicitly, because a shirt size belongs to
+            // the person who is no longer coming.
+            $registration->addonLines()
+                ->where('event_participant_id', $participant->id)
+                ->delete();
+
+            $participant->delete();
+        });
+
+        AdminLogger::activity('participants.person-removed', sprintf(
+            'Removed %s (%s) from %s.',
+            $name,
+            $card,
+            $registration->reference,
+        ));
+
+        return redirect()
+            ->route('admin.event.participants.show', $registration)
+            ->with('status', sprintf(
+                '%s removed from %s.%s',
+                $name,
+                $registration->reference,
+                $this->playerShortfallNote($registration),
+            ));
+    }
+
+    /**
+     * A note about the entry now being under the event's minimum, or an empty
+     * string.
+     *
+     * Said rather than enforced. Refusing the removal would leave the record
+     * describing somebody who is not coming, which is worse than a squad that is
+     * one short and known to be. Whoever runs the tournament decides what to do.
+     */
+    private function playerShortfallNote(EventRegistration $registration): string
+    {
+        $minimum = $registration->event?->min_players;
+
+        if ($minimum === null || $minimum < 1) {
+            return '';
+        }
+
+        // Counted through the playing scope, so a manager who also plays keeps the
+        // squad above its minimum instead of the count reading one short.
+        $remaining = $registration->participants()->playing()->count();
+
+        if ($remaining >= $minimum) {
+            return '';
+        }
+
+        return sprintf(
+            ' Note: this entry now has %d %s, below this event\'s minimum of %d.',
+            $remaining,
+            $remaining === 1 ? 'player' : 'players',
+            $minimum,
+        );
     }
 
     /**
