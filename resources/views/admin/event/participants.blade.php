@@ -473,24 +473,15 @@
     @endforeach
 
     {{--
-        One dialog per entry that can take a payment.
+        One dialog per entry that can be moved to another event.
 
-        Each carries a real POST form, so it works the same way the rest of this
-        admin does and the amount cannot be submitted without being on screen.
+        Its own loop, gated on the same test as the button that opens it. This sat
+        inside the payment loop below at first, and that loop skips any entry which
+        owes nothing. A free entry owes nothing, so the dialog was left out of the
+        markup for precisely the rows whose move button was on screen: the button
+        opened nothing, silently, because there was nothing to find.
     --}}
     @foreach ($registrations as $registration)
-        @continue (! $canRecordPayment || ! $registration->owesBalance())
-
-        @php
-            $isReopened = (int) $reopenPaymentFor === (int) $registration->id;
-            $outstanding = $registration->outstandingAmount();
-            $settlement = $isReopened ? old('settlement', 'full') : 'full';
-        @endphp
-
-        {{-- Move this entry to another event.
-
-             Rendered for every row that could be moved, in the same loop as the
-             payment dialog, so the pair behave alike and share the binder below. --}}
         @if ($canTransfer && ! $registration->hasMoneyOnRecord() && $transferTargets->isNotEmpty())
             <div id="transfer-modal-{{ $registration->id }}"
                  data-transfer-modal="{{ $registration->id }}"
@@ -596,6 +587,22 @@
                 </div>
             </div>
         @endif
+    @endforeach
+
+    {{--
+        One dialog per entry that can take a payment.
+
+        Each carries a real POST form, so it works the same way the rest of this
+        admin does and the amount cannot be submitted without being on screen.
+    --}}
+    @foreach ($registrations as $registration)
+        @continue (! $canRecordPayment || ! $registration->owesBalance())
+
+        @php
+            $isReopened = (int) $reopenPaymentFor === (int) $registration->id;
+            $outstanding = $registration->outstandingAmount();
+            $settlement = $isReopened ? old('settlement', 'full') : 'full';
+        @endphp
 
         <div id="payment-modal-{{ $registration->id }}"
              data-payment-modal="{{ $registration->id }}"
@@ -919,6 +926,6 @@
         if (dialogs.some((dialog) => !dialog.classList.contains('hidden'))) {
             document.body.classList.add('overflow-hidden');
         }
-    })();
+    });
 </script>
 @endpush
