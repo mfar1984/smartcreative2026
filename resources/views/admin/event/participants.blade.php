@@ -59,6 +59,13 @@
         :active-tab="$activeTab"
         route="admin.event.participants">
 
+        {{-- This screen had no banner at all, so deleting or moving an entry said
+             nothing either way. A refusal was the worse half of it: the reason was
+             put in the error bag and never drawn, and the move dialog closes on
+             redirect, so its own message went with it. Everything on this screen
+             redirects back here, which is where the answer has to appear. --}}
+        @include('admin.partials.flash')
+
         <div class="flex flex-wrap items-start justify-between gap-4 mb-5">
             <x-admin.section-intro
                 :title="$intro['title']"
