@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin\Event;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\TransferRegistrationRequest;
 use App\Http\Requests\Admin\UpdateParticipantRequest;
 use App\Models\Event;
 use App\Models\EventAddonVariant;
@@ -520,110 +521,139 @@ class ParticipantController extends Controller
     }
 
     /**
+     * The move page for one entry.
+     *
+     * A page rather than a dialog. Two events rarely want the same shape of entry,
+     * so moving one can mean choosing who is left behind, entering somebody new to
+     * make up a shortfall, and answering the target's own questions for everybody
+     * who ends up on it. None of that fits in a box over a table.
+     *
+     * The arithmetic is worked out here rather than in the markup, so there is one
+     * place that decides how many have to go and how many may come in.
+     */
+    public function transferForm(Request $request, EventRegistration $registration)
+    {
+        $registration->load(['event', 'participants', 'addonLines']);
+
+        /*
+         | Only events of the same shape are offered. A squad entry has a manager and
+         | players and an individual entry has neither, so listing the other kind
+         | would be offering a choice that is refused the moment it is taken.
+         */
+        $targets = Event::query()
+            ->whereIn('status', Event::REGISTERABLE)
+            ->where('registration_mode', $registration->mode)
+            ->whereKeyNot($registration->event_id)
+            ->orderBy('title')
+            ->get();
+
+        $chosen = $request->query('event');
+
+        /** @var Event|null $target */
+        $target = is_numeric($chosen) ? $targets->firstWhere('id', (int) $chosen) : null;
+
+        $target?->load('questions');
+
+        // Counted in players, never in rows. A manager who does not play occupies no
+        // playing place; one who ticked "and Player" is one of the players.
+        $playing = $registration->participants
+            ->filter(fn (EventParticipant $person) => $person->isPlaying())
+            ->count();
+
+        [$min, $max] = $target?->playerBounds() ?? [0, null];
+
+        return view('admin.event.participant-transfer', [
+            'registration' => $registration,
+            'from' => $registration->event,
+            'targets' => $targets,
+            'target' => $target,
+
+            'playing' => $playing,
+            'minPlayers' => $min,
+            'maxPlayers' => $max,
+
+            /*
+             | How many have to go, and how many may be brought in. Never both above
+             | zero: a squad over the target's ceiling has to shed people, and one
+             | under its floor has to gain them.
+             */
+            'mustDrop' => $target === null || $max === null ? 0 : max(0, $playing - $max),
+            'mustAdd' => $target === null ? 0 : max(0, $min - $playing),
+            'addSlots' => $this->addSlots($target, $playing, $min, $max),
+
+            // Settled before anything is drawn, because the rest of the page would
+            // be a form that cannot be submitted.
+            'blocked' => $registration->hasMoneyOnRecord()
+                ? sprintf(
+                    '%s cannot be moved because %s has been taken for it. Refund it at the gateway, then enter it on the other event.',
+                    $registration->reference,
+                    $registration->amountLabel(),
+                )
+                : null,
+        ]);
+    }
+
+    /**
+     * How many "add a person" forms to draw.
+     *
+     * Every place up to the target's ceiling, so the compulsory ones and the
+     * optional ones are on screen together and the operator can see which is
+     * which. An event with no ceiling has no arithmetic answer, so it gets enough
+     * to cover the shortfall and a few spare.
+     */
+    private function addSlots(?Event $target, int $playing, int $min, ?int $max): int
+    {
+        if ($target === null || ! $target->isManagerMode()) {
+            return 0;
+        }
+
+        if ($max === null) {
+            return max(0, $min - $playing) + 3;
+        }
+
+        return max(0, $max - $playing);
+    }
+
+    /**
      * Move a whole entry to a different event.
      *
      * For the entry filed against the wrong event, which happens when two of them
-     * are open at once and look alike. The alternative is deleting and asking seven
-     * people to type their details again.
+     * are open at once and look alike. The alternative is deleting it and asking
+     * seven people to type their details again.
      *
-     * Four things are refused rather than guessed at:
+     * What is refused, and why, lives in TransferRegistrationRequest. What is left
+     * here is the writing, in one transaction, in an order that matters: the old
+     * event's add-on lines and answers go first because they point at its catalogue
+     * and its questions; then the people being left behind, so no answer is
+     * recorded against somebody who is not coming; then the arrivals; then the
+     * target's questions for everybody now on the entry.
      *
-     * Money. Moving a paid entry changes what it should have cost, and this cannot
-     * refund the difference or collect it. Refund at the gateway and re-enter.
-     *
-     * A different mode. A squad entry has a manager and players; an individual entry
-     * has neither. Moving between the two would leave roles that the target event
-     * does not use.
-     *
-     * A head count outside the target's bounds. A squad of seven does not fit an
-     * event that caps at five, and pretending otherwise produces an entry the
-     * organiser cannot run.
-     *
-     * No room. The target's capacity is checked under a lock, the same way the
-     * public form checks it, because two administrators moving entries at once must
-     * not both be told yes.
-     *
-     * Two things are dropped, and the message says how many. Add-on lines point at
-     * the old event's catalogue and answers point at its questions; neither exists
-     * on the target. Carrying them would leave rows referring to a shirt nobody is
-     * selling and a question nobody asked.
+     * Capacity is the one test that has to happen here rather than in the request,
+     * because it is only meaningful under a lock: two administrators moving entries
+     * at once must not both be told yes.
      */
-    public function transfer(Request $request, EventRegistration $registration)
+    public function transfer(TransferRegistrationRequest $request, EventRegistration $registration, EventNotifier $notifier)
     {
-        $data = $request->validate([
-            'event_id' => ['required', 'integer', 'exists:events,id'],
-        ], [
-            'event_id.required' => 'Choose the event to move this entry to.',
-        ]);
-
         $registration->loadMissing(['event', 'participants']);
 
-        if ($registration->hasMoneyOnRecord()) {
-            return back()->withInput()->withErrors(['transfer' => sprintf(
-                '%s cannot be moved because %s has been taken for it. Refund it at the gateway, then enter it on the other event.',
-                $registration->reference,
-                $registration->amountLabel(),
-            )]);
-        }
-
-        if ((int) $data['event_id'] === (int) $registration->event_id) {
-            return back()->withErrors(['transfer' => 'That is the event it is already on.']);
-        }
-
-        $headCount = $registration->participants->count();
         $from = $registration->event;
 
-        $outcome = DB::transaction(function () use ($registration, $data, $headCount, $from) {
-            /** @var Event $target */
-            $target = Event::query()->whereKey($data['event_id'])->lockForUpdate()->firstOrFail();
+        /** @var Event $target */
+        $target = $request->target();
 
-            if ($target->registration_mode !== $registration->mode) {
-                return ['error' => sprintf(
-                    '%s takes %s entries and this one is %s. The two shapes are not interchangeable.',
-                    $target->title,
-                    $target->isManagerMode() ? 'squad' : 'individual',
-                    $registration->mode === Event::MODE_MANAGER ? 'a squad' : 'individual',
-                )];
-            }
+        $dropped = $request->dropped();
+        $staying = $request->staying();
+        $added = $request->added();
 
-            [$min, $max] = $target->playerBounds();
+        $outcome = DB::transaction(function () use ($registration, $request, $target, $from, $dropped, $staying, $added) {
+            /** @var Event $locked */
+            $locked = Event::query()->whereKey($target->id)->lockForUpdate()->firstOrFail();
 
-            if ($target->isManagerMode()) {
-                // The manager occupies one of the rows, so the playing count is the
-                // head count less one unless they also play.
-                $players = $registration->participants
-                    ->filter(fn (EventParticipant $person) => $person->isPlaying())
-                    ->count();
+            $headCount = $staying->count() + count($added);
+            $wanted = $locked->seatsForEntry($headCount);
 
-                if ($players < $min || ($max !== null && $players > $max)) {
-                    return ['error' => sprintf(
-                        '%s takes between %d and %s players and this entry has %d.',
-                        $target->title,
-                        $min,
-                        $max === null ? 'any number of' : $max,
-                        $players,
-                    )];
-                }
-            }
-
-            $wanted = $target->seatsForEntry($headCount);
-
-            if ($target->seats_total > 0 && $wanted > $target->seatsLeft()) {
-                return ['error' => sprintf('%s is fully booked.', $target->title)];
-            }
-
-            // Give the place back before taking the new one, so an event cannot
-            // appear to hold the same entry twice while this runs.
-            if ($from !== null) {
-                $released = $from->seatsForEntry($headCount);
-
-                Event::query()->whereKey($from->id)->lockForUpdate()->first()?->forceFill([
-                    'seats_taken' => max(0, $from->seats_taken - $released),
-                ])->save();
-            }
-
-            if ($wanted > 0) {
-                $target->increment('seats_taken', $wanted);
+            if ($locked->seats_total > 0 && $wanted > $locked->seatsLeft()) {
+                return ['error' => sprintf('%s is fully booked.', $locked->title)];
             }
 
             $droppedAddons = $registration->addonLines()->count();
@@ -637,16 +667,80 @@ class ParticipantController extends Controller
                 ->whereIn('event_participant_id', $registration->participants->pluck('id'))
                 ->delete();
 
+            foreach ($dropped as $person) {
+                /*
+                 | Written before the delete. Once the row is gone its id cannot be
+                 | recorded, and this row is the only surviving trace that the person
+                 | was ever named on the entry.
+                 */
+                EventParticipantChange::create([
+                    'event_id' => $registration->event_id,
+                    'event_registration_id' => $registration->id,
+                    'event_participant_id' => $person->id,
+                    'type' => EventParticipantChange::TYPE_REMOVED,
+                    'previous_name' => $person->full_name,
+                    'previous_ic' => $person->ic_number,
+                    'new_name' => null,
+                    'new_ic' => null,
+                    'details_before' => $person->only([
+                        'role', 'also_plays', 'full_name', 'ic_number',
+                        'ign_player_id', 'ign_server_id', 'ign_name',
+                        'phone', 'email', 'gender', 'race', 'date_of_birth',
+                    ]),
+                    'details_after' => null,
+                    'reason' => sprintf('Left behind when the entry moved to %s.', $locked->title),
+                    'changed_by' => $request->user()->id,
+                ]);
+
+                $person->delete();
+            }
+
+            $arrived = collect();
+
+            foreach ($added as $person) {
+                // Whitelisted rather than passed through, so the answers nested in
+                // each block cannot reach the model as a column.
+                $attributes = array_intersect_key($person, array_flip([
+                    'full_name', 'ic_number', 'phone', 'email', 'date_of_birth',
+                    'gender', 'race', 'address_line_1', 'city', 'state', 'country',
+                    'ign_player_id', 'ign_server_id', 'ign_name',
+                ]));
+
+                $arrived->push(EventParticipant::create($attributes + [
+                    'event_registration_id' => $registration->id,
+                    // Always a player. A squad has at most one manager and it
+                    // already has theirs, so there is no second one to bring in.
+                    'role' => $request->addedRole(),
+                    'also_plays' => false,
+                ]));
+            }
+
+            $recorded = $this->recordTargetAnswers($locked, $staying, $arrived, $request);
+
+            // The place goes back before the new one is taken, so no event can
+            // appear to hold the same entry twice while this runs.
+            if ($from !== null) {
+                $released = $from->seatsForEntry($registration->participants->count());
+
+                Event::query()->whereKey($from->id)->lockForUpdate()->first()?->forceFill([
+                    'seats_taken' => max(0, $from->seats_taken - $released),
+                ])->save();
+            }
+
+            if ($wanted > 0) {
+                $locked->increment('seats_taken', $wanted);
+            }
+
             /*
              | The amount is rewritten from the target's fee. Extras are gone, and
              | the entry fee is the target's now, not the one it arrived with. Only
-             | reachable when no money moved, so nothing is being written over a
+             | reachable when no money has moved, so nothing is being written over a
              | figure somebody actually paid.
              */
-            $fee = $target->registrationAmount();
+            $fee = $locked->registrationAmount();
 
             $registration->forceFill([
-                'event_id' => $target->id,
+                'event_id' => $locked->id,
                 'registration_fee' => $fee,
                 'addons_total' => 0,
                 'amount' => $fee,
@@ -659,37 +753,76 @@ class ParticipantController extends Controller
             ])->save();
 
             return [
-                'target' => $target,
+                'target' => $locked,
                 'dropped_addons' => $droppedAddons,
                 'dropped_answers' => $droppedAnswers,
+                'left_behind' => $dropped->count(),
+                'brought_in' => $arrived->count(),
+                'answers_recorded' => $recorded,
+                'fee' => $fee,
             ];
         });
 
         if (isset($outcome['error'])) {
-            return back()->withInput()->withErrors(['transfer' => $outcome['error']]);
+            return back()->withInput()->withErrors(['event_id' => $outcome['error']]);
         }
 
-        /** @var Event $target */
-        $target = $outcome['target'];
+        /** @var Event $moved */
+        $moved = $outcome['target'];
 
         AdminLogger::activity('participants.transfer', sprintf(
-            'Moved %s from %s to %s.',
+            'Moved %s from %s to %s. %d left behind, %d brought in.',
             $registration->reference,
             $from?->title ?? 'an unknown event',
-            $target->title,
+            $moved->title,
+            $outcome['left_behind'],
+            $outcome['brought_in'],
         ));
 
         AdminLogger::audit($registration, 'transferred', [
             'event' => $from?->title,
             'amount' => $from?->registrationAmount(),
         ], [
-            'event' => $target->title,
-            'amount' => $target->registrationAmount(),
+            'event' => $moved->title,
+            'amount' => $outcome['fee'],
+            'left_behind' => $outcome['left_behind'],
+            'brought_in' => $outcome['brought_in'],
             'addon_lines_dropped' => $outcome['dropped_addons'],
             'answers_dropped' => $outcome['dropped_answers'],
+            'answers_recorded' => $outcome['answers_recorded'],
         ]);
 
+        /*
+         | Money. The fee is the target's now, so an entry that arrived free of
+         | charge can land on an event that costs something. The person who
+         | registered is the only one holding the means to pay, and they have no
+         | reason to look, so they are told rather than left to find out.
+         |
+         | Reloaded first: the email renders the event and the figure from the
+         | record, and both have just changed.
+         */
+        $registration->refresh()->load(['event', 'participants']);
+
+        $chased = $registration->owesBalance()
+            && $notifier->paymentReminder($registration, $request->user()?->id) > 0;
+
         $notes = [];
+
+        if ($outcome['left_behind'] > 0) {
+            $notes[] = sprintf(
+                '%d %s left behind',
+                $outcome['left_behind'],
+                $outcome['left_behind'] === 1 ? 'person was' : 'people were',
+            );
+        }
+
+        if ($outcome['brought_in'] > 0) {
+            $notes[] = sprintf(
+                '%d %s added',
+                $outcome['brought_in'],
+                $outcome['brought_in'] === 1 ? 'person was' : 'people were',
+            );
+        }
 
         if ($outcome['dropped_addons'] > 0) {
             $notes[] = sprintf(
@@ -701,18 +834,89 @@ class ParticipantController extends Controller
 
         if ($outcome['dropped_answers'] > 0) {
             $notes[] = sprintf(
-                '%d %s cleared, because the questions belonged to the old event',
+                '%d old %s cleared',
                 $outcome['dropped_answers'],
                 $outcome['dropped_answers'] === 1 ? 'answer was' : 'answers were',
             );
         }
 
-        return back()->with('status', sprintf(
-            '%s moved to %s.%s',
-            $registration->reference,
-            $target->title,
-            $notes === [] ? '' : ' ' . ucfirst(implode('. ', $notes)) . '.',
-        ));
+        if ($registration->owesBalance()) {
+            $notes[] = $chased
+                ? sprintf('%s is now owed, and a request to pay has been sent', $registration->outstandingAmountLabel())
+                : sprintf(
+                    '%s is now owed, but no request went out. Check the Payment Reminder template is switched on and that the registrant has an email address',
+                    $registration->outstandingAmountLabel(),
+                );
+        }
+
+        return redirect()
+            ->route('admin.event.participants.show', $registration)
+            ->with('status', sprintf(
+                '%s moved to %s.%s',
+                $registration->reference,
+                $moved->title,
+                $notes === [] ? '' : ' ' . ucfirst(implode('. ', $notes)) . '.',
+            ));
+    }
+
+    /**
+     * Record the target event's questions for everybody now on the entry.
+     *
+     * The wording is copied onto each answer rather than read back through the
+     * relation, so editing the question afterwards cannot rewrite what was agreed.
+     * A row is written for every question, ticked or not, because "not agreed" is
+     * an answer and its absence would be indistinguishable from never having been
+     * asked.
+     *
+     * @param  \Illuminate\Support\Collection<int, EventParticipant>  $staying
+     * @param  \Illuminate\Support\Collection<int, EventParticipant>  $arrived
+     * @return int how many answers were written
+     */
+    private function recordTargetAnswers(Event $target, $staying, $arrived, TransferRegistrationRequest $request): int
+    {
+        $questions = $target->loadMissing('questions')->questions;
+
+        if ($questions->isEmpty()) {
+            return 0;
+        }
+
+        $given = (array) $request->input('answers', []);
+        $addedInput = $request->added();
+        $now = now();
+        $rows = [];
+
+        $write = function (EventParticipant $person, array $answers) use ($questions, $now, &$rows): void {
+            foreach ($questions as $question) {
+                $ticked = filter_var($answers[$question->id] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+                $rows[] = $question->snapshot() + [
+                    'event_participant_id' => $person->id,
+                    'answered' => $ticked,
+                    // Stamped with now, not with the original registration's time:
+                    // this was recorded by an administrator during the move, and
+                    // saying otherwise would misdate the agreement.
+                    'answered_at' => $ticked ? $now : null,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
+        };
+
+        foreach ($staying as $person) {
+            $write($person, (array) ($given[$person->id] ?? []));
+        }
+
+        // Index order, because the arrivals were pushed in the order they were
+        // posted and their answers are still keyed by that position.
+        foreach ($arrived as $index => $person) {
+            $write($person, (array) ($addedInput[$index]['answers'] ?? []));
+        }
+
+        if ($rows !== []) {
+            EventParticipantAnswer::query()->insert($rows);
+        }
+
+        return count($rows);
     }
 
     /**

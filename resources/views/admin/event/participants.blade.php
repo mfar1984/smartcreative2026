@@ -278,23 +278,24 @@
                                             </form>
                                         @endif
 
-                                        {{-- Move an entry filed against the wrong event. Same money
-                                             test as delete: once anything has been taken the amount
-                                             would have to change, and this cannot refund or collect
-                                             the difference. --}}
+                                        {{-- Move an entry filed against the wrong event. A link to its
+                                             own page, not a dialog: the two events rarely want the
+                                             same shape of entry, so moving one can mean choosing who
+                                             is left behind, entering somebody to make up a shortfall,
+                                             and answering the other event's questions for everybody
+                                             on it. None of that fits in a box over a table. --}}
                                         @if ($canTransfer && ! $registration->hasMoneyOnRecord() && $transferTargets->isNotEmpty())
-                                            <button type="button"
-                                                    data-open-transfer="{{ $registration->id }}"
-                                                    class="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition"
-                                                    title="Move {{ $registration->reference }} to a different event"
-                                                    aria-label="Move {{ $registration->reference }} to a different event">
+                                            <a href="{{ route('admin.event.participants.transfer', $registration) }}"
+                                               class="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition"
+                                               title="Move {{ $registration->reference }} to a different event"
+                                               aria-label="Move {{ $registration->reference }} to a different event">
                                                 {{-- An arrow between two points, rather than a pencil:
                                                      nothing about the entry is edited, it changes
                                                      which event it belongs to. --}}
                                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
                                                 </svg>
-                                            </button>
+                                            </a>
                                         @endif
 
                                         {{-- Money taken is a financial record. Judged on whether any
@@ -477,126 +478,6 @@
                 </div>
             </div>
         </div>
-    @endforeach
-
-    {{--
-        One dialog per entry that can be moved to another event.
-
-        Its own loop, gated on the same test as the button that opens it. This sat
-        inside the payment loop below at first, and that loop skips any entry which
-        owes nothing. A free entry owes nothing, so the dialog was left out of the
-        markup for precisely the rows whose move button was on screen: the button
-        opened nothing, silently, because there was nothing to find.
-    --}}
-    @foreach ($registrations as $registration)
-        @if ($canTransfer && ! $registration->hasMoneyOnRecord() && $transferTargets->isNotEmpty())
-            <div id="transfer-modal-{{ $registration->id }}"
-                 data-transfer-modal="{{ $registration->id }}"
-                 class="fixed inset-0 z-50 overflow-y-auto hidden"
-                 role="dialog"
-                 aria-modal="true"
-                 aria-labelledby="transfer-title-{{ $registration->id }}">
-
-                <div class="fixed inset-0 bg-gray-900/60" data-close-transfer></div>
-
-                {{-- Centred rather than pinned to the top. min-h-full lets this grow
-                     to the panel's height when the panel is the taller of the two, so
-                     centring never puts the head of a long dialog out of reach. --}}
-                <div class="relative min-h-full flex items-center justify-center p-4">
-                    <div class="relative w-full max-w-lg bg-white rounded-xl shadow-2xl my-8">
-
-                        <div class="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200">
-                            <div class="min-w-0">
-                                <h2 id="transfer-title-{{ $registration->id }}" class="text-lg font-bold text-gray-900">
-                                    Move to another event
-                                </h2>
-                                <p class="text-xs text-gray-500 mt-0.5">
-                                    {{ $registration->reference }} &middot; {{ $registration->displayName() }}
-                                </p>
-                            </div>
-
-                            <button type="button" data-close-transfer
-                                    class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition shrink-0"
-                                    aria-label="Close">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                </svg>
-                            </button>
-                        </div>
-
-                        <form action="{{ route('admin.event.participants.transfer', $registration) }}" method="POST"
-                              class="px-6 py-5 space-y-4">
-                            @csrf
-
-                            <div class="rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-3">
-                                <p class="text-xs text-gray-500">Currently on</p>
-                                <p class="text-sm font-semibold text-gray-900">{{ $registration->event?->title ?? '—' }}</p>
-                                <p class="text-xs text-gray-500 mt-1">
-                                    {{ $registration->participants->count() }}
-                                    {{ $registration->participants->count() === 1 ? 'person' : 'people' }}
-                                    &middot; {{ ucfirst((string) $registration->mode) }} entry
-                                </p>
-                            </div>
-
-                            <div>
-                                <label for="transfer-event-{{ $registration->id }}" class="block text-sm font-semibold text-gray-700 mb-1.5">
-                                    Move to
-                                </label>
-                                <select id="transfer-event-{{ $registration->id }}" name="event_id" required
-                                        class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition bg-white">
-                                    <option value="">Choose an event</option>
-                                    @foreach ($transferTargets as $target)
-                                        @continue((int) $target->id === (int) $registration->event_id)
-
-                                        {{-- The mode is shown because an entry can only move between
-                                             events of its own shape, and saying so here saves a
-                                             refusal after the press. --}}
-                                        <option value="{{ $target->id }}"
-                                                @disabled($target->registration_mode !== $registration->mode)>
-                                            {{ $target->title }}
-                                            &mdash; {{ $target->registration_mode === \App\Models\Event::MODE_MANAGER ? 'squad' : 'individual' }}
-                                            @if ($target->registration_mode !== $registration->mode)
-                                                (different shape)
-                                            @endif
-                                        </option>
-                                    @endforeach
-                                </select>
-                            </div>
-
-                            {{-- Said before the press, not after. Somebody moving an entry is
-                                 fixing a filing mistake and does not expect to lose the shirt
-                                 sizes with it. --}}
-                            <div class="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3">
-                                <p class="text-xs text-amber-800 font-semibold mb-1">What does not come with it</p>
-                                <ul class="text-xs text-amber-800 space-y-0.5 list-disc list-inside">
-                                    <li>Extras chosen, including shirt sizes. The other event sells its own.</li>
-                                    <li>Answers to this event's questions. The other event asks its own.</li>
-                                    <li>The amount, which becomes the other event's fee.</li>
-                                </ul>
-                                <p class="text-xs text-amber-700 mt-1.5">
-                                    Everybody's own details and the reference are kept.
-                                </p>
-                            </div>
-
-                            @error('transfer')
-                                <p class="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-800">{{ $message }}</p>
-                            @enderror
-
-                            <div class="flex items-center justify-end gap-2 pt-1">
-                                <button type="button" data-close-transfer
-                                        class="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
-                                    Cancel
-                                </button>
-                                <button type="submit"
-                                        class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
-                                    Move Entry
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        @endif
     @endforeach
 
     {{--
@@ -857,7 +738,6 @@
      */
     [
         { modal: 'data-payment-modal', open: 'data-open-payment', close: 'data-close-payment' },
-        { modal: 'data-transfer-modal', open: 'data-open-transfer', close: 'data-close-transfer' },
         { modal: 'data-tally-modal', open: 'data-open-tally', close: 'data-close-tally' },
     ].forEach(function (kind) {
         const dialogs = Array.from(document.querySelectorAll('[' + kind.modal + ']'));

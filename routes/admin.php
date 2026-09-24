@@ -166,9 +166,13 @@ Route::prefix('admin')->name('admin.')->group(function () {
              | belonged to the old one. Throttled because each press writes to two
              | events under a lock.
              */
+            Route::get('participants/{registration}/transfer', [ParticipantController::class, 'transferForm'])
+                ->middleware('permission:participants.transfer')
+                ->name('participants.transfer');
+
             Route::post('participants/{registration}/transfer', [ParticipantController::class, 'transfer'])
                 ->middleware(['permission:participants.transfer', 'throttle:20,1'])
-                ->name('participants.transfer');
+                ->name('participants.transfer.save');
 
             /*
              | One person on an entry, rather than the entry itself. Keyed by both so
