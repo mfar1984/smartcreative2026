@@ -42,6 +42,12 @@ class RolesAndPermissionsSeeder extends Seeder
                 // Separate again: there is no undo, and it destroys the record
                 // of who entered and what they were charged.
                 'delete' => ['participants.delete', 'Delete an unpaid registration'],
+
+                // Separate from viewing for the same reason the payment one is: a
+                // screen shows one entry at a time to somebody who is looking at
+                // it, and an export puts every person's identity card number and
+                // address into a file that leaves the building.
+                'export' => ['participants.export', 'Export the participant list for an event'],
             ],
             'Attendance' => [
                 'view' => ['attendance.view', 'View attendance'],
@@ -376,6 +382,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'participants.view',
                 'participants.notify',
                 'participants.delete',
+                'participants.export',
                 'attendance.view',
                 'attendance.update',
                 'attendance.remove-player',

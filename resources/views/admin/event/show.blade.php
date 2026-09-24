@@ -62,6 +62,19 @@
                 View on site
             </a>
 
+            {{-- Everyone on this event, with no filter to think about. The other
+                 door to the same export is on the Participants screen, where it
+                 carries whatever is filtered there instead. --}}
+            @if ($canExportParticipants && $event->registrations()->exists())
+                {{-- No tab, which the export reads as everybody. Naming one here
+                     would hand back an empty file on an event of the other kind. --}}
+                <a href="{{ route('admin.event.participants.export', ['event' => $event->id]) }}"
+                   class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                    <x-admin.icon name="archive" class="w-4 h-4" />
+                    Export Participants
+                </a>
+            @endif
+
             @if ($canUpdate)
                 <a href="{{ route('admin.event.registration.edit', $event) }}"
                    class="inline-flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">

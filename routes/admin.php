@@ -108,6 +108,18 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('participants', [ParticipantController::class, 'index'])
                 ->middleware('permission:participants.view')
                 ->name('participants');
+
+            /*
+             | Its own permission, and declared before the {registration} route
+             | below so "export" is not mistaken for a registration id.
+             |
+             | Separate from viewing because a screen shows one entry to somebody
+             | looking at it, while this puts every person's identity card number
+             | and address into a file that leaves the building.
+             */
+            Route::get('participants/export', [ParticipantController::class, 'export'])
+                ->middleware('permission:participants.export')
+                ->name('participants.export');
             Route::get('participants/{registration}', [ParticipantController::class, 'show'])
                 ->middleware('permission:participants.view')
                 ->name('participants.show');
@@ -242,6 +254,7 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('export', [PaymentController::class, 'export'])
                 ->middleware('permission:payments.export')
                 ->name('export');
+
 
             Route::post('{registration}/remind', [PaymentController::class, 'remind'])
                 ->middleware(['permission:participants.notify', 'throttle:20,1'])

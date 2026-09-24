@@ -111,6 +111,37 @@
                 </select>
             </x-admin.filter-bar>
 
+            {{-- Export sits under the filters rather than beside Apply, because it
+                 leaves this page entirely and should not read as another way to
+                 filter it.
+
+                 Offered only once an event is chosen. One file holding every
+                 identity card number ever collected is a different risk from one
+                 event's, and the controller refuses it either way; disabling the
+                 button says so before the press rather than after. --}}
+            @if ($canExport)
+                <div class="flex flex-wrap items-center gap-3 px-5 pb-4">
+                    @if ($eventId !== '')
+                        <a href="{{ route('admin.event.participants.export', request()->only('event', 'tab', 'q')) }}"
+                           class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                            <x-admin.icon name="archive" class="w-4 h-4" />
+                            Export {{ $tabs[$activeTab]['label'] ?? '' }} as CSV
+                        </a>
+                        <p class="text-xs text-gray-500">
+                            One row per person, matching the filters above. Carries identity
+                            card numbers and addresses.
+                        </p>
+                    @else
+                        <span class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed"
+                              aria-disabled="true">
+                            <x-admin.icon name="archive" class="w-4 h-4" />
+                            Export as CSV
+                        </span>
+                        <p class="text-xs text-gray-500">Choose an event above to export its participants.</p>
+                    @endif
+                </div>
+            @endif
+
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="bg-gray-50 text-left">

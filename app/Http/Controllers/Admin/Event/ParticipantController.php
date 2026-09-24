@@ -102,6 +102,7 @@ class ParticipantController extends Controller
             'canDelete' => $request->user()->hasPermission('participants.delete'),
             'canRecordPayment' => $request->user()->hasPermission('payments.record'),
             'canTally' => $request->user()->hasPermission('payments.tally'),
+            'canExport' => $request->user()->hasPermission('participants.export'),
 
             // Only events that actually have entries, so the filter never offers
             // a choice that returns nothing.
@@ -490,6 +491,209 @@ class ParticipantController extends Controller
                     ? $registration->event?->seatUnit() ?? 'place'
                     : $registration->event?->seatUnitPlural() ?? 'places',
             ));
+    }
+
+    /**
+     * The participant list as a CSV, one row per person.
+     *
+     * One row per person, not per registration. The payment export already gives a
+     * row per entry and names only whoever pays, which answers a money question.
+     * This answers the other one: who is actually coming, what size they wear, and
+     * what card number to check at the counter. A squad of seven is seven rows.
+     *
+     * Scoped to one event on purpose. A single file holding every identity card
+     * number this organisation has ever collected is a different risk from one
+     * event's, so the request is refused rather than quietly widened.
+     *
+     * Uses the same filters as the screen it was pressed from, so the file matches
+     * what was on display. A button that exports a different set from the one being
+     * looked at is a button that surprises people.
+     */
+    public function export(Request $request)
+    {
+        $eventId = trim((string) $request->query('event'));
+
+        if ($eventId === '') {
+            return back()->with('error', 'Choose an event before exporting. One file covering every event would carry more personal data than any single job needs.');
+        }
+
+        /** @var Event $event */
+        $event = Event::query()->whereKey($eventId)->firstOrFail();
+
+        /*
+         | A missing or unknown tab means everybody, not the first tab.
+         |
+         | resolveTab() falls back to "individual" because a screen has to show
+         | something, and that default would be wrong here: on a squad event it
+         | matches nothing, so the header button would hand back an empty file
+         | rather than the seven people it is pointing at.
+         */
+        $requested = (string) $request->query('tab', '');
+        $tab = array_key_exists($requested, self::TABS) ? $requested : null;
+        $search = trim((string) $request->query('q'));
+
+        $registrations = ($tab === null ? EventRegistration::query() : $this->scoped($tab))
+            ->where('event_id', $event->id)
+            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
+                $inner->where('reference', 'like', "%{$search}%")
+                    ->orWhere('team_name', 'like', "%{$search}%")
+                    ->orWhereHas('participants', fn (Builder $people) => $people
+                        ->where('full_name', 'like', "%{$search}%")
+                        ->orWhere('ic_number', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%"));
+            }))
+            ->orderBy('id');
+
+        /*
+         | In-game columns only where the event asks for them, and one column per
+         | question the event added. A fixed header would leave empty columns on most
+         | events and no column at all for anything an organiser invented.
+         */
+        $ignFields = $event->ignFieldsAsked();
+        $questions = $event->questions;
+
+        $header = array_merge(
+            ['Reference', 'Team / Entry', 'Mode', 'Role', 'Also Plays'],
+            ['Full Name', 'Identity Card', 'Date of Birth', 'Age', 'Gender', 'Race'],
+            ['Telephone', 'Email'],
+            array_values($ignFields),
+            ['Address 1', 'Address 2', 'Postcode', 'City', 'State', 'Country'],
+            ['Emergency Contact', 'Emergency Telephone'],
+            ['Extras Chosen'],
+            $questions->pluck('title')->all(),
+            ['Marketing Consent', 'Checked In At', 'Entry Status', 'Payment Status', 'Submitted'],
+        );
+
+        AdminLogger::activity(
+            'participants.export',
+            sprintf(
+                'Exported the %s participant list for %s.',
+                $tab === null ? 'full' : $tab,
+                $event->title,
+            ),
+        );
+
+        return response()->streamDownload(function () use ($registrations, $header, $ignFields, $questions) {
+            $handle = fopen('php://output', 'wb');
+
+            // Byte order mark. Malaysian names carry characters Excel reads as
+            // mojibake without it, which ruins the file for anybody who opens it by
+            // double clicking, which is everybody.
+            fwrite($handle, "\xEF\xBB\xBF");
+
+            fputcsv($handle, $header);
+
+            /*
+             | Chunked, with the relations loaded per chunk rather than up front. A
+             | popular event is hundreds of people, and holding all of them plus
+             | their answers and add-on lines in memory to write a file is needless.
+             */
+            $registrations
+                ->with(['participants.answers', 'participants.attendance', 'addonLines'])
+                ->chunk(50, function ($rows) use ($handle, $ignFields, $questions) {
+                    foreach ($rows as $registration) {
+                        foreach ($registration->participants as $person) {
+                            fputcsv($handle, $this->exportRow($registration, $person, $ignFields, $questions));
+                        }
+                    }
+                });
+
+            fclose($handle);
+        }, sprintf('participants-%s-%s.csv', $event->slug, now()->format('Ymd-His')), [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    /**
+     * One person as a row of cells, in the same order as the header.
+     *
+     * @param  array<string, string>  $ignFields
+     * @param  \Illuminate\Support\Collection<int, \App\Models\EventQuestion>  $questions
+     * @return array<int, string>
+     */
+    private function exportRow(
+        EventRegistration $registration,
+        EventParticipant $person,
+        array $ignFields,
+        $questions,
+    ): array {
+        $ign = [];
+
+        foreach (array_keys($ignFields) as $field) {
+            $ign[] = (string) ($person->{$field} ?? '');
+        }
+
+        // Extras recorded against this person, which is where a shirt size lives.
+        $extras = $registration->addonLines
+            ->where('event_participant_id', $person->id)
+            ->map(fn ($line) => filled($line->variant_label)
+                ? sprintf('%s: %s', $line->name, $line->variant_label)
+                : $line->name)
+            ->implode('; ');
+
+        /*
+         | Matched on the question id, falling back to the stored title. An answer
+         | whose question has since been deleted keeps its own copy of the wording,
+         | so it can still be placed under the right heading while that heading
+         | exists.
+         */
+        $answers = [];
+
+        foreach ($questions as $question) {
+            $answer = $person->answers->firstWhere('event_question_id', $question->id)
+                ?? $person->answers->firstWhere('question_title', $question->title);
+
+            $answers[] = $answer === null ? '' : $answer->answerLabel();
+        }
+
+        return array_merge(
+            [
+                $registration->reference,
+                (string) ($registration->team_name ?? ''),
+                // The stored word, capitalised, which is what the Mode column on
+                // the screen shows. Event::MODES holds a sentence meant for a
+                // dropdown and would be unreadable in a spreadsheet cell.
+                ucfirst((string) $registration->mode),
+                $person->roleLabel(),
+                $person->also_plays ? 'Yes' : '',
+            ],
+            [
+                $person->full_name,
+                // In full, not masked. Somebody at the counter checks this against a
+                // card in a person's hand, and half a number cannot be checked.
+                $person->ic_number,
+                $person->date_of_birth?->format('Y-m-d') ?? '',
+                (string) ($person->age() ?? ''),
+                (string) ($person->gender ?? ''),
+                (string) ($person->race ?? ''),
+            ],
+            [
+                (string) ($person->phone ?? ''),
+                (string) ($person->email ?? ''),
+            ],
+            $ign,
+            [
+                (string) ($person->address_line_1 ?? ''),
+                (string) ($person->address_line_2 ?? ''),
+                (string) ($person->postcode ?? ''),
+                (string) ($person->city ?? ''),
+                (string) ($person->state ?? ''),
+                (string) ($person->country ?? ''),
+            ],
+            [
+                (string) ($person->emergency_contact_name ?? ''),
+                (string) ($person->emergency_contact_phone ?? ''),
+            ],
+            [$extras],
+            $answers,
+            [
+                $person->marketing_consent ? 'Yes' : 'No',
+                $person->attendance?->created_at?->format('Y-m-d H:i') ?? '',
+                $registration->statusLabel(),
+                $registration->paymentStatusLabel(),
+                $registration->created_at?->format('Y-m-d H:i') ?? '',
+            ],
+        );
     }
 
     /* ---------------------------------------------------------------------

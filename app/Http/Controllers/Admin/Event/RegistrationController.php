@@ -132,6 +132,10 @@ class RegistrationController extends Controller
             ],
             'canUpdate' => $request->user()->hasPermission('events.update'),
             'canDelete' => $request->user()->hasPermission('events.delete'),
+
+            // Its own permission rather than events.view, because the file carries
+            // every attendee's identity card number and address out of the system.
+            'canExportParticipants' => $request->user()->hasPermission('participants.export'),
         ]);
     }
 
