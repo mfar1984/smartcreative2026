@@ -56,11 +56,9 @@
                      which rather than guess. --}}
                 @unless (App\Support\PublicResults::isEmpty())
                     <div class="relative group">
-                        <a href="{{ App\Support\PublicResults::anyLive()
-                                ? route('events.ranking', App\Support\PublicResults::live()->first()->event->slug)
-                                : route('hall-of-fame') }}"
+                        <a href="{{ App\Support\PublicResults::menuUrl() }}"
                            data-nav-link
-                           class="text-white hover:text-blue-300 font-medium transition flex items-center gap-2 {{ request()->routeIs('events.ranking') || request()->routeIs('hall-of-fame') ? 'text-blue-300' : '' }}">
+                           class="text-white hover:text-blue-300 font-medium transition flex items-center gap-2 {{ request()->routeIs('events.ranking') || request()->routeIs('hall-of-fame') || request()->routeIs('archive') ? 'text-blue-300' : '' }}">
 
                             {{-- A match is being played, so the menu says so before
                                  anybody has to open anything. --}}
@@ -94,7 +92,10 @@
                                     </a>
                                 @endforeach
 
-                                @if (App\Support\PublicResults::anyLive() && App\Support\PublicResults::hasHallOfFame())
+                                {{-- Divides what is happening now from what has already
+                                     happened, and only when there is something on both
+                                     sides of the line. --}}
+                                @if (App\Support\PublicResults::anyLive() && (App\Support\PublicResults::hasHallOfFame() || App\Support\PublicResults::hasArchive()))
                                     <div class="my-1.5 border-t border-gray-100"></div>
                                 @endif
 
@@ -103,6 +104,14 @@
                                        class="block px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition">
                                         <span class="font-semibold">Hall of Fame</span>
                                         <span class="block text-xs text-gray-500 mt-0.5">Every podium we have announced</span>
+                                    </a>
+                                @endif
+
+                                @if (App\Support\PublicResults::hasArchive())
+                                    <a href="{{ route('archive') }}"
+                                       class="block px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition">
+                                        <span class="font-semibold">Archive</span>
+                                        <span class="block text-xs text-gray-500 mt-0.5">Every tournament we have finished</span>
                                     </a>
                                 @endif
                             </div>
@@ -199,6 +208,13 @@
                         <a href="{{ route('hall-of-fame') }}" data-nav-link
                            class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('hall-of-fame') ? 'text-blue-300' : '' }}">
                             Hall of Fame
+                        </a>
+                    @endif
+
+                    @if (App\Support\PublicResults::hasArchive())
+                        <a href="{{ route('archive') }}" data-nav-link
+                           class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('archive') ? 'text-blue-300' : '' }}">
+                            Archive
                         </a>
                     @endif
                 @endunless

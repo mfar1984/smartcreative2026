@@ -25,6 +25,9 @@ use App\Models\TournamentStage;
  * come in, and it says how far through the tournament is so a visitor does not take a
  * half-played table for a final result.
  *
+ * The archive lists the tournaments that are over, whether or not a podium was ever
+ * announced, and counts them from the match rows rather than storing a summary.
+ *
  * Neither page shows anything beyond a competitor's name and the figures making up
  * their score. No telephone number, no identity card, no email.
  */
@@ -72,6 +75,104 @@ class TournamentPublicController extends Controller
         return view('pages.hall-of-fame', [
             'years' => $champions,
             'awards' => $awards,
+        ]);
+    }
+
+    /**
+     * Every tournament that is over, newest first.
+     *
+     * The third of the three results pages, and the one that answers "what have you
+     * run before". The Hall of Fame shows three names per tournament and only once a
+     * podium has been announced. This shows every finished tournament, announced or
+     * not, with the size of it and a way into the full table.
+     *
+     * Keyed on the tournament being finished rather than on the event's dates. An
+     * organiser closing a tournament is a decision; a date passing is not, and keying
+     * on the date would file a tournament still being played under "past".
+     *
+     * Every figure on this page is counted from rows that already exist. Nothing here
+     * is entered a second time, so the archive cannot disagree with the tournament it
+     * describes.
+     */
+    public function archive()
+    {
+        $tournaments = Tournament::query()
+            ->whereIn('status', [Tournament::STATUS_COMPLETED, Tournament::STATUS_PUBLISHED])
+            // No draw means no fixtures and no standings, so the entry would open onto
+            // an empty table.
+            ->whereHas('stages', fn ($query) => $query->whereNotNull('drawn_at'))
+            ->whereHas('event')
+            ->with([
+                'event:id,slug,title,category,location,starts_at,ends_at',
+                'champions',
+                'pointRule:id,name,track_players',
+            ])
+            ->withCount([
+                'entrants',
+                'matches as played_count' => fn ($query) => $query->whereIn('status', [
+                    TournamentMatch::STATUS_COMPLETED,
+                    TournamentMatch::STATUS_WALKOVER,
+                ]),
+                /*
+                 | Overall player rows only, which is why the stage filter is here: a
+                 | tournament that keeps per-stage player tables as well would otherwise
+                 | count the same person once per stage.
+                 */
+                'playerStandings as players_count' => fn ($query) => $query->whereNull('tournament_stage_id'),
+            ])
+            ->get()
+            ->sortByDesc(fn (Tournament $tournament) => [
+                $tournament->event?->ends_at?->timestamp ?? 0,
+                $tournament->id,
+            ])
+            ->values();
+
+        $entries = $tournaments->map(function (Tournament $tournament) {
+            /*
+             | The winner is read from the frozen champions and nowhere else.
+             |
+             | Live standings would also name a leader, and for a finished tournament
+             | that leader is almost always the winner. Almost is the problem: until an
+             | organiser publishes, no result has been announced, and a page calling
+             | somebody champion before that is putting words in their mouth.
+             */
+            $champion = $tournament->champions
+                ->whereNotNull('published_at')
+                ->firstWhere('rank', 1);
+
+            /*
+             | Whether the full table is reachable, decided by the same rules the
+             | ranking page itself applies. Linking without checking produced a card
+             | leading to a page that had quietly withheld everything.
+             */
+            $open = $tournament->isPublished()
+                || (bool) $tournament->setting('public_rankings_live', true);
+
+            return [
+                'tournament' => $tournament,
+                'event' => $tournament->event,
+                'champion' => $champion,
+                'is_announced' => $champion !== null,
+                'teams' => (int) $tournament->entrants_count,
+                'played' => (int) $tournament->played_count,
+                'players' => $tournament->tracksPlayers() ? (int) $tournament->players_count : 0,
+                'standings_url' => $open && $tournament->event
+                    ? route('events.ranking', $tournament->event->slug)
+                    : null,
+            ];
+        });
+
+        return view('pages.archive', [
+            'years' => $entries->groupBy(
+                fn (array $entry) => $entry['event']?->starts_at?->format('Y')
+                    ?? $entry['tournament']->published_at?->format('Y')
+                    ?? 'Undated',
+            )->sortKeysDesc(),
+            'totals' => [
+                'tournaments' => $entries->count(),
+                'teams' => $entries->sum('teams'),
+                'matches' => $entries->sum('played'),
+            ],
         ]);
     }
 

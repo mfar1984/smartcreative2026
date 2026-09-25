@@ -35,6 +35,14 @@ Route::get('/hall-of-fame', [TournamentPublicController::class, 'hallOfFame'])->
 Route::get('/events/{slug}/ranking', [TournamentPublicController::class, 'ranking'])->name('events.ranking');
 
 /*
+| The archive: every tournament that is over, announced or not, counted from the
+| match rows it already has. Keyed on the tournament being closed rather than on the
+| event's dates, so a date passing never files a tournament still being played under
+| "past".
+*/
+Route::get('/archive', [TournamentPublicController::class, 'archive'])->name('archive');
+
+/*
 | One team's record in one event, reached by tapping its name on the ranking above.
 |
 | Keyed on the registration rather than the team name, because a name is typed by

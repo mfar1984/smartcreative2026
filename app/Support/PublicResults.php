@@ -24,6 +24,8 @@ final class PublicResults
 
     private static ?bool $champions = null;
 
+    private static ?bool $archive = null;
+
     /**
      * Events with a tournament being played right now, one entry per event.
      *
@@ -76,11 +78,52 @@ final class PublicResults
     }
 
     /**
+     * Whether any tournament has finished with a table behind it.
+     *
+     * Two conditions, and both are needed. Finished, because an archive of things
+     * still being played is not an archive. And drawn, because a tournament closed
+     * without a draw has no fixtures and no standings, so its entry would open onto
+     * nothing.
+     *
+     * Deliberately not the same test as hasHallOfFame(). A finished tournament whose
+     * podium was never announced belongs in the archive and not on the podium page,
+     * which is the whole reason the two pages are separate.
+     */
+    public static function hasArchive(): bool
+    {
+        return self::$archive ??= Tournament::query()
+            ->whereIn('status', [Tournament::STATUS_COMPLETED, Tournament::STATUS_PUBLISHED])
+            ->whereHas('stages', fn ($query) => $query->whereNotNull('drawn_at'))
+            ->whereHas('event')
+            ->exists();
+    }
+
+    /**
      * Nothing to show, so the menu item is left out altogether.
      */
     public static function isEmpty(): bool
     {
-        return ! self::anyLive() && ! self::hasHallOfFame();
+        return ! self::anyLive() && ! self::hasHallOfFame() && ! self::hasArchive();
+    }
+
+    /**
+     * Where the Results menu itself should lead.
+     *
+     * The heading is a link as well as a hover target, because on a touch screen the
+     * hover never happens. It has to land on a page with something on it, so it walks
+     * the same order the menu is listed in and takes the first one that is populated.
+     */
+    public static function menuUrl(): string
+    {
+        if (self::anyLive()) {
+            return route('events.ranking', self::live()->first()->event->slug);
+        }
+
+        if (self::hasHallOfFame()) {
+            return route('hall-of-fame');
+        }
+
+        return route('archive');
     }
 
     /**
@@ -90,5 +133,6 @@ final class PublicResults
     {
         self::$live = null;
         self::$champions = null;
+        self::$archive = null;
     }
 }
