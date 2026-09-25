@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin\Event;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\TransferRegistrationRequest;
 use App\Http\Requests\Admin\UpdateParticipantRequest;
+use App\Http\Requests\Admin\UpdateRegistrationEntryRequest;
 use App\Models\Event;
 use App\Models\EventAddonVariant;
 use App\Models\EventParticipant;
@@ -917,6 +918,84 @@ class ParticipantController extends Controller
         }
 
         return count($rows);
+    }
+
+    /** Where logos live on the public disk. The same folder the public form uses. */
+    private const LOGO_DIRECTORY = 'registration-logos';
+
+    /**
+     * Correct the entry itself: the team's name, its logo, and the note on it.
+     *
+     * The panel these sit in was read-only, which left a misspelt team name with
+     * nowhere to be fixed and a missing logo with nowhere to be added. Everything
+     * else on that panel stays read-only on purpose, and the dialog says why:
+     * the reference is quoted in every message already sent, the event has its
+     * own screen because moving one moves seats and money, and the rest is either
+     * the event's setting or a record of what happened.
+     *
+     * The old image is deleted only once the new row is saved. Deleting first
+     * would leave the entry pointing at nothing if the write then failed.
+     */
+    public function updateEntry(UpdateRegistrationEntryRequest $request, EventRegistration $registration)
+    {
+        $registration->loadMissing('event');
+
+        $before = $registration->only(['team_name', 'logo_path', 'notes']);
+
+        $registration->fill([
+            'team_name' => $request->input('team_name'),
+            'notes' => $request->input('notes'),
+        ]);
+
+        $replaced = null;
+
+        if ($request->hasFile('logo')) {
+            // Stored before the save so a rejected upload cannot leave the row
+            // pointing at a file that was never written.
+            $registration->logo_path = $request->file('logo')->store(self::LOGO_DIRECTORY, 'public');
+            $replaced = $before['logo_path'];
+        } elseif ($request->boolean('remove_logo')) {
+            $registration->logo_path = null;
+            $replaced = $before['logo_path'];
+        }
+
+        if (! $registration->isDirty()) {
+            return redirect()
+                ->route('admin.event.participants.show', $registration)
+                ->with('status', 'Nothing was changed on this entry.');
+        }
+
+        $changed = array_keys($registration->getDirty());
+
+        $registration->save();
+
+        // Now that nothing points at it. An upload that replaced nothing leaves
+        // this null and there is nothing to tidy.
+        if (filled($replaced)) {
+            Storage::disk('public')->delete($replaced);
+        }
+
+        AdminLogger::activity('participants.entry-updated', sprintf(
+            'Updated %s: %s.',
+            $registration->reference,
+            implode(', ', $changed),
+        ));
+
+        AdminLogger::audit(
+            $registration,
+            'updated',
+            array_intersect_key($before, array_flip($changed)),
+            array_intersect_key($registration->only(['team_name', 'logo_path', 'notes']), array_flip($changed)),
+        );
+
+        return redirect()
+            ->route('admin.event.participants.show', $registration)
+            ->with('status', sprintf(
+                '%s updated. %d %s changed.',
+                $registration->reference,
+                count($changed),
+                count($changed) === 1 ? 'field' : 'fields',
+            ));
     }
 
     /**

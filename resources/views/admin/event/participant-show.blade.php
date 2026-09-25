@@ -113,7 +113,21 @@
             description="What was submitted, and what it came to."
             icon="clipboard" />
 
-        <x-admin.panel title="Entry" icon="clipboard">
+        <x-admin.panel title="Entry" icon="clipboard" id="entry">
+            @if ($canUpdatePerson)
+                <x-slot:actions>
+                    <button type="button"
+                            data-open-entry
+                            class="p-1.5 rounded-lg text-blue-600 hover:bg-blue-100 transition"
+                            title="Correct the team name, logo or note"
+                            aria-label="Correct the team name, logo or note">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                        </svg>
+                    </button>
+                </x-slot:actions>
+            @endif
+
             <table class="w-full text-sm">
                 <tbody class="divide-y divide-gray-100">
                     <tr>
@@ -177,15 +191,165 @@
                             @endif
                         </td>
                     </tr>
-                    @if (filled($registration->notes))
+                    {{-- Always drawn once the entry can be edited, so an empty note
+                         has a place to be written rather than the row vanishing and
+                         with it any sign that a note is possible. --}}
+                    @if (filled($registration->notes) || $canUpdatePerson)
                         <tr>
                             <th scope="row" class="{{ $label }} text-left">Notes</th>
-                            <td class="{{ $value }} whitespace-pre-line">{{ $registration->notes }}</td>
+                            <td class="{{ $value }} whitespace-pre-line">{{ $registration->notes ?: '—' }}</td>
                         </tr>
                     @endif
                 </tbody>
             </table>
         </x-admin.panel>
+
+        {{--
+            Correcting the entry itself.
+
+            Three fields, and the dialog says which of the others cannot be touched
+            and why, because somebody who opened this looking for the reference or
+            the event should be told rather than left hunting.
+        --}}
+        @if ($canUpdatePerson)
+            @php
+                $entryReopened = $errors->hasAny(['team_name', 'logo', 'remove_logo', 'notes']);
+            @endphp
+
+            <div id="entry-modal"
+                 data-entry-modal
+                 @class(['fixed inset-0 z-50 overflow-y-auto', 'hidden' => ! $entryReopened])
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="entry-modal-title">
+
+                <div class="fixed inset-0 bg-gray-900/60" data-close-entry></div>
+
+                <div class="relative min-h-full flex items-center justify-center p-4">
+                    <div class="relative w-full max-w-lg bg-white rounded-xl shadow-2xl my-8">
+
+                        <div class="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                            <div class="min-w-0">
+                                <h2 id="entry-modal-title" class="text-lg font-bold text-gray-900">Correct this entry</h2>
+                                <p class="text-xs text-gray-500 mt-0.5">{{ $registration->reference }}</p>
+                            </div>
+
+                            <button type="button" data-close-entry
+                                    class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition shrink-0"
+                                    aria-label="Close">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <form action="{{ route('admin.event.participants.entry.update', $registration) }}" method="POST"
+                              enctype="multipart/form-data"
+                              class="px-6 py-5 space-y-4">
+                            @csrf
+                            @method('PUT')
+
+                            <div>
+                                <label for="team_name" class="{{ $personLabel }}">
+                                    Team or organisation name
+                                    @if ($registration->mode === \App\Models\Event::MODE_MANAGER)
+                                        <span class="text-red-600" aria-hidden="true">*</span>
+                                    @endif
+                                </label>
+                                <input type="text" id="team_name" name="team_name"
+                                       value="{{ old('team_name', $registration->team_name) }}"
+                                       class="{{ $personInput }}">
+                                @error('team_name') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                            </div>
+
+                            @if ($event?->asksLogo() || $registration->hasLogo())
+                                <div>
+                                    <span class="{{ $personLabel }}">{{ $event?->logoLabel() ?? 'Logo' }}</span>
+
+                                    <div class="flex items-start gap-3">
+                                        @if ($registration->hasLogo())
+                                            <img src="{{ $registration->logoUrl() }}"
+                                                 alt="Current logo for {{ $registration->displayName() }}"
+                                                 class="w-16 h-16 object-contain rounded-lg border border-gray-200 bg-gray-50 p-1 shrink-0">
+                                        @endif
+
+                                        <div class="grow min-w-0">
+                                            <input type="file" id="logo" name="logo"
+                                                   accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                                                   class="w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100">
+
+                                            <p class="text-xs text-gray-400 mt-1">
+                                                JPG, PNG, WebP or SVG, up to 2 MB.
+                                                @if ($registration->hasLogo())
+                                                    Leave this empty to keep the current image.
+                                                @endif
+                                            </p>
+
+                                            {{-- Browsers do not keep a chosen file across a
+                                                 rejected submission, so this is said rather
+                                                 than left for somebody to wonder about. --}}
+                                            @if ($entryReopened)
+                                                <p class="text-xs text-amber-700 mt-1 font-semibold">
+                                                    Please choose the image again if you were uploading one.
+                                                </p>
+                                            @endif
+
+                                            @error('logo') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+
+                                            @if ($registration->hasLogo() && ! $event?->requiresLogo())
+                                                <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                                    <input type="hidden" name="remove_logo" value="0">
+                                                    <input type="checkbox" name="remove_logo" value="1"
+                                                           @checked(old('remove_logo'))
+                                                           class="rounded border-gray-300 text-red-600 focus:ring-red-500/40">
+                                                    <span class="text-xs font-semibold text-red-700">Remove the current image</span>
+                                                </label>
+                                            @endif
+
+                                            @error('remove_logo') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
+
+                            <div>
+                                <label for="notes" class="{{ $personLabel }}">Notes</label>
+                                <textarea id="notes" name="notes" rows="3"
+                                          class="{{ $personInput }}">{{ old('notes', $registration->notes) }}</textarea>
+                                <p class="text-xs text-gray-400 mt-1">Whatever the entrant wrote, or anything worth recording against this entry.</p>
+                                @error('notes') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                            </div>
+
+                            <div class="rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-3">
+                                <p class="text-xs text-gray-600 font-semibold mb-1">What cannot be changed here</p>
+                                <ul class="text-xs text-gray-500 space-y-0.5 list-disc list-inside">
+                                    <li>The reference. Every email, receipt and gateway record already quotes it.</li>
+                                    <li>
+                                        The event. Moving an entry changes the places held on two events and
+                                        rewrites the fee, so it has
+                                        <a href="{{ route('admin.event.participants.transfer', $registration) }}"
+                                           class="text-blue-600 hover:underline">its own screen</a>.
+                                    </li>
+                                    <li>The mode. It comes from the event, not from the entry.</li>
+                                    <li>How many people, and when it was submitted. Both are records of what happened.</li>
+                                </ul>
+                            </div>
+
+                            <div class="flex items-center justify-end gap-2 pt-1">
+                                <button type="button" data-close-entry
+                                        class="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                    Cancel
+                                </button>
+                                <button type="submit"
+                                        class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        @endif
 
         {{-- ---------------- What we invoiced ---------------- --}}
         <x-admin.panel title="Amount Invoiced" icon="credit-card">
@@ -1310,6 +1474,49 @@
         // A server-reopened dialog is visible from the markup, so the scroll lock
         // has to be applied to match it.
         if (dialogs.some((dialog) => !dialog.classList.contains('hidden'))) {
+            document.body.classList.add('overflow-hidden');
+        }
+    })();
+
+    /*
+     | The one dialog for the entry's own details.
+     |
+     | Separate from the per person binder above because there is exactly one of
+     | these, so it needs no matching by id and no closeAll.
+     */
+    (function () {
+        const dialog = document.querySelector('[data-entry-modal]');
+
+        if (!dialog) {
+            return;
+        }
+
+        function close() {
+            dialog.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+        }
+
+        document.querySelectorAll('[data-open-entry]').forEach(function (trigger) {
+            trigger.addEventListener('click', function () {
+                dialog.classList.remove('hidden');
+                document.body.classList.add('overflow-hidden');
+                dialog.querySelector('input:not([type=hidden]):not([disabled])')?.focus();
+            });
+        });
+
+        dialog.querySelectorAll('[data-close-entry]').forEach(function (trigger) {
+            trigger.addEventListener('click', close);
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                close();
+            }
+        });
+
+        // Reopened by the server after a rejected submission, so it is already
+        // visible and the scroll lock has to match.
+        if (!dialog.classList.contains('hidden')) {
             document.body.classList.add('overflow-hidden');
         }
     })();

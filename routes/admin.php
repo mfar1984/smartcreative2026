@@ -184,6 +184,17 @@ Route::prefix('admin')->name('admin.')->group(function () {
              | taking somebody off destroys one, along with their answers and
              | whatever was ordered in their size.
              */
+            /*
+             | The entry's own details: team name, logo and note. Behind the same
+             | permission as correcting a person, because it is the same act on the
+             | same record. The reference and the event are not here: the first is
+             | quoted in every message already sent, and the second has its own
+             | screen above because moving one moves seats and money.
+             */
+            Route::put('participants/{registration}/entry', [ParticipantController::class, 'updateEntry'])
+                ->middleware(['permission:participants.update', 'throttle:30,1'])
+                ->name('participants.entry.update');
+
             Route::put('participants/{registration}/people/{participant}', [ParticipantController::class, 'updateParticipant'])
                 ->middleware(['permission:participants.update', 'throttle:30,1'])
                 ->name('participants.person.update');
