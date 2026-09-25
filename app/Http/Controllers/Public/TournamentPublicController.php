@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Public;
 
 use App\Http\Controllers\Controller;
 use App\Models\Event;
+use App\Models\EventRegistration;
 use App\Models\Tournament;
 use App\Models\TournamentChampion;
+use App\Models\TournamentEntrant;
 use App\Models\TournamentMatch;
+use App\Models\TournamentMatchEntrant;
 use App\Models\TournamentPlayerAward;
 use App\Models\TournamentStage;
 
@@ -203,6 +206,92 @@ class TournamentPublicController extends Controller
         return view('pages.event-ranking', [
             'event' => $event,
             'boards' => $boards,
+        ]);
+    }
+
+    /**
+     * One team's record in one event.
+     *
+     * Reached by tapping a name on the ranking table. Everything here is read from the
+     * match rows that already exist, so it fills itself in as the tournament is
+     * scored rather than needing anything entered twice.
+     *
+     * Keyed on the registration rather than the team name, because a name is typed by
+     * whoever registered and two squads may well choose the same one.
+     */
+    public function team(string $slug, EventRegistration $registration)
+    {
+        $event = Event::where('slug', $slug)->firstOrFail();
+
+        // The team has to belong to the event in the URL, or the page would present
+        // one event's squad as though it played in another.
+        abort_if((int) $registration->event_id !== (int) $event->id, 404);
+
+        $registration->load(['participants', 'event']);
+
+        $entrant = TournamentEntrant::query()
+            ->where('event_registration_id', $registration->id)
+            ->with(['tournament.pointRule', 'tournament.event'])
+            ->first();
+
+        // Registered, but never entered into a tournament. Nothing to show and no
+        // reason to pretend otherwise.
+        abort_if($entrant === null, 404);
+
+        $tournament = $entrant->tournament;
+
+        abort_if($tournament === null, 404);
+
+        /*
+         | Hidden for the same reason the ranking is: an organiser who does not want a
+         | half-played table quoted back at them does not want one team's running total
+         | quoted either.
+         */
+        abort_if(
+            ! (bool) $tournament->setting('public_rankings_live', true) && ! $tournament->isPublished(),
+            404,
+        );
+
+        $columns = collect($tournament->pointRule?->components ?? [])
+            ->map(fn (array $component) => [
+                'key' => $component['key'],
+                'label' => $component['label'] ?? $component['key'],
+                'counted' => in_array($component['type'] ?? '', ['per_unit', 'bonus'], true),
+            ])
+            ->all();
+
+        /*
+         | Every fixture this team has a settled result in, oldest first, so it reads as
+         | the story of the day rather than a leaderboard.
+         */
+        $lines = TournamentMatchEntrant::query()
+            ->where('tournament_entrant_id', $entrant->id)
+            ->whereHas('match', fn ($query) => $query->whereIn('status', [
+                TournamentMatch::STATUS_COMPLETED,
+                TournamentMatch::STATUS_WALKOVER,
+            ]))
+            ->with(['match:id,position,round,map,scheduled_at,status,winner_entrant_id,tournament_stage_id', 'match.stage:id,name'])
+            ->get()
+            ->sortBy([
+                fn ($a, $b) => ($a->match?->scheduled_at <=> $b->match?->scheduled_at),
+                fn ($a, $b) => ($a->match?->position <=> $b->match?->position),
+            ])
+            ->values();
+
+        return view('pages.event-team', [
+            'event' => $event,
+            'registration' => $registration,
+            'tournament' => $tournament,
+            'entrant' => $entrant,
+            'columns' => $columns,
+            'lines' => $lines,
+
+            // Where they stand, taken from the stage they are in rather than recomputed.
+            'standing' => $tournament->standings()
+                ->where('tournament_entrant_id', $entrant->id)
+                ->with('stage:id,name,advance_count')
+                ->orderByDesc('tournament_stage_id')
+                ->first(),
         ]);
     }
 }

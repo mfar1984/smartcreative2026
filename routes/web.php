@@ -33,6 +33,17 @@ Route::get('/services', [MaintenanceController::class, 'services'])->name('servi
 */
 Route::get('/hall-of-fame', [TournamentPublicController::class, 'hallOfFame'])->name('hall-of-fame');
 Route::get('/events/{slug}/ranking', [TournamentPublicController::class, 'ranking'])->name('events.ranking');
+
+/*
+| One team's record in one event, reached by tapping its name on the ranking above.
+|
+| Keyed on the registration rather than the team name, because a name is typed by
+| whoever registered and two squads may well choose the same one. Declared after the
+| ranking route so "ranking" is never read as a team id.
+*/
+Route::get('/events/{slug}/team/{registration}', [TournamentPublicController::class, 'team'])
+    ->whereNumber('registration')
+    ->name('events.team');
 /*
 | The three service pages. Each is laid out differently on purpose: they are bought
 | for different reasons, and a visitor comparing them should be able to tell them

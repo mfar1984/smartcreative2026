@@ -225,9 +225,20 @@
                                             </td>
 
                                             <td class="px-3 md:px-5 py-3.5">
-                                                <span class="font-semibold text-gray-900 text-sm md:text-base">
-                                                    {{ $standing->entrant?->displayName() ?? '—' }}
-                                                </span>
+                                                {{-- A link when there is a registration behind the row,
+                                                     which is what carries the match by match record. An
+                                                     entrant added by hand has none, so it stays text
+                                                     rather than becoming a link to nothing. --}}
+                                                @if ($standing->entrant?->event_registration_id)
+                                                    <a href="{{ route('events.team', [$event->slug, $standing->entrant->event_registration_id]) }}"
+                                                       class="font-semibold text-gray-900 text-sm md:text-base hover:text-blue-600 hover:underline transition">
+                                                        {{ $standing->entrant->displayName() }}
+                                                    </a>
+                                                @else
+                                                    <span class="font-semibold text-gray-900 text-sm md:text-base">
+                                                        {{ $standing->entrant?->displayName() ?? '—' }}
+                                                    </span>
+                                                @endif
 
                                                 @if ($standing->is_disqualified)
                                                     <span class="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800 align-middle">
