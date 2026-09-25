@@ -137,7 +137,77 @@ class MatchController extends Controller
                 'group' => (string) $request->query('group', ''),
             ],
             'canScore' => $request->user()->hasPermission('tournaments.matches.score'),
+
+            /*
+             | Changing which map a fixture is on, or when it starts, is deciding what
+             | the fixture is rather than what its result was. That is the permission
+             | that already owns generating and discarding a draw, so a referee who may
+             | only enter scores does not get it.
+             */
+            'canEditFixture' => $request->user()->hasPermission('tournaments.matches.generate'),
+
+            // Read live rather than from the tournament's frozen copy: this is a list
+            // of suggestions for a dropdown, not a rule the tournament was run under.
+            'mapPool' => TournamentSettingsController::mapPool(),
         ]);
+    }
+
+    /**
+     * Change which map a fixture is on, and when it starts.
+     *
+     * Both were written once when the draw was generated and then had nowhere to be
+     * corrected. The map came from the rotation in the tournament's frozen settings,
+     * cycled by match number, so an organiser who wanted Sanhok for match three had
+     * no way to say so: not through the settings screen, because the tournament had
+     * already frozen its copy, and not by discarding the draw, because that reads the
+     * same frozen copy again. The comment in the scheduler even claimed every time
+     * could be edited afterwards, which was never true.
+     *
+     * Allowed on a fixture that has been played. Neither field is part of the result:
+     * they describe where and when it happened, and a wrong map name is worth
+     * correcting after the fact rather than being preserved because it is too late.
+     */
+    public function updateFixture(Request $request, TournamentMatch $match)
+    {
+        $data = $request->validate([
+            'map' => ['nullable', 'string', 'max:60'],
+            'scheduled_at' => ['nullable', 'date'],
+        ], [
+            'scheduled_at.date' => 'Give a real date and time, or leave it empty.',
+        ]);
+
+        $match->loadMissing('tournament');
+
+        $before = $match->only(['map', 'scheduled_at']);
+
+        $match->fill([
+            'map' => filled($data['map'] ?? null) ? trim($data['map']) : null,
+            'scheduled_at' => filled($data['scheduled_at'] ?? null) ? $data['scheduled_at'] : null,
+        ]);
+
+        if (! $match->isDirty()) {
+            return back()->with('status', sprintf('Nothing was changed on %s.', $match->label()));
+        }
+
+        $changed = array_keys($match->getDirty());
+
+        $match->save();
+
+        AdminLogger::activity('tournaments.matches.generate', sprintf(
+            'Updated %s in %s: %s.',
+            $match->label(),
+            $match->tournament?->name ?? 'a tournament',
+            implode(', ', $changed),
+        ));
+
+        AdminLogger::audit(
+            $match,
+            'tournament.fixture_updated',
+            array_intersect_key($before, array_flip($changed)),
+            array_intersect_key($match->only(['map', 'scheduled_at']), array_flip($changed)),
+        );
+
+        return back()->with('status', sprintf('%s updated.', $match->label()));
     }
 
     /**

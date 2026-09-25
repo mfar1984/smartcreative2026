@@ -129,6 +129,31 @@ class TournamentSettingsController extends Controller
     }
 
     /**
+     * The maps a battle royale fixture may be set to, as a list.
+     *
+     * Held here because this is where the pool is written. Stored one per line, which
+     * is how an operator writes a list; handed back as an array, which is how a
+     * dropdown needs it.
+     *
+     * Read live rather than from a tournament's frozen settings copy. The pool is a
+     * set of suggestions for whoever is filling a form in, not a rule the tournament
+     * was run under, so a map added this morning should appear this morning.
+     *
+     * @return array<int, string>
+     */
+    public static function mapPool(): array
+    {
+        $stored = Setting::where('key', self::GROUP . '.map_pool')->value('value');
+
+        return collect(preg_split('/\r\n|\r|\n/', (string) ($stored ?? self::DEFAULTS['map_pool'])))
+            ->map(fn ($map) => trim($map))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
      * The current values, with defaults where nothing has been saved.
      *
      * @return array<string, mixed>

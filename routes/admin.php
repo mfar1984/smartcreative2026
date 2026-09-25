@@ -418,6 +418,15 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware(['permission:tournaments.matches.score', 'throttle:20,1'])
                 ->name('matches.score.clear');
 
+            /*
+            | The map a fixture is on and when it starts. Behind the draw permission
+            | rather than the scoring one: this decides what the fixture is, not what
+            | its result was, which is the same question generating a draw answers.
+            */
+            Route::put('matches/{match}/fixture', [MatchController::class, 'updateFixture'])
+                ->middleware(['permission:tournaments.matches.generate', 'throttle:60,1'])
+                ->name('matches.fixture.update');
+
             Route::get('standings', [StandingController::class, 'index'])
                 ->middleware('permission:tournaments.standings.view')->name('standings');
 

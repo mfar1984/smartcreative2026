@@ -156,7 +156,20 @@
                                         @endif
                                     </td>
 
-                                    <td class="px-5 py-3 text-xs text-gray-600">{{ $match->map ?? '—' }}</td>
+                                    <td class="px-5 py-3 text-xs text-gray-600">
+                                        {{ $match->map ?? '—' }}
+                                        @if ($canEditFixture)
+                                            <button type="button"
+                                                    data-open-fixture="{{ $match->id }}"
+                                                    class="ml-1 p-1 rounded text-gray-400 hover:bg-blue-50 hover:text-blue-600 transition align-middle"
+                                                    title="Change the map or the time for {{ $match->label() }}"
+                                                    aria-label="Change the map or the time for {{ $match->label() }}">
+                                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                                                </svg>
+                                            </button>
+                                        @endif
+                                    </td>
 
                                     <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
                                         {{ $match->scheduled_at?->format('d M, g:i a') ?? '—' }}
@@ -223,5 +236,175 @@
                 </div>
             </div>
         @endif
+
+        {{--
+            One dialog per fixture, drawn outside the table.
+
+            The table sits in an overflow-x-auto wrapper, and a fixed overlay nested
+            inside one gets clipped by it, so these live out here and are matched to
+            their button by id.
+        --}}
+        @if ($canEditFixture && $matches)
+            @foreach ($matches as $match)
+                <div id="fixture-modal-{{ $match->id }}"
+                     data-fixture-modal="{{ $match->id }}"
+                     class="fixed inset-0 z-50 overflow-y-auto hidden"
+                     role="dialog"
+                     aria-modal="true"
+                     aria-labelledby="fixture-title-{{ $match->id }}">
+
+                    <div class="fixed inset-0 bg-gray-900/60" data-close-fixture></div>
+
+                    <div class="relative min-h-full flex items-center justify-center p-4">
+                        <div class="relative w-full max-w-md bg-white rounded-xl shadow-2xl my-8">
+
+                            <div class="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                                <div class="min-w-0">
+                                    <h2 id="fixture-title-{{ $match->id }}" class="text-lg font-bold text-gray-900">
+                                        {{ $match->label() }}
+                                    </h2>
+                                    <p class="text-xs text-gray-500 mt-0.5">
+                                        {{ $match->stage?->name }}
+                                        @if ($match->group)
+                                            &middot; {{ $match->group->name }}
+                                        @endif
+                                    </p>
+                                </div>
+
+                                <button type="button" data-close-fixture
+                                        class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition shrink-0"
+                                        aria-label="Close">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <form action="{{ route('admin.tournaments.matches.fixture.update', $match) }}" method="POST"
+                                  class="px-6 py-5 space-y-4">
+                                @csrf
+                                @method('PUT')
+
+                                <div>
+                                    <label for="map-{{ $match->id }}" class="block text-xs font-semibold text-gray-700 mb-1">Map</label>
+
+                                    {{-- A list with a free text box behind it, because the
+                                         pool is a convenience and a map that is not on it
+                                         still has to be typeable. --}}
+                                    <input type="text" id="map-{{ $match->id }}" name="map" maxlength="60"
+                                           value="{{ $match->map }}"
+                                           list="map-pool"
+                                           placeholder="Leave empty for no map"
+                                           class="{{ $filterInput }} w-full">
+
+                                    <p class="text-xs text-gray-400 mt-1">
+                                        Pick from the pool or type any name. Empty shows a dash on the list.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label for="when-{{ $match->id }}" class="block text-xs font-semibold text-gray-700 mb-1">Starts at</label>
+                                    <input type="datetime-local" id="when-{{ $match->id }}" name="scheduled_at"
+                                           value="{{ $match->scheduled_at?->format('Y-m-d\TH:i') }}"
+                                           class="{{ $filterInput }} w-full">
+                                    <p class="text-xs text-gray-400 mt-1">
+                                        Set by the draw from the event date and the buffer between matches.
+                                    </p>
+                                </div>
+
+                                @if ($match->isSettled())
+                                    <p class="rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-xs text-gray-600">
+                                        This fixture has been played. Neither field is part of the result, so
+                                        changing them here corrects the record without touching the standings.
+                                    </p>
+                                @endif
+
+                                <div class="flex items-center justify-end gap-2 pt-1">
+                                    <button type="button" data-close-fixture
+                                            class="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                        Cancel
+                                    </button>
+                                    <button type="submit"
+                                            class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                        Save
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            @endforeach
+
+            {{-- One shared pool for every dialog on the page. --}}
+            <datalist id="map-pool">
+                @foreach ($mapPool as $map)
+                    <option value="{{ $map }}"></option>
+                @endforeach
+            </datalist>
+        @endif
     </x-admin.settings-shell>
 @endsection
+
+@push('scripts')
+<script>
+    /*
+     | Opening and closing the fixture dialogs.
+     |
+     | One per row, each holding an ordinary PUT form. The script only shows and
+     | hides them; nothing about the submission depends on JavaScript.
+     */
+    (function () {
+        const dialogs = Array.from(document.querySelectorAll('[data-fixture-modal]'));
+
+        if (dialogs.length === 0) {
+            return;
+        }
+
+        function dialogFor(id) {
+            return dialogs.find((node) => node.getAttribute('data-fixture-modal') === String(id)) || null;
+        }
+
+        function close(dialog) {
+            dialog.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+        }
+
+        function closeAll() {
+            dialogs.forEach(close);
+        }
+
+        document.querySelectorAll('[data-open-fixture]').forEach(function (trigger) {
+            trigger.addEventListener('click', function () {
+                const dialog = dialogFor(trigger.getAttribute('data-open-fixture'));
+
+                if (!dialog) {
+                    return;
+                }
+
+                closeAll();
+                dialog.classList.remove('hidden');
+
+                // The scroll lock belongs to whichever dialog is open, and only one
+                // can be, so it is set rather than counted.
+                document.body.classList.add('overflow-hidden');
+
+                dialog.querySelector('input:not([type=hidden]):not([disabled])')?.focus();
+            });
+        });
+
+        dialogs.forEach(function (dialog) {
+            dialog.querySelectorAll('[data-close-fixture]').forEach(function (trigger) {
+                trigger.addEventListener('click', function () {
+                    close(dialog);
+                });
+            });
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                closeAll();
+            }
+        });
+    })();
+</script>
+@endpush
