@@ -489,7 +489,25 @@
                                     <input type="number" id="stage-count" name="match_count" min="1" max="32" value="3"
                                            class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
                                     <p class="text-xs text-gray-500 mt-1">
-                                        Lobbies and heats: how many matches each plays. Groups: how many groups.
+                                        Lobbies: how many matches every team plays. Heats: how many heats,
+                                        each played once. Groups: how many groups.
+                                    </p>
+                                </div>
+
+                                {{-- Lobbies only. Sixteen was hard-coded on the PMPL
+                                     convention, which split a field of twenty into two
+                                     lobbies of ten. A custom room takes more than that,
+                                     so whoever runs the competition says how many. --}}
+                                <div>
+                                    <label for="stage-capacity" class="block text-xs font-semibold text-gray-700 mb-1">
+                                        Teams per lobby
+                                    </label>
+                                    <input type="number" id="stage-capacity" name="lobby_capacity" min="2" max="128"
+                                           placeholder="16"
+                                           class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        Lobbies only. Leave empty for 16. Set it to your field size to keep
+                                        everybody in one room; anything smaller splits them across lobbies.
                                     </p>
                                 </div>
                             </div>

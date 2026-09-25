@@ -27,6 +27,10 @@ class StageController extends Controller
             'type' => ['required', Rule::in(array_keys(TournamentStage::TYPES))],
             'advance_count' => ['nullable', 'integer', 'min:0', 'max:512'],
             'match_count' => ['nullable', 'integer', 'min:1', 'max:32'],
+
+            // Only a lobby reads this. Left null the generator uses sixteen, which is
+            // what every stage drawn before this field existed was drawn with.
+            'lobby_capacity' => ['nullable', 'integer', 'min:2', 'max:128'],
             'best_of' => ['array'],
             'best_of.*' => ['nullable', 'integer', 'min:1', 'max:9'],
         ], [
@@ -44,6 +48,7 @@ class StageController extends Controller
             'sequence' => (int) $tournament->stages()->max('sequence') + 1,
             'advance_count' => $data['advance_count'] ?? 0,
             'match_count' => $data['match_count'] ?? 1,
+            'lobby_capacity' => $data['lobby_capacity'] ?? null,
             'best_of' => $bestOf === [] ? ['1' => 1] : $bestOf,
             'status' => TournamentStage::STATUS_PENDING,
         ]);

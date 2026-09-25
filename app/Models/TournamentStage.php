@@ -50,6 +50,7 @@ class TournamentStage extends Model
         'sequence',
         'advance_count',
         'match_count',
+        'lobby_capacity',
         'best_of',
         'status',
         'drawn_at',
@@ -62,6 +63,7 @@ class TournamentStage extends Model
             'sequence' => 'integer',
             'advance_count' => 'integer',
             'match_count' => 'integer',
+            'lobby_capacity' => 'integer',
             'best_of' => 'array',
             'drawn_at' => 'datetime',
         ];

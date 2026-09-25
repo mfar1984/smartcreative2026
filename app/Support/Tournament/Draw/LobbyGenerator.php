@@ -22,7 +22,15 @@ use Illuminate\Support\Facades\DB;
  */
 final class LobbyGenerator implements DrawGenerator
 {
-    private const LOBBY_CAPACITY = 16;
+    /**
+     * Used when the stage does not say.
+     *
+     * Sixteen squads is the PMPL convention and was hard-coded here, which split a
+     * field of twenty into two lobbies of ten. A custom room holds more than that, so
+     * the number belongs to whoever is running the competition. Kept as the fallback
+     * so a stage drawn before the setting existed keeps the shape it was drawn with.
+     */
+    private const DEFAULT_CAPACITY = 16;
 
     public function refusal(TournamentStage $stage, Collection $entrants): ?string
     {
@@ -39,7 +47,7 @@ final class LobbyGenerator implements DrawGenerator
 
     public function generate(TournamentStage $stage, Collection $entrants): void
     {
-        $lobbyCount = (int) ceil($entrants->count() / self::LOBBY_CAPACITY);
+        $lobbyCount = (int) ceil($entrants->count() / $this->capacity($stage));
         $rotation = $this->rotation($stage);
 
         DB::transaction(function () use ($stage, $entrants, $lobbyCount, $rotation) {
@@ -125,6 +133,17 @@ final class LobbyGenerator implements DrawGenerator
         }
 
         return $buckets;
+    }
+
+    /**
+     * How many entrants fit in one lobby.
+     *
+     * Clamped at one so a zero or a negative left in the column cannot divide by
+     * nothing and ask for an infinite number of lobbies.
+     */
+    private function capacity(TournamentStage $stage): int
+    {
+        return max(1, (int) ($stage->lobby_capacity ?: self::DEFAULT_CAPACITY));
     }
 
     /**
