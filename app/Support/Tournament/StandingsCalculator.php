@@ -57,6 +57,18 @@ final class StandingsCalculator
      */
     private function recalculateStage(Tournament $tournament, TournamentStage $stage, $rule): void
     {
+        /*
+         | A stage nobody has drawn yet has no table.
+         |
+         | Without this it fell through to the no-groups branch below, which is meant
+         | for a bracket, and produced a full table of every entrant on zero points for
+         | a stage that does not exist. On the public ranking page that read as a
+         | tournament where nineteen teams were somehow all in first place.
+         */
+        if (! $stage->hasDraw()) {
+            return;
+        }
+
         $lines = TournamentMatchEntrant::query()
             ->whereHas('match', fn ($q) => $q
                 ->where('tournament_stage_id', $stage->id)
@@ -88,11 +100,25 @@ final class StandingsCalculator
                 ? $lines
                 : $lines->where('match.tournament_group_id', $groupId);
 
-            // Who belongs in this group's table: whoever has a line in it. A bracket
-            // stage has no groups, so everybody who played is in the one table.
+            /*
+             | Who belongs in this group's table.
+             |
+             | Whoever is drawn into it, not whoever has played in it. Reading it from
+             | the played lines alone left a lobby's table empty until the first result
+             | landed, which is the opposite of the intention stated above: a table is
+             | meant to be populated from the start so it is not blank for the first
+             | hour of a tournament. A bracket stage has no groups, so everybody in the
+             | tournament is in the one table.
+             */
             $entrantIds = $groupId === null
                 ? $entrants->keys()
-                : $groupLines->pluck('tournament_entrant_id')->unique()->values();
+                : TournamentMatchEntrant::query()
+                    ->whereHas('match', fn ($query) => $query
+                        ->where('tournament_stage_id', $stage->id)
+                        ->where('tournament_group_id', $groupId))
+                    ->whereNotNull('tournament_entrant_id')
+                    ->distinct()
+                    ->pluck('tournament_entrant_id');
 
             if ($entrantIds->isEmpty()) {
                 continue;

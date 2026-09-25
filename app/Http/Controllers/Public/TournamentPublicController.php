@@ -8,6 +8,7 @@ use App\Models\Tournament;
 use App\Models\TournamentChampion;
 use App\Models\TournamentMatch;
 use App\Models\TournamentPlayerAward;
+use App\Models\TournamentStage;
 
 /**
  * What the public sees.
@@ -104,21 +105,56 @@ class TournamentPublicController extends Controller
                 continue;
             }
 
-            $finalStage = $tournament->stages()->orderByDesc('sequence')->first();
+            /*
+             | The stage being played, not the last one in the list.
+             |
+             | Taking the last stage showed a visitor the Grand Final's table while the
+             | qualifiers were being played, which is empty, because the final has not
+             | been drawn yet and nobody has qualified for it. What somebody opening
+             | this page wants is whatever is happening now: the earliest drawn stage
+             | that still has a fixture outstanding, falling back to the last drawn one
+             | once everything has been played.
+             */
+            $drawn = $tournament->stages()
+                ->whereNotNull('drawn_at')
+                ->orderBy('sequence')
+                ->get();
+
+            $finalStage = $drawn->first(fn (TournamentStage $stage) => ! $stage->isPlayedOut())
+                ?? $drawn->last();
 
             if ($finalStage === null) {
                 continue;
             }
 
-            $total = $tournament->matches()->count();
-            $done = $tournament->matches()->whereIn('status', [
+            /*
+             | Counted over the stage on screen rather than the whole tournament, so
+             | "match 2 of 5" refers to the table underneath it. Counting every fixture
+             | in the tournament made the qualifiers read as two of ten while five were
+             | all that had been drawn.
+             */
+            $total = $finalStage->matches()->count();
+            $done = $finalStage->matches()->whereIn('status', [
                 TournamentMatch::STATUS_COMPLETED,
                 TournamentMatch::STATUS_WALKOVER,
             ])->count();
 
+            $nextFixture = $finalStage->matches()
+                ->whereIn('status', [TournamentMatch::STATUS_SCHEDULED, TournamentMatch::STATUS_AWAITING])
+                ->orderBy('scheduled_at')
+                ->orderBy('position')
+                ->first();
+
             $boards[] = [
                 'tournament' => $tournament,
                 'stage' => $finalStage,
+
+                // Where the cut is, so the page can draw the line somebody has to
+                // finish above. Zero on a last stage, where there is nothing to
+                // qualify for.
+                'advance_count' => (int) $finalStage->advance_count,
+
+                'next_fixture' => $nextFixture,
                 'columns' => collect($tournament->pointRule?->components ?? [])
                     ->map(fn (array $c) => [
                         'key' => $c['key'],
