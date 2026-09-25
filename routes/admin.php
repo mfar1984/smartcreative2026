@@ -408,6 +408,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::post('matches/{match}/resolve', [MatchController::class, 'resolve'])
                 ->middleware('permission:tournaments.matches.score')->name('matches.resolve');
 
+            /*
+            | Blanking a result, for the figure that should never have been entered.
+            | Behind the same permission as entering one, the way publishing a podium
+            | and withdrawing it share theirs: whoever decides a result is the person
+            | who decides it was not one.
+            */
+            Route::delete('matches/{match}/score', [MatchController::class, 'clear'])
+                ->middleware(['permission:tournaments.matches.score', 'throttle:20,1'])
+                ->name('matches.score.clear');
+
             Route::get('standings', [StandingController::class, 'index'])
                 ->middleware('permission:tournaments.standings.view')->name('standings');
 

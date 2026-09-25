@@ -102,6 +102,24 @@ final class DrawFactory
             'drawn_at' => null,
             'drawn_by' => null,
         ]);
+
+        /*
+         | The counterpart of generate() moving the tournament to ongoing. Once no
+         | stage holds a draw, nothing has been played and nothing is scheduled, so the
+         | tournament is being set up again and its entrants should be editable.
+         |
+         | Without this a tournament that had every draw thrown away stayed Ongoing for
+         | ever, with its entrant list locked and the refusal telling the operator to
+         | discard a draw that no longer existed.
+         */
+        $stage->tournament->refresh();
+
+        if ($stage->tournament->stages()->whereNotNull('drawn_at')->doesntExist()) {
+            $stage->tournament->update([
+                'status' => Tournament::STATUS_SETUP,
+                'draw_generated_at' => null,
+            ]);
+        }
     }
 
     /**

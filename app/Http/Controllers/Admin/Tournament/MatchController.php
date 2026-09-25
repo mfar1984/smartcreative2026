@@ -8,6 +8,7 @@ use App\Models\PointRule;
 use App\Models\Tournament;
 use App\Models\TournamentEntrant;
 use App\Models\TournamentMatch;
+use App\Models\TournamentMatchEntrant;
 use App\Models\TournamentMatchPlayer;
 use App\Models\TournamentStage;
 use App\Services\AdminLogger;
@@ -382,6 +383,227 @@ class MatchController extends Controller
         return redirect()
             ->route('admin.tournaments.matches', ['tournament' => $tournament->id, 'tab' => 'completed'])
             ->with('status', sprintf('%s scored. Standings updated.', $match->label()));
+    }
+
+    /**
+     * Blank a result and put the fixture back to Scheduled.
+     *
+     * Correcting a score has always been possible: saving the form again rewrites it.
+     * What was missing is the case where nothing should have been entered at all, and
+     * a wrong figure typed once was enough to freeze the whole tournament. Generating
+     * the first draw moves a tournament to Ongoing, which locks its entrants; the
+     * draw could be discarded to get back, but discarding is refused the moment
+     * anything is scored. So one mistaken score was a dead end.
+     *
+     * Standings need no surgery. They are a stored table that StandingsCalculator
+     * deletes and rebuilds from the match rows on every save, so once this fixture
+     * holds no result the rebuild simply leaves it out.
+     *
+     * Three things are refused rather than guessed at, because StageAdvancer only
+     * moves competitors forward and has no counterpart that unwinds them:
+     *
+     * A published podium. The same refusal scoring gives, for the same reason.
+     *
+     * A result that has been built on. If the winner of this fixture went on to play
+     * a fixture that is itself settled, clearing this one would leave that result
+     * describing a match between competitors who never earned their place.
+     *
+     * A later stage that is already drawn. That draw was built from these standings,
+     * so changing them underneath it would leave a bracket nobody qualified for.
+     */
+    public function clear(
+        Request $request,
+        TournamentMatch $match,
+        StandingsCalculator $calculator,
+        PlayerStandingsCalculator $playerCalculator,
+    ) {
+        $match->load(['tournament', 'stage', 'entrants']);
+        $tournament = $match->tournament;
+
+        if (! $match->isSettled()) {
+            return back()->withErrors(['score' => sprintf(
+                '%s has no result to clear.',
+                $match->label(),
+            )]);
+        }
+
+        if ($tournament->isPublished()) {
+            return back()->withErrors(['score' => 'The podium for this tournament is published. Withdraw it before clearing a result.']);
+        }
+
+        if ($blocked = $this->clearRefusal($match)) {
+            return back()->withErrors(['score' => $blocked]);
+        }
+
+        $label = $match->label();
+        $stage = $match->stage;
+        $reopenedStage = $stage !== null && $stage->status === TournamentStage::STATUS_COMPLETED;
+
+        // Read before anything is blanked: afterwards the match no longer says who
+        // won, so there is no way to work out who it knocked out.
+        $loserIds = $match->entrants
+            ->pluck('tournament_entrant_id')
+            ->filter()
+            ->reject(fn ($id) => (int) $id === (int) $match->winner_entrant_id)
+            ->all();
+
+        DB::transaction(function () use ($match, $stage, $reopenedStage, $loserIds, $tournament, $request) {
+            $before = $match->entrants->mapWithKeys(
+                fn ($line) => [$line->tournament_entrant_id => $line->inputs],
+            )->all();
+
+            // Take the competitors back out of whatever this fixture fed. Checked
+            // above to be unsettled, so nothing is being unpicked from a played match.
+            $this->unseat($match->winner_to_match_id, $match->winner_to_slot);
+            $this->unseat($match->loser_to_match_id, $match->loser_to_slot);
+
+            foreach ($match->entrants as $line) {
+                // The personal figures go with the result. They describe a match that
+                // is no longer recorded as having been played.
+                $line->players()->delete();
+
+                $line->update([
+                    'inputs' => null,
+                    'points' => 0,
+                    'component_points' => null,
+                    'component_counts' => null,
+                    'is_disqualified' => false,
+                ]);
+            }
+
+            $match->update([
+                'status' => TournamentMatch::STATUS_SCHEDULED,
+                'winner_entrant_id' => null,
+                'resolution' => null,
+                'reason' => null,
+                'scored_by' => null,
+                'scored_at' => null,
+            ]);
+
+            /*
+             | Whoever this fixture knocked out is back in. Only those it knocked out:
+             | a competitor an earlier round eliminated stays eliminated, and one who
+             | was disqualified or withdrew is not touched at all, because neither was
+             | a consequence of this score.
+             */
+            if ($loserIds !== []) {
+                TournamentEntrant::whereIn('id', $loserIds)
+                    ->where('status', TournamentEntrant::STATUS_ELIMINATED)
+                    ->update(['status' => TournamentEntrant::STATUS_ACTIVE]);
+            }
+
+            if ($reopenedStage && $stage !== null) {
+                $stage->update(['status' => TournamentStage::STATUS_ONGOING]);
+
+                /*
+                 | Closing a stage eliminates everybody its standings did not advance.
+                 | The stage is being played again, so that has to come undone. Scoped
+                 | to competitors who actually appear in this stage's fixtures, so an
+                 | earlier stage's casualties are left where they are.
+                 */
+                $inThisStage = TournamentMatchEntrant::query()
+                    ->whereHas('match', fn ($query) => $query->where('tournament_stage_id', $stage->id))
+                    ->whereNotNull('tournament_entrant_id')
+                    ->pluck('tournament_entrant_id');
+
+                TournamentEntrant::whereIn('id', $inThisStage)
+                    ->where('status', TournamentEntrant::STATUS_ELIMINATED)
+                    ->update(['status' => TournamentEntrant::STATUS_ACTIVE]);
+            }
+
+            // A finished tournament has something left to play again.
+            if ($tournament->status === Tournament::STATUS_COMPLETED) {
+                $tournament->update([
+                    'status' => Tournament::STATUS_ONGOING,
+                    'completed_at' => null,
+                ]);
+            }
+
+            AdminLogger::audit($match, 'tournament.match_result_cleared', $before, null);
+        });
+
+        // Both tables are counted from the match rows, so with this fixture holding
+        // no result its contribution simply disappears.
+        $calculator->recalculate($tournament->fresh());
+        $playerCalculator->recalculate($tournament->fresh());
+
+        AdminLogger::activity('tournaments.matches.score', sprintf(
+            'Cleared the result of %s in %s.',
+            $label,
+            $tournament->name,
+        ));
+
+        return redirect()
+            ->route('admin.tournaments.matches', ['tournament' => $tournament->id, 'tab' => 'scheduled'])
+            ->with('status', sprintf(
+                '%s cleared and put back to Scheduled. Standings worked out again without it.%s',
+                $label,
+                $tournament->matches()->whereNotNull('scored_at')->exists()
+                    ? ''
+                    : ' Nothing is scored in this tournament now, so its draw can be discarded again.',
+            ));
+    }
+
+    /**
+     * Why this result cannot be cleared, or null when it can.
+     */
+    private function clearRefusal(TournamentMatch $match): ?string
+    {
+        foreach ([$match->winner_to_match_id, $match->loser_to_match_id] as $onwardId) {
+            if ($onwardId === null) {
+                continue;
+            }
+
+            $onward = TournamentMatch::find($onwardId);
+
+            if ($onward?->isSettled()) {
+                return sprintf(
+                    '%s fed %s, which has been played. Clear %s first, or this result would be taken away from underneath it.',
+                    $match->label(),
+                    $onward->label(),
+                    $onward->label(),
+                );
+            }
+        }
+
+        $stage = $match->stage;
+
+        if ($stage === null) {
+            return null;
+        }
+
+        $drawnLater = $stage->tournament
+            ->stages()
+            ->where('sequence', '>', $stage->sequence)
+            ->whereNotNull('drawn_at')
+            ->first();
+
+        if ($drawnLater !== null) {
+            return sprintf(
+                '%s was drawn from this stage\'s standings. Discard that draw before changing what it was built on.',
+                $drawnLater->name,
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * Empty the slot this fixture seated somebody into.
+     *
+     * The line itself stays, because the draw wrote it to describe a place in the
+     * bracket. Only who is sitting in it is removed.
+     */
+    private function unseat(?int $matchId, ?int $slot): void
+    {
+        if ($matchId === null || $slot === null) {
+            return;
+        }
+
+        TournamentMatchEntrant::query()
+            ->where('tournament_match_id', $matchId)
+            ->where('slot', $slot)
+            ->update(['tournament_entrant_id' => null]);
     }
 
     /**

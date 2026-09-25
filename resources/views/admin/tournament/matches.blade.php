@@ -164,10 +164,30 @@
 
                                     <td class="px-5 py-3 text-center whitespace-nowrap">
                                         @if ($canScore && $match->isReady())
-                                            <a href="{{ route('admin.tournaments.matches.score', $match) }}"
-                                               class="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition">
-                                                {{ $match->isSettled() ? 'Correct' : 'Enter Score' }}
-                                            </a>
+                                            <div class="inline-flex items-center gap-1.5">
+                                                <a href="{{ route('admin.tournaments.matches.score', $match) }}"
+                                                   class="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition">
+                                                    {{ $match->isSettled() ? 'Correct' : 'Enter Score' }}
+                                                </a>
+
+                                                {{-- Only for a fixture that holds one. Correcting a
+                                                     result replaces it; this is for the figure that
+                                                     should never have been entered, which used to
+                                                     leave the whole tournament frozen: the draw
+                                                     cannot be discarded once anything is scored. --}}
+                                                @if ($match->isSettled())
+                                                    <form action="{{ route('admin.tournaments.matches.score.clear', $match) }}" method="POST"
+                                                          onsubmit="return confirm('Clear the result of {{ addslashes($match->label()) }}?\n\nThe fixture goes back to Scheduled and the standings are worked out again without it. This cannot be undone.');">
+                                                        @csrf
+                                                        @method('DELETE')
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 transition"
+                                                                title="Blank this result and put the fixture back to Scheduled">
+                                                            Clear
+                                                        </button>
+                                                    </form>
+                                                @endif
+                                            </div>
                                         @elseif (! $match->isReady())
                                             <span class="text-xs text-gray-400">Not ready</span>
                                         @else
