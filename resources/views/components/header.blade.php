@@ -48,6 +48,68 @@
                     Shop
                 </a>
                 
+                {{-- Results.
+
+                     Left out entirely while there is nothing behind it, the same rule
+                     the basket below follows. A dropdown because the live table belongs
+                     to one event and there can be more than one, so the menu has to say
+                     which rather than guess. --}}
+                @unless (App\Support\PublicResults::isEmpty())
+                    <div class="relative group">
+                        <a href="{{ App\Support\PublicResults::anyLive()
+                                ? route('events.ranking', App\Support\PublicResults::live()->first()->event->slug)
+                                : route('hall-of-fame') }}"
+                           data-nav-link
+                           class="text-white hover:text-blue-300 font-medium transition flex items-center gap-2 {{ request()->routeIs('events.ranking') || request()->routeIs('hall-of-fame') ? 'text-blue-300' : '' }}">
+
+                            {{-- A match is being played, so the menu says so before
+                                 anybody has to open anything. --}}
+                            @if (App\Support\PublicResults::anyLive())
+                                <span class="relative flex w-2 h-2" aria-hidden="true">
+                                    <span class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                                    <span class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
+                                </span>
+                            @endif
+
+                            Results
+
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </a>
+
+                        <div class="absolute left-0 mt-2 w-72 bg-white rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                            <div class="py-2">
+                                @foreach (App\Support\PublicResults::live() as $liveTournament)
+                                    <a href="{{ route('events.ranking', $liveTournament->event->slug) }}"
+                                       class="flex items-start gap-2.5 px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition">
+                                        <span class="relative flex w-2 h-2 mt-1.5 shrink-0" aria-hidden="true">
+                                            <span class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                                            <span class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
+                                        </span>
+                                        <span class="min-w-0">
+                                            <span class="block text-xs font-bold uppercase tracking-wide text-red-600">Live standings</span>
+                                            <span class="block font-semibold leading-snug">{{ $liveTournament->event->title }}</span>
+                                        </span>
+                                    </a>
+                                @endforeach
+
+                                @if (App\Support\PublicResults::anyLive() && App\Support\PublicResults::hasHallOfFame())
+                                    <div class="my-1.5 border-t border-gray-100"></div>
+                                @endif
+
+                                @if (App\Support\PublicResults::hasHallOfFame())
+                                    <a href="{{ route('hall-of-fame') }}"
+                                       class="block px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition">
+                                        <span class="font-semibold">Hall of Fame</span>
+                                        <span class="block text-xs text-gray-500 mt-0.5">Every podium we have announced</span>
+                                    </a>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                @endunless
+
                 <a href="{{ route('contact') }}" data-nav-link class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('contact') ? 'text-blue-300' : '' }}">
                     Contact
                 </a>
@@ -115,6 +177,32 @@
                     Shop
                 </a>
                 
+                {{-- Results, listed flat rather than behind another toggle. There are
+                     rarely more than two of these, and a second collapsible on a phone
+                     is one more tap between somebody and the table they came for. --}}
+                @unless (App\Support\PublicResults::isEmpty())
+                    @foreach (App\Support\PublicResults::live() as $liveTournament)
+                        <a href="{{ route('events.ranking', $liveTournament->event->slug) }}" data-nav-link
+                           class="flex items-start gap-2.5 text-white hover:text-blue-300 font-medium transition">
+                            <span class="relative flex w-2 h-2 mt-2 shrink-0" aria-hidden="true">
+                                <span class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                                <span class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
+                            </span>
+                            <span class="min-w-0">
+                                <span class="block text-xs font-bold uppercase tracking-wide text-red-400">Live standings</span>
+                                <span class="block leading-snug">{{ $liveTournament->event->title }}</span>
+                            </span>
+                        </a>
+                    @endforeach
+
+                    @if (App\Support\PublicResults::hasHallOfFame())
+                        <a href="{{ route('hall-of-fame') }}" data-nav-link
+                           class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('hall-of-fame') ? 'text-blue-300' : '' }}">
+                            Hall of Fame
+                        </a>
+                    @endif
+                @endunless
+
                 <a href="{{ route('contact') }}" data-nav-link class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('contact') ? 'text-blue-300' : '' }}">
                     Contact
                 </a>
