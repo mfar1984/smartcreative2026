@@ -313,11 +313,57 @@ class PlayerScoringTest extends TestCase
             ->orderByDesc('total_points')
             ->first();
 
-        $this->assertSame('Team 1 Player 1', $overall->display_name);
+        /*
+         | The label this row carries is the one the public leaderboard and the
+         | published awards print, so it is what the competitor plays under rather than
+         | what is written on their identity card. This fixture gives nobody an in-game
+         | name, so it falls back to the game account id.
+         */
+        $this->assertSame('ID T1P1', $overall->display_name);
+        $this->assertStringNotContainsString('Team 1 Player 1', $overall->display_name);
         $this->assertSame('T1P1', $overall->ign);
+
         $this->assertSame(2, $overall->matches_played);
         $this->assertSame(10.0, $overall->total_points);
         $this->assertSame(3500, $overall->componentCount('damage'));
+    }
+
+    /**
+     * The in-game name wins when there is one.
+     *
+     * The order matters because it decides what a stranger reading the website sees: a
+     * nickname, a game account id, or somebody's legal name. Only the first two are
+     * acceptable, and this pins which.
+     */
+    public function test_a_player_is_labelled_by_what_they_play_under(): void
+    {
+        $withNickname = new \App\Models\EventParticipant([
+            'full_name' => 'Mohd Faizan Bin Rahman',
+            'ign_name' => 'ShadowX',
+            'ign_player_id' => '51209884',
+        ]);
+
+        $withIdOnly = new \App\Models\EventParticipant([
+            'full_name' => 'Mohd Faizan Bin Rahman',
+            'ign_player_id' => '51209884',
+        ]);
+
+        $withNeither = new \App\Models\EventParticipant([
+            'full_name' => 'Mohd Faizan Bin Rahman',
+        ]);
+
+        $this->assertSame('ShadowX', PlayerStandingsCalculator::publicLabel($withNickname));
+        $this->assertSame('ID 51209884', PlayerStandingsCalculator::publicLabel($withIdOnly));
+        $this->assertSame('Unnamed player', PlayerStandingsCalculator::publicLabel($withNeither));
+        $this->assertSame('Unnamed player', PlayerStandingsCalculator::publicLabel(null));
+
+        // Never, under any of the three.
+        foreach ([$withNickname, $withIdOnly, $withNeither] as $person) {
+            $this->assertStringNotContainsString(
+                'Mohd Faizan',
+                PlayerStandingsCalculator::publicLabel($person),
+            );
+        }
     }
 
     /**

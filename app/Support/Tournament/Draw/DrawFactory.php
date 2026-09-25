@@ -26,9 +26,66 @@ final class DrawFactory
             return 'This stage already has a draw. Discard it before generating another.';
         }
 
+        if ($waiting = $this->unfinishedEarlierStage($stage)) {
+            return $waiting;
+        }
+
         $entrants = $this->entrantsFor($stage);
 
         return $this->generatorFor($stage)->refusal($stage, $entrants);
+    }
+
+    /**
+     * Why an earlier stage means this one cannot be drawn yet, or null.
+     *
+     * A draw takes whoever is active, and nobody is eliminated until the stage they are
+     * in has been played out. So drawing a Grand Final while the qualifiers are still
+     * being played does not draw the qualifiers: it draws the entire field into the
+     * final, silently, and the press that does it looks exactly like the press that
+     * would have been right an hour later.
+     *
+     * Checked here rather than in a generator because it is true of every format, and
+     * because refusal() is read by the screen to decide what to say under the button as
+     * well as by generate() to decide whether to write anything.
+     */
+    private function unfinishedEarlierStage(TournamentStage $stage): ?string
+    {
+        $earlier = $stage->tournament
+            ?->stages()
+            ->where('sequence', '<', $stage->sequence)
+            ->orderBy('sequence')
+            ->get();
+
+        if ($earlier === null) {
+            return null;
+        }
+
+        foreach ($earlier as $previous) {
+            // Never drawn at all. Nothing has been played, so nothing has qualified.
+            if (! $previous->hasDraw()) {
+                return sprintf(
+                    '%s has not been drawn yet, so nobody has qualified for this stage.',
+                    $previous->name,
+                );
+            }
+
+            if ($previous->isPlayedOut()) {
+                continue;
+            }
+
+            $outstanding = $previous->matches()
+                ->whereIn('status', [TournamentMatch::STATUS_SCHEDULED, TournamentMatch::STATUS_AWAITING])
+                ->count();
+
+            return sprintf(
+                '%s has %d %s still to play. Drawing this stage now would enter every team rather than the ones who qualify.',
+                $previous->name,
+                $outstanding,
+                $outstanding === 1 ? 'fixture' : 'fixtures',
+            );
+        }
+
+        return null;
     }
 
     /**

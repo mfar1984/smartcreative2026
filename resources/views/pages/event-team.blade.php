@@ -254,14 +254,9 @@
                 <div class="px-5 md:px-7 py-5 flex flex-wrap gap-2">
                     @forelse ($registration->participants as $person)
                         @php
-                            /*
-                             | What this person is called in public, in order of preference:
-                             | the in-game name they typed, then their game account id, and
-                             | only then a placeholder. Never their full name.
-                             */
-                            $label = filled($person->ign_name)
-                                ? $person->ign_name
-                                : (filled($person->ign_player_id) ? 'ID ' . $person->ign_player_id : 'Unnamed player');
+                            // One definition of what a competitor is called in public, shared
+                            // with the player leaderboard so the two cannot drift apart.
+                            $label = \App\Support\Tournament\PlayerStandingsCalculator::publicLabel($person);
 
                             $second = filled($person->ign_name) && filled($person->ign_player_id)
                                 ? $person->ign_player_id

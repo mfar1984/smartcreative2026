@@ -184,15 +184,18 @@
                                                 {{ $award->award_label }}
                                             </p>
 
-                                            {{-- The in-game name where there is one. A person is named
-                                                 here by what they play under, not by anything read off
-                                                 an identity card. --}}
+                                            {{-- display_name is already the public label: the in-game
+                                                 name, falling back to the game account id. Nothing read
+                                                 off an identity card reaches it. --}}
                                             <p class="text-base font-bold text-gray-900 mt-1.5">
-                                                {{ $award->ign ?: $award->display_name }}
+                                                {{ $award->display_name }}
                                             </p>
 
                                             <p class="text-sm text-gray-500 mt-0.5">
                                                 {{ $award->entrant_name }}
+                                                @if ($award->ign && $award->ign !== $award->display_name)
+                                                    &middot; <span class="tabular-nums">{{ $award->ign }}</span>
+                                                @endif
                                                 @if ((float) $award->total_points > 0)
                                                     &middot; <span class="tabular-nums">{{ $award->total_points + 0 }} pts</span>
                                                 @endif

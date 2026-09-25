@@ -2,6 +2,7 @@
 
 namespace App\Support\Tournament;
 
+use App\Models\EventParticipant;
 use App\Models\Tournament;
 use App\Models\TournamentEntrant;
 use App\Models\TournamentMatch;
@@ -91,9 +92,36 @@ final class PlayerStandingsCalculator
             ->with([
                 'matchEntrant:id,tournament_match_id,tournament_entrant_id',
                 'matchEntrant.match:id,tournament_stage_id',
-                'participant:id,event_registration_id,full_name,ign_player_id',
+                'participant:id,event_registration_id,full_name,ign_name,ign_player_id',
             ])
             ->get();
+    }
+
+    /**
+     * What a competitor is called on a page anybody can read.
+     *
+     * In order: the in-game name they registered, then their game account id, then a
+     * placeholder. Never the name on their identity card, which is what this used to be
+     * and which this table carries to the public leaderboard and the published awards.
+     *
+     * Static and public so anything else that has to name a player gets the same answer
+     * rather than inventing its own order.
+     */
+    public static function publicLabel(?EventParticipant $participant): string
+    {
+        if ($participant === null) {
+            return 'Unnamed player';
+        }
+
+        if (filled($participant->ign_name)) {
+            return $participant->ign_name;
+        }
+
+        if (filled($participant->ign_player_id)) {
+            return 'ID ' . $participant->ign_player_id;
+        }
+
+        return 'Unnamed player';
     }
 
     /**
@@ -136,7 +164,21 @@ final class PlayerStandingsCalculator
             $rows[] = [
                 'participant_id' => (int) $participantId,
                 'entrant_id' => $entrantId,
-                'display_name' => $participant?->full_name ?? 'Unknown player',
+
+                /*
+                 | What this person is called in public.
+                 |
+                 | This was their full name as written on their identity card, and this
+                 | table feeds the public leaderboard and the published awards, so that
+                 | name was one entered score away from the website. A competitor is
+                 | named by what they play under: the in-game name they registered,
+                 | then their game account id, and only then a placeholder.
+                 |
+                 | Nothing is lost to whoever runs the tournament: the row still carries
+                 | event_participant_id, so the person behind it is one join away on any
+                 | admin screen that needs them.
+                 */
+                'display_name' => self::publicLabel($participant),
                 'ign' => $participant?->ign_player_id,
                 'matches_played' => $played,
                 'component_totals' => $totals,
