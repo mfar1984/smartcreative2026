@@ -571,27 +571,109 @@ class RolesAndPermissionsSeeder extends Seeder
         ],
     ];
 
+    /**
+     * Install the permission catalogue, and the roles that do not exist yet.
+     *
+     * The lists above are a starting point, not a standing instruction. This used to
+     * end with sync() on every role on every run, which made a role's permissions
+     * exactly what this file said each time the seeder was invoked. Since the seeder
+     * runs on every deployment, every box ticked in Roles Management was undone the
+     * next time the site was updated, and every box unticked came back. Somebody was
+     * re-ticking the same boxes after each release and had no way to know why.
+     *
+     * So a role is written once, when it is created. After that its permissions
+     * belong to whoever is ticking the boxes, and this file stops having an opinion.
+     * Its name, its description and whether it is switched on are left alone for the
+     * same reason.
+     *
+     * The catalogue is different and is still written every run: a permission row has
+     * to exist before it can be granted, and one that has been withdrawn has to go or
+     * it sits on the matrix for ever granting nothing.
+     */
     public function run(): void
     {
         $permissionIds = $this->seedPermissions();
+        $created = [];
 
         foreach (self::ROLES as $slug => $definition) {
-            $role = Role::updateOrCreate(
-                ['slug' => $slug],
-                [
-                    'name' => $definition['name'],
-                    'description' => $definition['description'],
-                    'is_protected' => $definition['is_protected'],
-                    'is_active' => true,
-                ],
-            );
+            $role = Role::where('slug', $slug)->first();
+
+            if ($role !== null) {
+                /*
+                 | Already here. One thing is still enforced: a protected role stays
+                 | protected. That is not a preference somebody might reasonably hold a
+                 | different view about, it is what stops the role carrying full access
+                 | from being deleted by accident.
+                 */
+                if ($definition['is_protected'] && ! $role->is_protected) {
+                    $role->forceFill(['is_protected' => true])->save();
+                }
+
+                continue;
+            }
+
+            $role = Role::create([
+                'slug' => $slug,
+                'name' => $definition['name'],
+                'description' => $definition['description'],
+                'is_protected' => $definition['is_protected'],
+                'is_active' => true,
+            ]);
 
             $granted = $definition['permissions'] === '*'
                 ? array_values($permissionIds)
                 : array_values(array_intersect_key($permissionIds, array_flip($definition['permissions'])));
 
             $role->permissions()->sync($granted);
+
+            $created[] = $slug;
         }
+
+        if ($created !== []) {
+            $this->command?->info(sprintf(
+                'Created %d role(s): %s',
+                count($created),
+                implode(', ', $created),
+            ));
+        }
+
+        $this->reportUngranted($permissionIds);
+    }
+
+    /**
+     * Say which permissions are held by no role at all.
+     *
+     * The cost of no longer syncing: a permission added with a new feature lands in
+     * the catalogue and is granted to nobody, so the button it guards is invisible to
+     * every role. Super Admin is unaffected, because its access does not run through
+     * this table, which is exactly why the gap could otherwise go unnoticed for weeks
+     * by the one person most likely to spot it.
+     *
+     * Said out loud at the end of the deployment rather than left to be discovered.
+     *
+     * @param  array<string, int>  $permissionIds
+     */
+    private function reportUngranted(array $permissionIds): void
+    {
+        $ungranted = Permission::query()
+            ->whereIn('slug', array_keys($permissionIds))
+            ->whereDoesntHave('roles')
+            ->orderBy('sort_order')
+            ->pluck('slug');
+
+        if ($ungranted->isEmpty()) {
+            return;
+        }
+
+        $this->command?->warn(sprintf(
+            '%d permission(s) are granted to no role: %s',
+            $ungranted->count(),
+            $ungranted->implode(', '),
+        ));
+
+        $this->command?->warn(
+            'Super Admin reaches these regardless. Tick them in Roles Management for any other role that needs them.',
+        );
     }
 
     /**
