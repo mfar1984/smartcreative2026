@@ -76,6 +76,17 @@
                         ? (int) round($board['matches_done'] / $board['matches_total'] * 100)
                         : 0;
                     $isLive = ! $board['is_final'] && $board['matches_done'] < $board['matches_total'];
+
+                    /*
+                     | Drawn, but nobody has played.
+                     |
+                     | Every team is on nil, so the ranking has them all in first place
+                     | and all above any cut, which is arithmetically true and reads as
+                     | nonsense: twenty champions, twenty teams through. The table is
+                     | still worth showing, because it says who is competing. The
+                     | placings are not, because there are none yet.
+                     */
+                    $notStarted = $board['matches_done'] === 0;
                 @endphp
 
                 <article class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-8 last:mb-0">
@@ -145,7 +156,7 @@
                         {{-- ===== Top three, on their own ===== --}}
                         @php $podium = $rows->take(3); @endphp
 
-                        @if ($rows->count() >= 3)
+                        @if ($rows->count() >= 3 && ! $notStarted)
                             <div class="px-5 md:px-7 pt-6 pb-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 @foreach ($podium as $standing)
                                     @php
@@ -202,9 +213,10 @@
                                     @foreach ($rows as $standing)
                                         @php
                                             // The qualifying line, drawn under the last team that would
-                                            // go through as things stand.
-                                            $onCut = $cut > 0 && $standing->rank === $cut;
-                                            $advancing = $cut > 0 && $standing->advances;
+                                            // go through as things stand. Withheld until something has
+                                            // been played, or every team sits above it.
+                                            $onCut = ! $notStarted && $cut > 0 && $standing->rank === $cut;
+                                            $advancing = ! $notStarted && $cut > 0 && $standing->advances;
                                         @endphp
 
                                         <tr @class([
@@ -214,13 +226,17 @@
                                         ])>
                                             <td class="px-3 md:px-5 py-3.5">
                                                 <div class="flex items-center gap-2">
+                                                    {{-- A dash rather than a 1 until something has been
+                                                         played. Showing every team as first is worse
+                                                         than showing no placing at all. --}}
                                                     <span @class([
                                                         'inline-flex items-center justify-center w-7 h-7 rounded-lg text-sm font-bold tabular-nums shrink-0',
-                                                        'bg-amber-400 text-amber-900' => $standing->rank === 1,
-                                                        'bg-slate-300 text-slate-800' => $standing->rank === 2,
-                                                        'bg-orange-300 text-orange-900' => $standing->rank === 3,
-                                                        'bg-gray-100 text-gray-600' => $standing->rank > 3,
-                                                    ])>{{ $standing->rank }}</span>
+                                                        'bg-gray-100 text-gray-400' => $notStarted,
+                                                        'bg-amber-400 text-amber-900' => ! $notStarted && $standing->rank === 1,
+                                                        'bg-slate-300 text-slate-800' => ! $notStarted && $standing->rank === 2,
+                                                        'bg-orange-300 text-orange-900' => ! $notStarted && $standing->rank === 3,
+                                                        'bg-gray-100 text-gray-600' => ! $notStarted && $standing->rank > 3,
+                                                    ])>{{ $notStarted ? '–' : $standing->rank }}</span>
                                                 </div>
                                             </td>
 
@@ -250,7 +266,7 @@
                                                     </span>
                                                 @endif
 
-                                                @if ($standing->is_tied)
+                                                @if ($standing->is_tied && ! $notStarted)
                                                     <span class="block text-xs text-amber-700 mt-0.5">Level after every tie-break</span>
                                                 @endif
 
@@ -289,11 +305,22 @@
                             </table>
                         </div>
 
-                        @if ($cut > 0)
+                        @if ($cut > 0 && $notStarted)
+                            <p class="px-5 md:px-7 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+                                <span class="font-semibold">{{ $rows->count() }} teams drawn.</span>
+                                The top {{ $cut }} will go through. Placings open once the first match
+                                has been scored.
+                            </p>
+                        @elseif ($cut > 0)
                             <p class="px-5 md:px-7 py-3 bg-emerald-50 border-t border-emerald-100 text-xs text-emerald-800">
                                 <span class="font-semibold">Top {{ $cut }} go through.</span>
                                 The line moves as results come in, so a place above it is not settled
                                 until the stage is finished.
+                            </p>
+                        @elseif ($notStarted)
+                            <p class="px-5 md:px-7 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+                                <span class="font-semibold">{{ $rows->count() }} teams drawn.</span>
+                                Placings open once the first match has been scored.
                             </p>
                         @endif
                     @empty

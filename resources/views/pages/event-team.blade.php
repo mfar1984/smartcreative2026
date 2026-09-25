@@ -88,11 +88,15 @@
                     </p>
 
                     <div class="flex flex-wrap gap-x-8 gap-y-4 mt-6">
+                        {{-- Withheld until they have played. Before that every team is
+                             level on nil and the ranking puts them all first, which is
+                             true and useless. --}}
                         <div>
                             <span @class([
                                 'block text-xl font-bold tabular-nums',
-                                'text-amber-400' => $standing && (int) $standing->rank <= 3,
-                            ])>{{ $ordinal($standing?->rank) }}</span>
+                                'text-amber-400' => $played > 0 && $standing && (int) $standing->rank <= 3,
+                                'text-gray-500' => $played === 0,
+                            ])>{{ $played > 0 ? $ordinal($standing?->rank) : '–' }}</span>
                             <span class="text-xs font-semibold uppercase tracking-widest text-gray-400">Standing</span>
                         </div>
 
