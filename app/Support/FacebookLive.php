@@ -309,6 +309,35 @@ final class FacebookLive
             ];
         }
 
+        /*
+         | Pressed a second time, when the first press already did the job.
+         |
+         | After a successful connect the saved token is the Page's own. Running the rest
+         | of this against it fails on /me/accounts, because `me` is then the Page and a
+         | Page has no accounts edge — which surfaced as a bare "(#100) Tried accessing
+         | nonexisting field (accounts)" and read as something being broken. It is not:
+         | it is the work already being done. So the first thing to establish is what is
+         | in there, and whether there is anything left to do at all.
+         */
+        $saved = self::inspectToken($pasted);
+
+        if ($saved['error'] === null && $saved['valid'] && $saved['type'] === 'PAGE') {
+            if ($saved['expires_at'] === 0) {
+                return [
+                    'ok' => true,
+                    'message' => sprintf(
+                        'Already done. What is saved is %sown token, and Facebook reports it as never expiring, so there is nothing left to trade. Press this again only after pasting a new token from the Explorer.',
+                        filled(self::pageId()) ? 'Page ' . self::pageId() . '\'s ' : 'the Page\'s ',
+                    ),
+                ];
+            }
+
+            return [
+                'ok' => false,
+                'message' => 'What is saved is a Page token with an expiry date, and a Page token cannot be traded up. Generate a fresh token in the Graph API Explorer, paste that into the Access Token box, save, then press this again.',
+            ];
+        }
+
         $long = self::exchange($pasted);
 
         if ($long['error'] !== null) {
@@ -327,6 +356,9 @@ final class FacebookLive
                 'message' => 'That login does not administer any Page. Check you authorised the right Page, and that the token carries pages_show_list.',
             ];
         }
+
+        // Nothing is written until here, so every path above leaves the working profile
+        // exactly as it was. That is what the failure box on screen promises.
 
         $wanted = self::pageId();
         $chosen = null;
@@ -439,12 +471,12 @@ final class FacebookLive
      * lifetime is not visible by looking at it, so claiming "this one is permanent"
      * without checking would reintroduce exactly the silent failure it set out to avoid.
      *
-     * @return array{valid: bool, expires_at: int|null, scopes: array<int, string>, error: string|null}
+     * @return array{valid: bool, expires_at: int|null, scopes: array<int, string>, type: string|null, error: string|null}
      */
     public static function inspectToken(string $token): array
     {
         if (! self::hasApp() || blank($token)) {
-            return ['valid' => false, 'expires_at' => null, 'scopes' => [], 'error' => 'No app credentials to check with.'];
+            return ['valid' => false, 'expires_at' => null, 'scopes' => [], 'type' => null, 'error' => 'No app credentials to check with.'];
         }
 
         $reply = self::graph('debug_token', [
@@ -453,7 +485,7 @@ final class FacebookLive
         ], $token);
 
         if ($reply['error'] !== null) {
-            return ['valid' => false, 'expires_at' => null, 'scopes' => [], 'error' => $reply['error']];
+            return ['valid' => false, 'expires_at' => null, 'scopes' => [], 'type' => null, 'error' => $reply['error']];
         }
 
         $data = (array) ($reply['body']['data'] ?? []);
@@ -462,6 +494,7 @@ final class FacebookLive
             'valid' => (bool) ($data['is_valid'] ?? false),
             'expires_at' => isset($data['expires_at']) ? (int) $data['expires_at'] : null,
             'scopes' => array_values(array_filter((array) ($data['scopes'] ?? []), 'is_string')),
+            'type' => filled($data['type'] ?? null) ? (string) $data['type'] : null,
             'error' => null,
         ];
     }
