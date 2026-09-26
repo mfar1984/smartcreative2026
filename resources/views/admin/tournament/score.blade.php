@@ -27,6 +27,27 @@
         $tracksPlayers = ! $picksPlayers && $playerInputs !== [] && $rosters !== [];
 
         /*
+         | Marks only one competitor in the fixture may hold, and who currently holds
+         | each of them.
+         |
+         | Read once here rather than per row, because a radio group needs to know the
+         | answer for the whole column before it draws any of it, including the row that
+         | says nobody.
+         */
+        $singleInputs = collect($inputs)
+            ->filter(fn (array $definition) => ($definition['type'] ?? null) === 'toggle'
+                && ! empty($definition['single_in_match']))
+            ->keyBy('key');
+
+        $singleHeldBy = $singleInputs
+            ->mapWithKeys(fn (array $definition) => [
+                $definition['key'] => $lines
+                    ->first(fn ($line) => (int) $line->input($definition['key']) === 1)
+                    ?->tournament_entrant_id ?? 0,
+            ])
+            ->all();
+
+        /*
          | Which team field holds the head count, read from the profile rather than
          | assumed to be called players_present. It is the input the profile marks as
          | measured against squad_size. Used only to point the copy button at it.
@@ -154,16 +175,35 @@
                                             @endphp
 
                                             <td class="px-4 py-3 text-center">
-                                                @if ($definition['type'] === 'toggle')
-                                                    {{-- A box rather than a number, because it is a
-                                                         choice about one competitor. The hidden 0 in
-                                                         front means an untucked box sends a decision
-                                                         instead of sending nothing. --}}
+                                                @if ($definition['type'] === 'toggle' && ! empty($definition['single_in_match']))
+                                                    {{-- One competitor out of the fixture, so one radio
+                                                         group across every row. They share a name, which
+                                                         is what makes the browser enforce the single
+                                                         choice: the rule is in the control rather than in
+                                                         a script that unticks things afterwards.
+
+                                                         The value is the competitor, not a yes or no. It
+                                                         is turned back into a per-competitor 0 or 1 when
+                                                         the result is read, so nothing downstream knows
+                                                         this changed. --}}
+                                                    <input type="radio"
+                                                           id="{{ $id }}"
+                                                           name="single[{{ $key }}]"
+                                                           value="{{ $entrantId }}"
+                                                           @checked((int) old('single.' . $key, $singleHeldBy[$key] ?? 0) === (int) $entrantId)
+                                                           class="w-5 h-5 border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+
+                                                    <label for="{{ $id }}" class="sr-only">
+                                                        Award {{ $definition['label'] ?? $key }} to {{ $entrant->displayName() }}
+                                                    </label>
+                                                @elseif ($definition['type'] === 'toggle')
+                                                    {{-- A mark any number of competitors may hold. The
+                                                         hidden 0 in front means an unticked box sends a
+                                                         decision instead of sending nothing. --}}
                                                     <input type="hidden" name="{{ $name }}" value="0">
 
                                                     <input type="checkbox" id="{{ $id }}" name="{{ $name }}" value="1"
                                                            @checked((int) $current === 1)
-                                                           @if (! empty($definition['single_in_match'])) data-single-toggle="{{ $key }}" @endif
                                                            class="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
 
                                                     <label for="{{ $id }}" class="sr-only">
@@ -352,6 +392,45 @@
                                     @endif
                                 @endforeach
                             </tbody>
+
+                            {{-- The way out of a radio group.
+                                 A radio cannot be cleared once set, and a fixture that was
+                                 abandoned or settled on penalty has nobody to award the mark
+                                 to. This row is that answer, sitting directly under the
+                                 column it belongs to, and it is the one selected when nothing
+                                 is on file so the state is never merely absent. --}}
+                            @if ($singleInputs->isNotEmpty())
+                                <tfoot>
+                                    <tr class="border-t-2 border-gray-200 bg-gray-50">
+                                        <th scope="row" class="px-4 py-3 text-left text-xs font-semibold text-gray-500">
+                                            Nobody
+                                        </th>
+
+                                        @foreach ($inputs as $definition)
+                                            @php $fkey = $definition['key']; @endphp
+
+                                            <td class="px-4 py-3 text-center">
+                                                @if ($singleInputs->has($fkey))
+                                                    <input type="radio"
+                                                           id="single-none-{{ $fkey }}"
+                                                           name="single[{{ $fkey }}]"
+                                                           value=""
+                                                           @checked((int) old('single.' . $fkey, $singleHeldBy[$fkey] ?? 0) === 0)
+                                                           class="w-5 h-5 border-gray-300 text-gray-500 focus:ring-2 focus:ring-blue-500/40">
+
+                                                    <label for="single-none-{{ $fkey }}" class="sr-only">
+                                                        Award {{ $definition['label'] ?? $fkey }} to nobody
+                                                    </label>
+                                                @endif
+
+                                                @error('single.' . $fkey)
+                                                    <span class="block text-xs text-red-600 mt-1">{{ $message }}</span>
+                                                @enderror
+                                            </td>
+                                        @endforeach
+                                    </tr>
+                                </tfoot>
+                            @endif
                         </table>
                     </div>
 
@@ -360,6 +439,14 @@
                             Points are worked out from these numbers and cannot be typed. Tab moves
                             down the list in reading order.
                         </p>
+
+                        @if ($singleInputs->isNotEmpty())
+                            <p class="text-xs text-gray-600 mt-1">
+                                {{ $singleInputs->pluck('label')->implode(', ') }}
+                                {{ $singleInputs->count() === 1 ? 'goes' : 'go' }} to one competitor at
+                                most. Pick Nobody where there is none to award.
+                            </p>
+                        @endif
                     </div>
                 </x-admin.panel>
 
@@ -733,28 +820,13 @@
         });
 
         /*
-         | Marks only one competitor can hold, such as the chicken dinner.
+         | Nothing here for the chicken dinner.
          |
-         | Ticking one unticks the rest, which is radio behaviour. Boxes rather than
-         | radios because a radio cannot be cleared once set, and a fixture that was
-         | abandoned or settled on penalty has nobody to award it to. The server refuses
-         | a second holder as well, and names the one that already has it.
+         | It is a radio group sharing one name, so the browser enforces the single
+         | choice and a Nobody option is the way to withhold it. There was a script that
+         | unticked sibling checkboxes; it is gone, because the rule now lives in the
+         | control rather than in code that has to run for the form to behave.
          */
-        document.querySelectorAll('[data-single-toggle]').forEach(function (box) {
-            box.addEventListener('change', function () {
-                if (!box.checked) {
-                    return;
-                }
-
-                document
-                    .querySelectorAll('[data-single-toggle="' + box.dataset.singleToggle + '"]')
-                    .forEach(function (other) {
-                        if (other !== box) {
-                            other.checked = false;
-                        }
-                    });
-            });
-        });
 
         /*
          | Naming the top players.

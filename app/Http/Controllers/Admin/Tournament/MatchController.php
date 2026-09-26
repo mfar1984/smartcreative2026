@@ -905,9 +905,78 @@ class MatchController extends Controller
         $errors = [];
         $seenPlacements = [];
 
-        // Who already holds each once-per-fixture mark, so a second tick can name the
-        // competitor it clashes with rather than only refusing.
-        $singleHolders = [];
+        /*
+         | Marks only one competitor in the fixture may hold, such as the chicken dinner.
+         |
+         | Submitted as one value naming the competitor rather than as a flag per row,
+         | because that is what a radio group sends. It means two holders is not a state
+         | the request can express, so there is no "only one" check here: the rule is in
+         | the shape of the data.
+         |
+         | An empty choice is a real answer. A fixture that was abandoned or settled on
+         | penalty has nobody to award it to.
+         */
+        $entrantIds = $match->entrants
+            ->pluck('tournament_entrant_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $singles = [];
+
+        foreach ($definitions as $key => $definition) {
+            if (($definition['type'] ?? null) !== 'toggle' || empty($definition['single_in_match'])) {
+                continue;
+            }
+
+            $chosen = $request->input('single.' . $key);
+            $label = $definition['label'] ?? $key;
+
+            /*
+             | Refused rather than cast.
+             |
+             | A radio group sends one value, but a request is not obliged to look like
+             | the form. Casting an array to an integer in PHP yields 1, which would have
+             | handed the mark to whichever competitor happened to be entrant 1, so the
+             | shape is checked before anything is read from it.
+             */
+            if (is_array($chosen)) {
+                $errors["single.{$key}"] = sprintf('%s can only be given to one competitor.', $label);
+
+                $singles[$key] = null;
+
+                continue;
+            }
+
+            if ($chosen === null || $chosen === '') {
+                $singles[$key] = null;
+
+                continue;
+            }
+
+            if (! is_numeric($chosen)) {
+                $errors["single.{$key}"] = sprintf('%s was not given to a competitor we recognise.', $label);
+
+                $singles[$key] = null;
+
+                continue;
+            }
+
+            $chosen = (int) $chosen;
+
+            // Checked rather than trusted, so a hand-made request cannot award a mark to
+            // a competitor who is not in this fixture.
+            if (! in_array($chosen, $entrantIds, true)) {
+                $errors["single.{$key}"] = sprintf(
+                    '%s can only be given to a competitor in this fixture.',
+                    $label,
+                );
+
+                $chosen = null;
+            }
+
+            $singles[$key] = $chosen;
+        }
 
         foreach ($match->entrants as $line) {
             $entrantId = $line->tournament_entrant_id;
@@ -925,31 +994,20 @@ class MatchController extends Controller
                 /*
                  | A yes or no that somebody chooses.
                  |
-                 | Handled before the blank check below, because an unticked box is a
-                 | decision rather than a missing answer. It is stored as 0 rather than
-                 | left null so a fixture where nobody took the mark reads as nobody
-                 | having taken it.
+                 | Handled before the blank check below, because nothing submitted is a
+                 | decision rather than a missing answer. Stored as 0 rather than left
+                 | null, so a fixture where nobody took the mark reads as nobody having
+                 | taken it instead of as a figure never entered.
+                 |
+                 | A once-per-fixture mark is read from the single choice made for the
+                 | whole fixture; anything else is read from this row. Either way it
+                 | lands in the same place, so the engine, the standings and everything
+                 | already recorded see the shape they always saw.
                  */
                 if ($definition['type'] === 'toggle') {
-                    $on = (int) ($value ?? 0) === 1;
-
-                    if ($on && ! empty($definition['single_in_match'])) {
-                        if (isset($singleHolders[$key])) {
-                            $errors["lines.{$entrantId}.{$key}"] = sprintf(
-                                'Only one competitor can be given %s in a fixture, and %s already has it.',
-                                $definition['label'] ?? $key,
-                                $singleHolders[$key],
-                            );
-
-                            $clean[$key] = 0;
-
-                            continue;
-                        }
-
-                        $singleHolders[$key] = $line->entrant?->displayName() ?? 'another competitor';
-                    }
-
-                    $clean[$key] = $on ? 1 : 0;
+                    $clean[$key] = array_key_exists($key, $singles)
+                        ? (int) ($singles[$key] === (int) $entrantId)
+                        : (int) ((int) ($value ?? 0) === 1);
 
                     continue;
                 }
