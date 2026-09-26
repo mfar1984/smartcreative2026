@@ -281,7 +281,15 @@
             @php
                 $currentTrack = old('track_players', $trackPlayers);
                 $statRows = old('player_stats', $playerStats);
-                $statSlots = max(6, count($statRows) + 2);
+                /*
+                 | Enough rows to enter a full battle royale scoreboard in one sitting.
+                 |
+                 | Six was too few: PUBG Mobile's own match summary alone carries eight
+                 | figures across its two star cards, so an operator had to fill six,
+                 | save, and come back for the rest. Two spare rows are kept beyond
+                 | whatever is already defined so there is always somewhere to add one.
+                 */
+                $statSlots = max(10, count($statRows) + 2);
             @endphp
 
             <x-admin.panel title="Personal Player Scoring" icon="users">
