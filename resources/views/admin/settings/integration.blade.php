@@ -535,8 +535,45 @@
             </div>
         @endif
 
-        {{-- ---------------- Facebook live check ---------------- --}}
+        {{-- ---------------- Facebook live ---------------- --}}
         @if ($activeTab === 'facebook' && $canUpdate)
+
+            {{-- Connect comes before Check, because it is the step that has to happen
+                 first and a screen that lists them the other way round invites somebody
+                 to press Check, see it work, and never press Connect at all. That is the
+                 path that ends with the stream dead by morning. --}}
+            <div class="mt-5">
+                <x-admin.panel title="Connect The Page" icon="lock">
+                    <div class="px-5 py-4">
+                        @if ($facebookToken['known'])
+                            <div class="flex items-start gap-3 rounded-lg border p-3 mb-4 {{ $facebookToken['permanent'] ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50' }}">
+                                <x-admin.icon name="{{ $facebookToken['permanent'] ? 'check' : 'clipboard' }}"
+                                              class="w-4 h-4 mt-0.5 shrink-0 {{ $facebookToken['permanent'] ? 'text-green-600' : 'text-amber-600' }}" />
+                                <p class="text-sm {{ $facebookToken['permanent'] ? 'text-green-800' : 'text-amber-800' }}">
+                                    {{ $facebookToken['note'] }}
+                                </p>
+                            </div>
+                        @endif
+
+                        <p class="text-sm text-gray-600 mb-4">
+                            A token copied out of the Graph API Explorer lives about an hour. Saved as
+                            it is, the stream works this afternoon and has stopped by morning with
+                            nothing on screen to say why. This trades it for the Page's own token,
+                            which does not expire, and saves that instead. Press it once after pasting
+                            a token, and again only if you ever paste a new one.
+                        </p>
+
+                        <form action="{{ route('admin.settings.integration.facebook.connect') }}" method="POST">
+                            @csrf
+                            <button type="submit"
+                                    class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                <x-admin.icon name="lock" class="w-4 h-4" />
+                                Connect The Page
+                            </button>
+                        </form>
+                    </div>
+                </x-admin.panel>
+            </div>
 
             <div class="mt-5">
                 <x-admin.panel title="Check The Connection" icon="video">
@@ -627,12 +664,16 @@
                                 token with those two permissions.
                             </li>
                             <li>
-                                Request <span class="font-mono text-xs">/me/accounts</span>. The reply
-                                lists your Pages, each with an <span class="font-mono text-xs">id</span>
-                                and an <span class="font-mono text-xs">access_token</span>. Those are
-                                the two values above.
+                                Copy that token into the Access Token box above. Copy the App ID and
+                                App Secret from the app's Settings > Basic while you are there. Leave
+                                Page ID blank unless the login administers more than one Page.
                             </li>
-                            <li>Paste them in, save, then press Check Live Status.</li>
+                            <li>
+                                Save, then press <strong>Connect The Page</strong>. That is what turns
+                                the hour-long token from the Explorer into the Page's own token, which
+                                does not expire, and fills in the Page ID for you.
+                            </li>
+                            <li>Press Check Live Status to confirm it.</li>
                         </ol>
                         <p class="text-gray-500">
                             Two use cases look right and are not. <strong>Facebook Login</strong>

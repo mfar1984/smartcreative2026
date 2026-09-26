@@ -725,6 +725,12 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware(['permission:settings.integration.update', 'throttle:6,1'])
                 ->name('integration.facebook.test');
 
+            // Writes: it replaces the stored token and can fill in the Page ID, so it is
+            // a POST of its own rather than part of the check above.
+            Route::post('integration/facebook/connect', [IntegrationController::class, 'connectFacebookPage'])
+                ->middleware(['permission:settings.integration.update', 'throttle:6,1'])
+                ->name('integration.facebook.connect');
+
             /*
              | EasyParcel authorisation. Three legs of one redirect, so they are
              | routes rather than part of the settings form.

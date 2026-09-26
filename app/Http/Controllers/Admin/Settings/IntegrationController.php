@@ -654,6 +654,7 @@ class IntegrationController extends Controller
             ],
             'panels' => [
                 'Page' => ['icon' => 'video', 'fields' => ['enabled', 'page_id', 'page_token']],
+                'App Credentials' => ['icon' => 'lock', 'fields' => ['app_id', 'app_secret']],
                 'Before The Page Is Connected' => ['icon' => 'globe', 'fields' => ['fallback_url']],
             ],
             'fields' => [
@@ -668,14 +669,28 @@ class IntegrationController extends Controller
                     'type' => 'text',
                     'rules' => ['nullable', 'string', 'max:100'],
                     'placeholder' => '102345678901234',
-                    'help' => 'The numeric id of the Facebook Page that broadcasts, not its name. Found under About > Page transparency on the Page itself.',
+                    'help' => 'Leave this blank if the login only administers one Page: Connect The Page will fill it in. Only needed to pick between several.',
                 ],
                 'page_token' => [
-                    'label' => 'Page Access Token',
+                    'label' => 'Access Token',
                     'type' => 'password',
                     'secret' => true,
                     'rules' => ['nullable', 'string', 'max:1000'],
-                    'help' => 'Needs pages_read_engagement. A token issued from a long-lived login does not expire, so this is set up once. Stored encrypted and never shown back.',
+                    'help' => 'Paste the token straight out of the Graph API Explorer, then press Connect The Page below. That token only lives about an hour, so it is raw material rather than the answer; Connect trades it for one that does not expire and saves that instead. Stored encrypted and never shown back.',
+                ],
+                'app_id' => [
+                    'label' => 'App ID',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:100'],
+                    'placeholder' => '1234567890123456',
+                    'help' => 'From the app dashboard, under Settings > Basic.',
+                ],
+                'app_secret' => [
+                    'label' => 'App Secret',
+                    'type' => 'password',
+                    'secret' => true,
+                    'rules' => ['nullable', 'string', 'max:255'],
+                    'help' => 'Beside the App ID, behind a Show button. Needed for two things a token cannot do for itself: be traded for a lasting one, and be asked when it expires. Stored encrypted and never shown back.',
                 ],
                 'fallback_url' => [
                     'label' => 'Video URL',
@@ -721,6 +736,11 @@ class IntegrationController extends Controller
             'smsSummary' => $tab === 'sms' ? SmsSettings::summary() : null,
             'telegramSummary' => $tab === 'telegram' ? TelegramSettings::summary() : null,
             'facebookSummary' => $tab === 'facebook' ? FacebookLive::summary() : null,
+
+            // Whether the saved token will outlive the week, asked of Facebook rather
+            // than assumed. `known` is false when it cannot be asked at all, so the
+            // panel stays quiet instead of guessing.
+            'facebookToken' => $tab === 'facebook' ? $this->facebookTokenState() : null,
 
             // Read only and generated, so it is shown rather than asked for. Only
             // resolved on the SMS tab, because reading it creates the secret on
@@ -822,6 +842,83 @@ class IntegrationController extends Controller
     private function resolveTab(?string $tab): string
     {
         return array_key_exists((string) $tab, self::SCHEMA) ? (string) $tab : 'email';
+    }
+
+    /**
+     * How long the saved Facebook token has left, in words.
+     *
+     * The reason this is on screen at all: a token's lifetime cannot be seen by looking
+     * at it, and the failure it causes arrives days later with no symptom beyond the
+     * video quietly not being there. Putting Facebook's own answer in front of the
+     * operator is the only thing that turns that into something they can act on before
+     * the event rather than during it.
+     *
+     * @return array{known: bool, permanent: bool, note: string}
+     */
+    private function facebookTokenState(): array
+    {
+        if (blank(FacebookLive::pageToken())) {
+            return ['known' => false, 'permanent' => false, 'note' => ''];
+        }
+
+        if (! FacebookLive::hasApp()) {
+            return [
+                'known' => true,
+                'permanent' => false,
+                'note' => 'A token is saved, but without the App ID and App Secret there is no way to ask Facebook when it expires. Fill those in and press Connect The Page.',
+            ];
+        }
+
+        $health = FacebookLive::inspectToken((string) FacebookLive::pageToken());
+
+        if ($health['error'] !== null) {
+            return [
+                'known' => true,
+                'permanent' => false,
+                'note' => 'Facebook would not report on the saved token: ' . $health['error'],
+            ];
+        }
+
+        if (! $health['valid']) {
+            return [
+                'known' => true,
+                'permanent' => false,
+                'note' => 'The saved token is no longer valid, so no video will appear. Generate a fresh one in the Graph API Explorer, paste it above, save, then press Connect The Page.',
+            ];
+        }
+
+        if (! in_array('pages_read_engagement', $health['scopes'], true)) {
+            return [
+                'known' => true,
+                'permanent' => false,
+                'note' => 'The saved token works but does not carry pages_read_engagement, so the live check will be refused. Add that permission in the Explorer and generate a new token.',
+            ];
+        }
+
+        if ($health['expires_at'] === 0) {
+            return [
+                'known' => true,
+                'permanent' => true,
+                'note' => 'Facebook reports the saved token as never expiring. Nothing here needs touching again.',
+            ];
+        }
+
+        if ($health['expires_at'] === null) {
+            return [
+                'known' => true,
+                'permanent' => false,
+                'note' => 'Facebook did not say when the saved token expires, so treat it as temporary. Press Connect The Page to trade it for one that does not.',
+            ];
+        }
+
+        return [
+            'known' => true,
+            'permanent' => false,
+            'note' => sprintf(
+                'The saved token expires on %s, so the stream will stop appearing after that. Press Connect The Page to trade it for one that does not expire.',
+                date('j M Y H:i', $health['expires_at']),
+            ),
+        ];
     }
 
     /**
@@ -1131,6 +1228,36 @@ class IntegrationController extends Controller
             'Connected, and live right now%s. It is on the ranking page.',
             filled($result['live']['title']) ? ': ' . $result['live']['title'] : '',
         ));
+    }
+
+    /**
+     * Turn the token that was pasted in into one that will still work at the next event.
+     *
+     * A separate press from Check Live Status, and deliberately so. This one writes: it
+     * replaces the saved token and may fill in the Page ID. Folding it into a button
+     * labelled as a check would mean a read-only-sounding action quietly changing
+     * credentials, which is the sort of surprise nobody wants from a settings screen.
+     */
+    public function connectFacebookPage()
+    {
+        $result = FacebookLive::connect();
+
+        if (! $result['ok']) {
+            AdminLogger::activity('settings.facebook.connect-failed', 'Facebook Page connection failed.');
+
+            return back()->with('test_facebook_error', $result['message']);
+        }
+
+        AdminLogger::audit(
+            new Setting(['key' => 'integration.facebook.page_token', 'group' => 'integration.facebook']),
+            'settings.updated',
+            null,
+            ['page_token' => '[redacted]', 'page_id' => FacebookLive::pageId()],
+        );
+
+        AdminLogger::activity('settings.facebook.connect', 'Connected a Facebook Page for live streaming.');
+
+        return back()->with('test_facebook_success', $result['message']);
     }
 
     /**
