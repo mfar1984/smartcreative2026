@@ -1220,13 +1220,26 @@ class IntegrationController extends Controller
 
         AdminLogger::activity('settings.facebook.test', 'Checked the Facebook live status.');
 
+        /*
+         | Which of the two routes answered is worth saying out loud.
+         |
+         | Both give the same fact, but only one of them depends on Facebook's Live Video
+         | API feature still being granted. Naming it means that if that grant is ever
+         | withdrawn, the change shows up here as a different sentence rather than as a
+         | video silently not appearing.
+         */
+        $via = $result['route'] === 'videos'
+            ? ' Read from the Page\'s videos, so this does not rely on the Live Video API feature.'
+            : '';
+
         if ($result['live'] === null) {
-            return back()->with('test_facebook_success', 'Connected. This Page is not broadcasting at the moment, so no video is on the ranking page. It will appear on its own the next time you go live.');
+            return back()->with('test_facebook_success', 'Connected. This Page is not broadcasting at the moment, so no video is on the ranking page. It will appear on its own the next time you go live.' . $via);
         }
 
         return back()->with('test_facebook_success', sprintf(
-            'Connected, and live right now%s. It is on the ranking page.',
+            'Connected, and live right now%s. It is on the ranking page.%s',
             filled($result['live']['title']) ? ': ' . $result['live']['title'] : '',
+            $via,
         ));
     }
 

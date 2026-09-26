@@ -6,6 +6,7 @@ use App\Models\Setting;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -188,7 +189,7 @@ final class FacebookLive
      * two need opposite responses from the operator, and a single boolean would leave
      * them guessing which one they were looking at.
      *
-     * @return array{live: array<string, mixed>|null, error: string|null}
+     * @return array{live: array<string, mixed>|null, error: string|null, route: string|null}
      */
     public static function probe(): array
     {
@@ -202,7 +203,24 @@ final class FacebookLive
     }
 
     /**
-     * @return array{live: array<string, mixed>|null, error: string|null}
+     * Is this Page broadcasting, asked two different ways.
+     *
+     * The obvious endpoint, live_videos, sits behind Facebook's Live Video API feature.
+     * That feature exists to let an app *publish* a broadcast, which this one never does,
+     * yet it gates reading as well — so an integration that only looks can be refused by
+     * a permission it has no business holding, and would have to justify publishing at
+     * App Review to get it.
+     *
+     * So there is a second route. A live broadcast is also a video on the Page, and the
+     * ordinary videos edge carries a live_status field saying whether it is running. That
+     * edge asks only for pages_read_engagement, which is what we already have and all
+     * that reading should ever have needed.
+     *
+     * Tried in that order, because live_videos is the endpoint built for the question and
+     * gives a direct answer where it is available. The fallback is not a workaround for a
+     * bug; it is the same fact read off a gate we are entitled to walk through.
+     *
+     * @return array{live: array<string, mixed>|null, error: string|null, route: string|null}
      */
     private static function ask(): array
     {
@@ -210,9 +228,39 @@ final class FacebookLive
         $token = self::pageToken();
 
         if (! filled($pageId) || ! filled($token)) {
-            return ['live' => null, 'error' => 'No Page ID and access token are saved.'];
+            return ['live' => null, 'error' => 'No Page ID and access token are saved.', 'route' => null];
         }
 
+        $direct = self::askLiveVideos((string) $pageId, (string) $token);
+
+        // Answered, whether or not anything was on air. Nothing to fall back to.
+        if ($direct['error'] === null) {
+            return $direct;
+        }
+
+        $viaVideos = self::askVideos((string) $pageId, (string) $token);
+
+        if ($viaVideos['error'] === null) {
+            return $viaVideos;
+        }
+
+        /*
+         | Both refused. The videos edge only needs a permission we hold, so its refusal
+         | describes the real problem, while live_videos would blame a feature that is
+         | beside the point. Both are carried so neither has to be guessed at.
+         */
+        return [
+            'live' => null,
+            'error' => $viaVideos['error'] . ' (The live_videos endpoint also refused: ' . $direct['error'] . ')',
+            'route' => null,
+        ];
+    }
+
+    /**
+     * @return array{live: array<string, mixed>|null, error: string|null, route: string|null}
+     */
+    private static function askLiveVideos(string $pageId, string $token): array
+    {
         try {
             /*
              | The token goes in the Authorization header, not the query string.
@@ -235,7 +283,7 @@ final class FacebookLive
 
                 self::note('Facebook live check refused.', $message, $token);
 
-                return ['live' => null, 'error' => $message];
+                return ['live' => null, 'error' => $message, 'route' => null];
             }
 
             foreach ((array) $response->json('data', []) as $video) {
@@ -243,31 +291,100 @@ final class FacebookLive
                     continue;
                 }
 
-                $permalink = self::absolute((string) ($video['permalink_url'] ?? ''));
+                $found = self::describeVideo($video, 'live_videos');
 
-                if ($permalink === null) {
-                    continue;
+                if ($found !== null) {
+                    return ['live' => $found, 'error' => null, 'route' => 'live_videos'];
                 }
-
-                return [
-                    'live' => [
-                        'id' => (string) ($video['id'] ?? ''),
-                        'title' => filled($video['title'] ?? null) ? (string) $video['title'] : null,
-                        'permalink' => $permalink,
-                        'embed' => self::embedUrl($permalink),
-                        'source' => 'graph',
-                    ],
-                    'error' => null,
-                ];
             }
 
             // Reachable, answered, nothing broadcasting. Not an error.
-            return ['live' => null, 'error' => null];
+            return ['live' => null, 'error' => null, 'route' => 'live_videos'];
         } catch (Throwable $exception) {
             self::note('Facebook live check failed.', $exception->getMessage(), $token);
 
-            return ['live' => null, 'error' => 'Facebook could not be reached.'];
+            return ['live' => null, 'error' => 'Facebook could not be reached.', 'route' => null];
         }
+    }
+
+    /**
+     * The same question put to the Page's ordinary videos edge.
+     *
+     * A broadcast is a video while it runs, and `live_status` says so. Only
+     * pages_read_engagement is needed here, so this route stays open whether or not the
+     * Live Video API feature was ever granted.
+     *
+     * @return array{live: array<string, mixed>|null, error: string|null, route: string|null}
+     */
+    private static function askVideos(string $pageId, string $token): array
+    {
+        try {
+            $response = Http::timeout(6)
+                ->connectTimeout(4)
+                ->withToken($token)
+                ->get(sprintf('https://graph.facebook.com/%s/%s/videos', self::version(), $pageId), [
+                    'fields' => 'id,title,description,permalink_url,live_status',
+                    'limit' => 10,
+                ]);
+
+            if ($response->failed()) {
+                $message = (string) ($response->json('error.message')
+                    ?? 'Facebook answered with HTTP ' . $response->status() . '.');
+
+                self::note('Facebook video check refused.', $message, $token);
+
+                return ['live' => null, 'error' => $message, 'route' => null];
+            }
+
+            foreach ((array) $response->json('data', []) as $video) {
+                if (! is_array($video) || ($video['live_status'] ?? null) !== 'LIVE') {
+                    continue;
+                }
+
+                $found = self::describeVideo($video, 'videos');
+
+                if ($found !== null) {
+                    return ['live' => $found, 'error' => null, 'route' => 'videos'];
+                }
+            }
+
+            return ['live' => null, 'error' => null, 'route' => 'videos'];
+        } catch (Throwable $exception) {
+            self::note('Facebook video check failed.', $exception->getMessage(), $token);
+
+            return ['live' => null, 'error' => 'Facebook could not be reached.', 'route' => null];
+        }
+    }
+
+    /**
+     * One Graph video row turned into what the page needs, or null if it cannot be shown.
+     *
+     * Null rather than a half-filled row when there is no permalink: without one there is
+     * nothing to embed and nothing to link to, so carrying it forward would only produce
+     * an empty frame.
+     *
+     * @param  array<string, mixed>  $video
+     * @return array<string, mixed>|null
+     */
+    private static function describeVideo(array $video, string $route): ?array
+    {
+        $permalink = self::absolute((string) ($video['permalink_url'] ?? ''));
+
+        if ($permalink === null) {
+            return null;
+        }
+
+        // The videos edge often carries the caption in `description` where live_videos
+        // uses `title`, so whichever is there is used rather than showing nothing.
+        $title = $video['title'] ?? $video['description'] ?? null;
+
+        return [
+            'id' => (string) ($video['id'] ?? ''),
+            'title' => filled($title) ? Str::limit(trim((string) $title), 120) : null,
+            'permalink' => $permalink,
+            'embed' => self::embedUrl($permalink),
+            'source' => $route,
+        ];
     }
 
     /* ---------------------------------------------------------------------
