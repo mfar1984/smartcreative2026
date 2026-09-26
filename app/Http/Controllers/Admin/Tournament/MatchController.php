@@ -905,6 +905,10 @@ class MatchController extends Controller
         $errors = [];
         $seenPlacements = [];
 
+        // Who already holds each once-per-fixture mark, so a second tick can name the
+        // competitor it clashes with rather than only refusing.
+        $singleHolders = [];
+
         foreach ($match->entrants as $line) {
             $entrantId = $line->tournament_entrant_id;
 
@@ -917,6 +921,38 @@ class MatchController extends Controller
 
             foreach ($definitions as $key => $definition) {
                 $value = $raw[$key] ?? null;
+
+                /*
+                 | A yes or no that somebody chooses.
+                 |
+                 | Handled before the blank check below, because an unticked box is a
+                 | decision rather than a missing answer. It is stored as 0 rather than
+                 | left null so a fixture where nobody took the mark reads as nobody
+                 | having taken it.
+                 */
+                if ($definition['type'] === 'toggle') {
+                    $on = (int) ($value ?? 0) === 1;
+
+                    if ($on && ! empty($definition['single_in_match'])) {
+                        if (isset($singleHolders[$key])) {
+                            $errors["lines.{$entrantId}.{$key}"] = sprintf(
+                                'Only one competitor can be given %s in a fixture, and %s already has it.',
+                                $definition['label'] ?? $key,
+                                $singleHolders[$key],
+                            );
+
+                            $clean[$key] = 0;
+
+                            continue;
+                        }
+
+                        $singleHolders[$key] = $line->entrant?->displayName() ?? 'another competitor';
+                    }
+
+                    $clean[$key] = $on ? 1 : 0;
+
+                    continue;
+                }
 
                 if ($definition['type'] === 'marks') {
                     $marks = collect(is_array($value) ? $value : [])

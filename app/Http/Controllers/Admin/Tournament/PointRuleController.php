@@ -422,10 +422,23 @@ class PointRuleController extends Controller
                 'type' => PointRule::TYPE_PER_UNIT, 'source' => 'kills',
                 'value' => (float) ($data['kill_value'] ?? 1),
             ];
+            /*
+             | WWCD is asked for, not worked out from the placement.
+             |
+             | This used to fire on placement 1, which is wrong. Finishing top of a
+             | fixture and taking the chicken dinner are two different things: a match
+             | can be settled on points after the winner is penalised, a squad can be
+             | awarded first place without having been last standing, and a fixture that
+             | was abandoned has a table but no winner at all. Deriving it meant the
+             | operator could neither move it nor withhold it.
+             |
+             | It matters even where it is worth nothing, because it is counted, and a
+             | count is the first thing compared when two squads finish level.
+             */
             $components[] = [
                 'key' => 'wwcd', 'label' => 'WWCD',
                 'type' => PointRule::TYPE_BONUS,
-                'when' => ['source' => 'placement', 'equals' => 1],
+                'when' => ['source' => 'wwcd', 'equals' => 1],
                 'value' => (float) ($data['wwcd_value'] ?? 0),
             ];
 
@@ -444,6 +457,14 @@ class PointRuleController extends Controller
             $inputs = [
                 ['key' => 'placement', 'label' => 'Placement', 'type' => 'integer', 'min' => 1, 'required' => true, 'unique_in_match' => true],
                 ['key' => 'kills', 'label' => 'Kills', 'type' => 'integer', 'min' => 0, 'required' => true],
+
+                /*
+                 | One squad at most, and not compulsory. A fixture that was abandoned
+                 | or settled on penalty has no chicken dinner to award, and forcing a
+                 | tick would make the operator invent one.
+                 */
+                ['key' => 'wwcd', 'label' => 'WWCD', 'type' => 'toggle', 'required' => false, 'single_in_match' => true],
+
                 ['key' => 'players_present', 'label' => 'Players', 'type' => 'integer', 'min' => 0, 'max_from' => 'squad_size', 'required' => true],
             ];
         }

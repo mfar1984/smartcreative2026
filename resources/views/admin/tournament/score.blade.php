@@ -154,7 +154,22 @@
                                             @endphp
 
                                             <td class="px-4 py-3 text-center">
-                                                @if ($definition['type'] === 'marks')
+                                                @if ($definition['type'] === 'toggle')
+                                                    {{-- A box rather than a number, because it is a
+                                                         choice about one competitor. The hidden 0 in
+                                                         front means an untucked box sends a decision
+                                                         instead of sending nothing. --}}
+                                                    <input type="hidden" name="{{ $name }}" value="0">
+
+                                                    <input type="checkbox" id="{{ $id }}" name="{{ $name }}" value="1"
+                                                           @checked((int) $current === 1)
+                                                           @if (! empty($definition['single_in_match'])) data-single-toggle="{{ $key }}" @endif
+                                                           class="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+
+                                                    <label for="{{ $id }}" class="sr-only">
+                                                        {{ $definition['label'] ?? $key }} for {{ $entrant->displayName() }}
+                                                    </label>
+                                                @elseif ($definition['type'] === 'marks')
                                                     <div class="flex flex-wrap justify-center gap-1.5">
                                                         @for ($judge = 0; $judge < ($definition['count'] ?? 5); $judge++)
                                                             <div>
@@ -715,6 +730,30 @@
 
         document.querySelectorAll('[data-player-block]').forEach(function (block) {
             refresh(block.dataset.playerBlock);
+        });
+
+        /*
+         | Marks only one competitor can hold, such as the chicken dinner.
+         |
+         | Ticking one unticks the rest, which is radio behaviour. Boxes rather than
+         | radios because a radio cannot be cleared once set, and a fixture that was
+         | abandoned or settled on penalty has nobody to award it to. The server refuses
+         | a second holder as well, and names the one that already has it.
+         */
+        document.querySelectorAll('[data-single-toggle]').forEach(function (box) {
+            box.addEventListener('change', function () {
+                if (!box.checked) {
+                    return;
+                }
+
+                document
+                    .querySelectorAll('[data-single-toggle="' + box.dataset.singleToggle + '"]')
+                    .forEach(function (other) {
+                        if (other !== box) {
+                            other.checked = false;
+                        }
+                    });
+            });
         });
 
         /*
