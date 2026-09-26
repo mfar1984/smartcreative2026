@@ -13,6 +13,7 @@ use App\Models\TournamentMatch;
 use App\Models\TournamentMatchEntrant;
 use App\Models\TournamentPlayerAward;
 use App\Models\TournamentStage;
+use App\Support\FacebookLive;
 use App\Support\PlayerProfile;
 
 /**
@@ -396,9 +397,26 @@ class TournamentPublicController extends Controller
             ];
         }
 
+        /*
+         | The Facebook broadcast, if the Page is on air.
+         |
+         | Gated on a tournament here still being played, not just on Facebook being
+         | live. The Page is the organisation's and gets used for other things, so
+         | without that test a broadcast about next season would attach itself to the
+         | finished table of an event from months ago and read as coverage of it.
+         |
+         | Asked for after the boards are built so the question is only put when there
+         | is a page to put it on. Returns null on any failure, including a timeout, so
+         | the standings below are never held up by it.
+         */
+        $liveStream = $tournaments->contains(fn (Tournament $tournament) => $tournament->isOngoing())
+            ? FacebookLive::current()
+            : null;
+
         return view('pages.event-ranking', [
             'event' => $event,
             'boards' => $boards,
+            'liveStream' => $liveStream,
         ]);
     }
 

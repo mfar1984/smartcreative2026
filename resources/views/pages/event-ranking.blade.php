@@ -69,6 +69,13 @@
     <section class="py-10 md:py-16 bg-gray-50">
         <div class="container mx-auto px-4 sm:px-6 lg:px-8">
 
+            {{-- The broadcast, when there is one. Nothing to switch on the day: it is
+                 here because Facebook says the Page is live, and it goes when the
+                 broadcast does. --}}
+            @if ($liveStream)
+                <x-live-stream :stream="$liveStream" />
+            @endif
+
             @forelse ($boards as $board)
                 @php
                     $tournament = $board['tournament'];

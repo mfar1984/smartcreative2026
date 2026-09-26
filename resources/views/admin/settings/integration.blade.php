@@ -534,6 +534,93 @@
                 </x-admin.panel>
             </div>
         @endif
+
+        {{-- ---------------- Facebook live check ---------------- --}}
+        @if ($activeTab === 'facebook' && $canUpdate)
+
+            <div class="mt-5">
+                <x-admin.panel title="Check The Connection" icon="video">
+                    <div class="px-5 py-4">
+                        <div class="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 mb-4">
+                            <x-admin.icon name="video" class="w-4 h-4 mt-0.5 shrink-0 text-gray-500" />
+                            <p class="text-sm text-gray-700">{{ $facebookSummary }}</p>
+                        </div>
+
+                        <p class="text-sm text-gray-600 mb-4">
+                            Asks Facebook whether this Page is broadcasting. It only reads, so
+                            pressing it posts nothing and starts nothing. A pass while you are off
+                            air is still a pass: it means the token works and the video will appear
+                            by itself the next time you go live.
+                        </p>
+
+                        @if (session('test_facebook_success'))
+                            <div role="status" class="flex items-start gap-3 bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                                <svg class="w-5 h-5 shrink-0 text-green-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <div class="text-sm text-green-800">
+                                    <p class="font-semibold mb-0.5">Connected</p>
+                                    <p>{{ session('test_facebook_success') }}</p>
+                                </div>
+                            </div>
+                        @endif
+
+                        @if (session('test_facebook_error'))
+                            <div role="alert" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                                <div class="flex items-start gap-3">
+                                    <svg class="w-5 h-5 shrink-0 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                    </svg>
+                                    <div class="min-w-0">
+                                        <p class="text-sm font-semibold text-red-900 mb-1">Could not check</p>
+                                        <pre class="text-xs text-red-800 whitespace-pre-wrap break-words font-mono bg-red-100/60 rounded p-2">{{ session('test_facebook_error') }}</pre>
+                                        <p class="text-xs text-red-700 mt-2">
+                                            That wording comes from Facebook. The usual causes are a token
+                                            issued without the pages_read_engagement permission, a token
+                                            for a different Page than the ID above, or one that has expired.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        @endif
+
+                        <form action="{{ route('admin.settings.integration.facebook.test') }}" method="POST">
+                            @csrf
+                            <button type="submit"
+                                    class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                <x-admin.icon name="video" class="w-4 h-4" />
+                                Check Live Status
+                            </button>
+                        </form>
+                    </div>
+                </x-admin.panel>
+            </div>
+
+            {{-- Where the two values above come from. Kept on screen rather than in a
+                 manual, because it is a once-only job done months apart and nobody
+                 remembers the order of it the second time. --}}
+            <div class="mt-5">
+                <x-admin.panel title="Getting The Page ID And Token" icon="identification">
+                    <div class="px-5 py-4 text-sm text-gray-700 space-y-3">
+                        <p>
+                            A one-off setup on Facebook's side. The token it produces does not
+                            expire, so this is not something to repeat before each event.
+                        </p>
+                        <ol class="list-decimal ml-5 space-y-2">
+                            <li>At <span class="font-mono text-xs">developers.facebook.com/apps</span>, create an app. Pick the Business type.</li>
+                            <li>Open the Graph API Explorer, choose that app, and generate a user token with <span class="font-mono text-xs">pages_show_list</span> and <span class="font-mono text-xs">pages_read_engagement</span>.</li>
+                            <li>Request <span class="font-mono text-xs">/me/accounts</span>. The reply lists your Pages with an <span class="font-mono text-xs">id</span> and an <span class="font-mono text-xs">access_token</span> for each. Those are the two values above.</li>
+                            <li>Paste them in, save, then press Check Live Status.</li>
+                        </ol>
+                        <p class="text-gray-500">
+                            No App Review is needed while the app is only ever used against a Page
+                            you administer yourself. Review is what Facebook asks for before an app
+                            may read other people's Pages, which this one never does.
+                        </p>
+                    </div>
+                </x-admin.panel>
+            </div>
+        @endif
     </x-admin.settings-shell>
 @endsection
 

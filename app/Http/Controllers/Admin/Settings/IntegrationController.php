@@ -10,6 +10,7 @@ use App\Services\Messaging\InfobipGateway;
 use App\Services\Messaging\MessagingException;
 use App\Services\Messaging\TelegramNotifier;
 use App\Support\ChipBalance;
+use App\Support\FacebookLive;
 use App\Support\MailSettings;
 use App\Support\PhoneNumber;
 use App\Support\PaymentSettings;
@@ -627,6 +628,64 @@ class IntegrationController extends Controller
                 ],
             ],
         ],
+
+        /*
+        | Facebook Live. Read only, and one way.
+        |
+        | Nothing here broadcasts, schedules, or ends anything on Facebook. The site
+        | asks one question — is this Page live — and embeds the answer on the event
+        | ranking page. That is deliberately the whole scope: going live is already a
+        | decision somebody makes in the Facebook app, and asking them to repeat it
+        | here would be a second switch that can disagree with the first.
+        |
+        | Asking Facebook is what makes it automatic. The manual link below exists for
+        | the case where no app has been set up yet, and stops applying the moment a
+        | Page id and token are saved, so there is never a stale link competing with a
+        | live broadcast.
+        */
+        'facebook' => [
+            'label' => 'Live Stream',
+            'icon' => 'video',
+            'intro' => [
+                'title' => 'Facebook Live',
+                'description' => 'Puts your Facebook broadcast on the event ranking page for as long as it is running, so the stream and the table are read in one place. Nothing is ever published to Facebook from here.',
+                'icon' => 'video',
+                'accent' => 'blue',
+            ],
+            'panels' => [
+                'Page' => ['icon' => 'video', 'fields' => ['enabled', 'page_id', 'page_token']],
+                'Before The Page Is Connected' => ['icon' => 'globe', 'fields' => ['fallback_url']],
+            ],
+            'fields' => [
+                'enabled' => [
+                    'label' => 'Show the stream on the ranking page',
+                    'type' => 'toggle',
+                    'rules' => ['nullable', 'boolean'],
+                    'help' => 'The master switch. With this off no video is embedded, whatever is saved below.',
+                ],
+                'page_id' => [
+                    'label' => 'Page ID',
+                    'type' => 'text',
+                    'rules' => ['nullable', 'string', 'max:100'],
+                    'placeholder' => '102345678901234',
+                    'help' => 'The numeric id of the Facebook Page that broadcasts, not its name. Found under About > Page transparency on the Page itself.',
+                ],
+                'page_token' => [
+                    'label' => 'Page Access Token',
+                    'type' => 'password',
+                    'secret' => true,
+                    'rules' => ['nullable', 'string', 'max:1000'],
+                    'help' => 'Needs pages_read_engagement. A token issued from a long-lived login does not expire, so this is set up once. Stored encrypted and never shown back.',
+                ],
+                'fallback_url' => [
+                    'label' => 'Video URL',
+                    'type' => 'url',
+                    'rules' => ['nullable', 'url', 'max:500'],
+                    'placeholder' => 'https://www.facebook.com/yourpage/videos/1234567890/',
+                    'help' => 'Embedded only while no Page ID and token are saved above. Once they are, what appears is whatever Facebook reports as live and this is ignored, so an old link can never outlive the broadcast. The video has to be public.',
+                ],
+            ],
+        ],
     ];
 
     public function index(Request $request)
@@ -661,6 +720,7 @@ class IntegrationController extends Controller
             // anything right now, shown above its test button.
             'smsSummary' => $tab === 'sms' ? SmsSettings::summary() : null,
             'telegramSummary' => $tab === 'telegram' ? TelegramSettings::summary() : null,
+            'facebookSummary' => $tab === 'facebook' ? FacebookLive::summary() : null,
 
             // Read only and generated, so it is shown rather than asked for. Only
             // resolved on the SMS tab, because reading it creates the secret on
@@ -730,6 +790,17 @@ class IntegrationController extends Controller
          */
         if ($tab === 'payments') {
             ChipBalance::forget();
+        }
+
+        /*
+         | Whether a Page is live was cached against the old profile, so it has to go.
+         |
+         | Without this, connecting a Page or flipping the switch appears to do nothing
+         | for up to a minute, which during an event reads as the feature being broken
+         | and invites somebody to change another setting to "fix" it.
+         */
+        if ($tab === 'facebook') {
+            FacebookLive::flush();
         }
 
         AdminLogger::activity(
@@ -1021,6 +1092,44 @@ class IntegrationController extends Controller
             'Posted to %s as @%s. Check the group.',
             TelegramSettings::chatId(),
             $bot['username'] ?? '?',
+        ));
+    }
+
+    /**
+     * Ask Facebook whether the Page is live, and report exactly what came back.
+     *
+     * Reads. It cannot start a broadcast and it does not post, so unlike the other test
+     * buttons on this screen pressing it has no effect anybody outside can see.
+     *
+     * Three outcomes, kept apart on purpose. Connected and live is the happy one.
+     * Connected and not live is also a pass, and saying so is the point: an operator
+     * testing the day before an event would otherwise read silence as a broken token
+     * and start changing credentials that were correct. A refusal is the only failure,
+     * and Facebook's own wording is passed through because it names the cause.
+     */
+    public function checkFacebookLive()
+    {
+        if (! FacebookLive::isReady()) {
+            return back()->with('test_facebook_error', 'Save the Page ID and access token first. There is nothing to ask yet.');
+        }
+
+        $result = FacebookLive::probe();
+
+        if ($result['error'] !== null) {
+            AdminLogger::activity('settings.facebook.test-failed', 'Facebook live check failed.');
+
+            return back()->with('test_facebook_error', $result['error']);
+        }
+
+        AdminLogger::activity('settings.facebook.test', 'Checked the Facebook live status.');
+
+        if ($result['live'] === null) {
+            return back()->with('test_facebook_success', 'Connected. This Page is not broadcasting at the moment, so no video is on the ranking page. It will appear on its own the next time you go live.');
+        }
+
+        return back()->with('test_facebook_success', sprintf(
+            'Connected, and live right now%s. It is on the ranking page.',
+            filled($result['live']['title']) ? ': ' . $result['live']['title'] : '',
         ));
     }
 

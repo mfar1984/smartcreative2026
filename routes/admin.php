@@ -718,6 +718,13 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware(['permission:settings.integration.update', 'throttle:6,1'])
                 ->name('integration.telegram.test');
 
+            // Throttled like the rest, though this one only reads: it clears the
+            // cached live status, so an unthrottled button would let somebody take the
+            // cache out from under a busy ranking page as fast as they can click.
+            Route::post('integration/facebook/test', [IntegrationController::class, 'checkFacebookLive'])
+                ->middleware(['permission:settings.integration.update', 'throttle:6,1'])
+                ->name('integration.facebook.test');
+
             /*
              | EasyParcel authorisation. Three legs of one redirect, so they are
              | routes rather than part of the settings form.
