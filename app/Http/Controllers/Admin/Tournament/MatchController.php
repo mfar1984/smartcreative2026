@@ -240,7 +240,97 @@ class MatchController extends Controller
             'playerInputs' => $rule?->tracksPlayers() ? ($rule->player_inputs ?? []) : [],
             'rosters' => $this->rostersFor($match, $rule),
             'recorded' => $this->recordedPlayersFor($match),
+
+            /*
+             | Two ways of entering personal figures, and only ever one of them on
+             | screen.
+             |
+             | Null means whole rosters, which is what a five-a-side wants: ten people,
+             | all of them named, a panel per squad. A number means the operator picks
+             | that many players out of the whole fixture, which is the only workable
+             | way to keep a leaderboard for a lobby of twenty squads where naming
+             | everybody is eighty rows.
+             */
+            'playerSlots' => $rule?->playerSlots(),
+            'pickable' => $this->pickableFor($match, $rule),
+            'slotRows' => $this->slotRowsFor($match, $rule),
         ]);
+    }
+
+    /**
+     * Everyone who could be named in this fixture, grouped by the squad they play for.
+     *
+     * Feeds the dropdown in the pick-a-player dialog. Built from the same rosters the
+     * roster panels use, so the two routes cannot offer different people, and grouped
+     * so an operator reading a results screen can find a name under its team.
+     *
+     * @return array<int, array{name: string, players: array<int, string>}>
+     */
+    private function pickableFor(TournamentMatch $match, ?PointRule $rule): array
+    {
+        if ($rule === null || ! $rule->picksPlayers()) {
+            return [];
+        }
+
+        $groups = [];
+
+        foreach ($this->rostersFor($match, $rule) as $entrantId => $roster) {
+            $line = $match->entrants->firstWhere('tournament_entrant_id', $entrantId);
+
+            if ($roster->isEmpty()) {
+                continue;
+            }
+
+            $groups[$entrantId] = [
+                'name' => $line?->entrant?->displayName() ?? 'Competitor',
+                'players' => $roster
+                    ->mapWithKeys(fn (EventParticipant $person) => [
+                        /*
+                         | Named for an operator, not for the public. The in-game name
+                         | is what appears on the results screen they are copying from,
+                         | the account id is what they check it against, and the legal
+                         | name settles it when two players chose the same handle. This
+                         | list never leaves the admin.
+                         */
+                        $person->id => trim(sprintf(
+                            '%s%s — %s',
+                            $person->ign_name ?: $person->full_name,
+                            $person->ign_player_id ? ' (' . $person->ign_player_id . ')' : '',
+                            $person->full_name,
+                        )),
+                    ])
+                    ->all(),
+            ];
+        }
+
+        return $groups;
+    }
+
+    /**
+     * Figures already on file, flattened into slot order for a correction.
+     *
+     * Ordered by what they scored so reopening a saved fixture reads the way it was
+     * entered: the best first. Slot numbers themselves are not stored, because they are
+     * a property of the form rather than of the result.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function slotRowsFor(TournamentMatch $match, ?PointRule $rule): array
+    {
+        if ($rule === null || ! $rule->picksPlayers()) {
+            return [];
+        }
+
+        return $match->entrants
+            ->flatMap(fn ($line) => $line->players)
+            ->filter(fn (TournamentMatchPlayer $player) => $player->inputs !== null)
+            ->sortByDesc('points')
+            ->values()
+            ->map(fn (TournamentMatchPlayer $player) => [
+                'participant' => $player->event_participant_id,
+                'inputs' => $player->inputs ?? [],
+            ])
+            ->all();
     }
 
     /**
@@ -275,7 +365,9 @@ class MatchController extends Controller
             ->whereIn('event_registration_id', $registrationIds)
             ->playing()
             ->orderBy('full_name')
-            ->get(['id', 'event_registration_id', 'full_name', 'ign_player_id'])
+            // ign_name is selected because the pick-a-player dropdown leads with the
+            // handle that appears on the results screen being copied from.
+            ->get(['id', 'event_registration_id', 'full_name', 'ign_name', 'ign_player_id'])
             ->groupBy('event_registration_id');
 
         $rosters = [];
@@ -362,8 +454,15 @@ class MatchController extends Controller
          | from being saved unless the profile says players are required. That is the
          | point of it being optional: an operator who skips these rows still gets a
          | correct podium.
+         |
+         | Which of the two readers runs is decided by the profile, never by what the
+         | browser happened to send. A profile that names a few players has no roster
+         | panels on screen, so reading roster keys from it would find nothing, and the
+         | reverse would let a hand-made request bypass the slot limit.
          */
-        $players = $this->validatePlayers($request, $match, $rule);
+        $players = $rule->picksPlayers()
+            ? $this->validateSlots($request, $match, $rule)
+            : $this->validatePlayers($request, $match, $rule);
 
         if ($request->hasFile('proof')) {
             $file = $request->file('proof');
@@ -385,6 +484,29 @@ class MatchController extends Controller
                 : collect($data['lines'])
                     ->map(fn (array $inputs) => $engine->score($rule, $inputs) + ['inputs' => $inputs])
                     ->all();
+
+            /*
+             | In slot mode the named players are the whole truth for this fixture, so
+             | anybody dropped from the list has their row removed.
+             |
+             | savePlayers() only ever creates or updates. That is right for roster mode,
+             | where the list of people is fixed and a blank row means "no figure". It is
+             | wrong here: correcting a result from naming A, B and C to naming A, B and D
+             | would otherwise leave C on the leaderboard with figures nobody claims.
+             |
+             | Scoped to this fixture's own lines, so a correction cannot touch what was
+             | recorded in another match.
+             */
+            if ($rule->picksPlayers()) {
+                $named = collect($players)
+                    ->flatMap(fn (array $rows) => array_keys($rows))
+                    ->all();
+
+                TournamentMatchPlayer::query()
+                    ->whereIn('tournament_match_entrant_id', $match->entrants->pluck('id'))
+                    ->when($named !== [], fn ($query) => $query->whereNotIn('event_participant_id', $named))
+                    ->delete();
+            }
 
             foreach ($match->entrants as $line) {
                 $result = $scored[$line->tournament_entrant_id] ?? null;
@@ -983,7 +1105,11 @@ class MatchController extends Controller
                         continue;
                     }
 
-                    $number = (int) $value;
+                    // Measured or counted, decided by the profile. Same rule the named
+                    // player route applies, so the two cannot store a figure differently.
+                    $number = ($definition['type'] ?? 'integer') === 'decimal'
+                        ? round((float) $value, 3)
+                        : (int) $value;
 
                     if (isset($definition['min']) && $number < $definition['min']) {
                         $errors["players.{$entrantId}.{$participant->id}.{$key}"] = sprintf(
@@ -1020,6 +1146,143 @@ class MatchController extends Controller
             if ($rows !== []) {
                 $out[$entrantId] = $rows;
             }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Check the figures for a handful of named players.
+     *
+     * The counterpart to validatePlayers() for a profile that names a few rather than
+     * listing every roster. Returns the same shape, so savePlayers() is reached by both
+     * routes without knowing which one it came from.
+     *
+     * The squad a named player belongs to is worked out here from their registration
+     * rather than taken from the request. The dialog only sends a person, which means a
+     * hand-made request cannot file somebody's figures under a team they do not play
+     * for, and a person who is not in this fixture at all is refused outright.
+     *
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function validateSlots(Request $request, TournamentMatch $match, PointRule $rule): array
+    {
+        $slots = $rule->playerSlots();
+
+        if ($slots === null) {
+            return [];
+        }
+
+        $definitions = collect($rule->player_inputs ?? [])->keyBy('key');
+
+        // Who may be named, and for whom. One entry per person in the fixture.
+        $owners = [];
+
+        foreach ($this->rostersFor($match, $rule) as $entrantId => $roster) {
+            foreach ($roster as $person) {
+                $owners[(int) $person->id] = (int) $entrantId;
+            }
+        }
+
+        $submitted = $request->input('slots', []);
+        $errors = [];
+        $named = [];
+        $out = [];
+
+        // Only as many rows as the profile allows are read. A longer request is
+        // truncated rather than rejected: the extra rows are not a thing the operator
+        // can see or have filled in.
+        foreach (array_slice(is_array($submitted) ? $submitted : [], 0, $slots, true) as $index => $row) {
+            $participantId = (int) (is_array($row) ? ($row['participant'] ?? 0) : 0);
+
+            // An empty slot is not an error. Eight slots does not mean eight players
+            // must be named, and a fixture may legitimately have none.
+            if ($participantId === 0) {
+                continue;
+            }
+
+            if (! array_key_exists($participantId, $owners)) {
+                $errors["slots.{$index}.participant"] = 'That player is not in this fixture.';
+
+                continue;
+            }
+
+            if (isset($named[$participantId])) {
+                $errors["slots.{$index}.participant"] = sprintf(
+                    'That player is already named in row %d.',
+                    $named[$participantId] + 1,
+                );
+
+                continue;
+            }
+
+            $entrantId = $owners[$participantId];
+
+            $clean = [];
+            $anyFigure = false;
+
+            foreach ($definitions as $key => $definition) {
+                $value = $row[$key] ?? null;
+
+                if ($value === null || $value === '') {
+                    if ($rule->requiresPlayers() && ($definition['required'] ?? false)) {
+                        $errors["slots.{$index}.{$key}"] = sprintf(
+                            '%s is needed in row %d.',
+                            $definition['label'] ?? $key,
+                            $index + 1,
+                        );
+                    }
+
+                    $clean[$key] = null;
+
+                    continue;
+                }
+
+                // A measured figure keeps its fraction; a counted one does not. Decided
+                // by the profile, so the form and the store agree on what was typed.
+                $number = ($definition['type'] ?? 'integer') === 'decimal'
+                    ? round((float) $value, 3)
+                    : (int) $value;
+
+                if (isset($definition['min']) && $number < $definition['min']) {
+                    $errors["slots.{$index}.{$key}"] = sprintf(
+                        '%s cannot be below %s in row %d.',
+                        $definition['label'] ?? $key,
+                        $definition['min'],
+                        $index + 1,
+                    );
+                }
+
+                $clean[$key] = $number;
+                $anyFigure = true;
+            }
+
+            /*
+             | Naming somebody and leaving every figure blank is a half-finished row, not
+             | a decision. Said plainly rather than saved as a player who did nothing,
+             | which would put them on the leaderboard on nil.
+             */
+            if (! $anyFigure) {
+                $errors["slots.{$index}.participant"] = sprintf(
+                    'Row %d names a player but has no figures. Fill one in or clear the name.',
+                    $index + 1,
+                );
+
+                continue;
+            }
+
+            $named[$participantId] = $index;
+
+            $out[$entrantId][$participantId] = [
+                // Naming somebody is saying they played. There is no separate tick,
+                // because an unnamed player simply does not appear.
+                'took_part' => true,
+                'inputs' => $clean,
+            ];
         }
 
         if ($errors !== []) {

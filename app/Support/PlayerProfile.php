@@ -178,6 +178,19 @@ final class PlayerProfile
                     'team' => $entrant->displayName(),
                     'standing' => self::teamStanding($entrant),
                     'personal' => self::personalStanding($tournament, $person),
+
+                    /*
+                     | Which personal figures this competition kept, in its own order and
+                     | under its own labels. Read per appearance rather than once for the
+                     | page, because two games record different things and merging them
+                     | would print one game's label over the other's number.
+                     */
+                    'player_columns' => collect($tournament->pointRule?->player_components ?? [])
+                        ->map(fn (array $component) => [
+                            'key' => $component['key'],
+                            'label' => $component['label'] ?? $component['key'],
+                        ])
+                        ->all(),
                 ];
             }
         }

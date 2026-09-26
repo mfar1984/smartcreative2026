@@ -349,6 +349,31 @@
                                             @endif
                                         @endif
                                     </div>
+
+                                    {{-- The figures behind that score, under the competition's
+                                         own labels. A stat left at nothing is dropped rather
+                                         than printed as a zero, because a game that never asked
+                                         for damage did not record none of it. --}}
+                                    @if ($personal && $appearance['player_columns'] !== [])
+                                        @php
+                                            $figures = collect($appearance['player_columns'])
+                                                ->mapWithKeys(fn (array $column) => [
+                                                    $column['label'] => $personal->componentCount($column['key']) + 0,
+                                                ])
+                                                ->filter(fn ($value) => $value > 0);
+                                        @endphp
+
+                                        @if ($figures->isNotEmpty())
+                                            <div class="flex flex-wrap gap-2 mt-3">
+                                                @foreach ($figures as $label => $value)
+                                                    <span class="inline-flex items-baseline gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5">
+                                                        <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">{{ $label }}</span>
+                                                        <span class="text-sm font-bold tabular-nums text-slate-800">{{ $value }}</span>
+                                                    </span>
+                                                @endforeach
+                                            </div>
+                                        @endif
+                                    @endif
                                 </div>
                             </div>
                         </div>

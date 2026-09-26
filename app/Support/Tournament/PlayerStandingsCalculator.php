@@ -147,8 +147,16 @@ final class PlayerStandingsCalculator
                     $totals[$key] = ($totals[$key] ?? 0) + (float) $value;
                 }
 
+                /*
+                 | Summed as a float, because a measured figure such as a personal
+                 | rating or damage carries a fraction and casting each one to an
+                 | integer here would throw it away after the engine had kept it.
+                 |
+                 | A whole number is unaffected: a total of twenty-four kills is 24.0,
+                 | which reads and prints as 24.
+                 */
                 foreach ($line->component_counts ?? [] as $key => $value) {
-                    $counts[$key] = ($counts[$key] ?? 0) + (int) $value;
+                    $counts[$key] = ($counts[$key] ?? 0) + (float) $value;
                 }
             }
 
@@ -182,7 +190,10 @@ final class PlayerStandingsCalculator
                 'ign' => $participant?->ign_player_id,
                 'matches_played' => $played,
                 'component_totals' => $totals,
-                'component_counts' => $counts,
+
+                // Rounded on the way in, so repeated addition of a measured figure does
+                // not leave 4152.299999999 in a column somebody reads.
+                'component_counts' => array_map(fn (float $value) => round($value, 3), $counts),
                 'total_points' => round(array_sum($totals), 3),
 
                 /*

@@ -15,7 +15,16 @@
         $head = 'px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-gray-500';
         $cell = 'w-20 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-center tabular-nums text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
 
-        $tracksPlayers = $playerInputs !== [] && $rosters !== [];
+        /*
+         | Two ways in, and never both at once.
+         |
+         | Slot mode names a few players out of the whole fixture and so has no per-squad
+         | panels; roster mode lists everybody and so has no dialog. Showing both would
+         | let the same player be entered twice for one match, with whichever was written
+         | last silently winning.
+         */
+        $picksPlayers = $playerSlots !== null && $pickable !== [];
+        $tracksPlayers = ! $picksPlayers && $playerInputs !== [] && $rosters !== [];
 
         /*
          | Which team field holds the head count, read from the profile rather than
@@ -373,12 +382,157 @@
                     <p class="text-xs text-gray-500 max-w-md">
                         Saving works the standings out again straight away. Nothing waits on a
                         background worker.
+                        @if ($picksPlayers)
+                            You will be asked for the top {{ $playerSlots }} players first.
+                        @endif
                     </p>
+
+                    {{-- A real submit button, always. In slot mode the script below
+                         intercepts it to show the dialog first, so a browser that never
+                         runs the script still saves the team result rather than leaving
+                         the operator with a button that does nothing. --}}
                     <button type="submit" @disabled(! $canScore)
+                            @if ($picksPlayers) data-open-slots @endif
                             class="rounded-lg border border-blue-600 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
                         {{ $match->isSettled() ? 'Correct Result' : 'Save Result' }}
                     </button>
                 </div>
+
+                {{-- ===== Name the top players =====
+                     Inside the form on purpose: these inputs are part of the same save,
+                     so there is one request and one transaction. A separate form would
+                     mean a team result that is saved and personal figures that might not
+                     be. --}}
+                @if ($picksPlayers)
+                    @php
+                        // A row that came back from a rejected save wins over what is on
+                        // file, so nothing anybody typed is lost to a validation error.
+                        $existingSlots = old('slots', collect($slotRows)
+                            ->map(fn (array $row) => ['participant' => $row['participant']] + $row['inputs'])
+                            ->all());
+                    @endphp
+
+                    <div id="slot-dialog"
+                         class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/60 p-4"
+                         role="dialog" aria-modal="true" aria-labelledby="slot-dialog-title">
+
+                        <div class="w-full max-w-3xl rounded-xl bg-white shadow-xl overflow-hidden max-h-full flex flex-col">
+                            <div class="flex items-start justify-between gap-4 px-5 py-4 border-b border-gray-200">
+                                <div>
+                                    <h2 id="slot-dialog-title" class="text-base font-bold text-gray-900">
+                                        Top {{ $playerSlots }} players
+                                    </h2>
+                                    <p class="text-sm text-gray-500 mt-0.5">
+                                        {{ $match->label() }} &middot; name only the players worth recording.
+                                        Leave a row blank to skip it.
+                                    </p>
+                                </div>
+
+                                <button type="button" data-close-slots
+                                        class="shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
+                                        aria-label="Close">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            @error('slots')
+                                <p class="px-5 py-2.5 bg-red-50 border-b border-red-200 text-sm text-red-800">{{ $message }}</p>
+                            @enderror
+
+                            <div class="overflow-y-auto">
+                                <table class="w-full text-sm">
+                                    <thead class="bg-gray-50 sticky top-0">
+                                        <tr>
+                                            <th scope="col" class="{{ $head }} w-10">#</th>
+                                            <th scope="col" class="{{ $head }}">Player</th>
+                                            @foreach ($playerInputs as $definition)
+                                                <th scope="col" class="{{ $head }} text-center">
+                                                    {{ $definition['label'] ?? $definition['key'] }}
+                                                </th>
+                                            @endforeach
+                                        </tr>
+                                    </thead>
+
+                                    <tbody class="divide-y divide-gray-100">
+                                        @for ($slot = 0; $slot < $playerSlots; $slot++)
+                                            @php $row = $existingSlots[$slot] ?? []; @endphp
+
+                                            <tr class="hover:bg-blue-50/30">
+                                                <td class="px-4 py-2.5 text-xs font-bold text-gray-400 tabular-nums">
+                                                    {{ $slot + 1 }}
+                                                </td>
+
+                                                <td class="px-4 py-2.5">
+                                                    <label for="slot-{{ $slot }}" class="sr-only">Player for row {{ $slot + 1 }}</label>
+                                                    <select id="slot-{{ $slot }}" name="slots[{{ $slot }}][participant]"
+                                                            class="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition"
+                                                            data-slot-player>
+                                                        <option value="">Nobody</option>
+                                                        @foreach ($pickable as $group)
+                                                            <optgroup label="{{ $group['name'] }}">
+                                                                @foreach ($group['players'] as $personId => $label)
+                                                                    <option value="{{ $personId }}"
+                                                                        @selected((int) ($row['participant'] ?? 0) === (int) $personId)>
+                                                                        {{ $label }}
+                                                                    </option>
+                                                                @endforeach
+                                                            </optgroup>
+                                                        @endforeach
+                                                    </select>
+
+                                                    @error("slots.{$slot}.participant")
+                                                        <span class="block text-xs text-red-600 mt-1">{{ $message }}</span>
+                                                    @enderror
+                                                </td>
+
+                                                @foreach ($playerInputs as $definition)
+                                                    @php $pkey = $definition['key']; @endphp
+
+                                                    <td class="px-3 py-2.5 text-center">
+                                                        <label for="slot-{{ $slot }}-{{ $pkey }}" class="sr-only">
+                                                            {{ $definition['label'] ?? $pkey }} for row {{ $slot + 1 }}
+                                                        </label>
+                                                        <input type="number"
+                                                               id="slot-{{ $slot }}-{{ $pkey }}"
+                                                               name="slots[{{ $slot }}][{{ $pkey }}]"
+                                                               min="{{ $definition['min'] ?? 0 }}"
+                                                               step="{{ $definition['step'] ?? 1 }}"
+                                                               value="{{ $row[$pkey] ?? '' }}"
+                                                               class="w-24 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+
+                                                        @error("slots.{$slot}.{$pkey}")
+                                                            <span class="block text-xs text-red-600 mt-1">{{ $message }}</span>
+                                                        @enderror
+                                                    </td>
+                                                @endforeach
+                                            </tr>
+                                        @endfor
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-t border-gray-200 bg-gray-50">
+                                <p class="text-xs text-gray-500 max-w-sm">
+                                    Personal points are counted on their own leaderboard and never added
+                                    to a team's total.
+                                </p>
+
+                                <div class="flex flex-wrap gap-2.5">
+                                    <button type="button" data-close-slots
+                                            class="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                        Back
+                                    </button>
+                                    <button type="submit"
+                                            class="rounded-lg border border-blue-600 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                        {{ $match->isSettled() ? 'Correct Result' : 'Save Result' }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                @endif
             </form>
 
             {{-- ============ Walkover, forfeit, DQ ============ --}}
@@ -562,6 +716,110 @@
         document.querySelectorAll('[data-player-block]').forEach(function (block) {
             refresh(block.dataset.playerBlock);
         });
+
+        /*
+         | Naming the top players.
+         |
+         | The dialog stands between pressing Save and the form going, so the team result
+         | is filled in first and the personal figures second, in one request. The button
+         | is a real submit button: if this script never runs, pressing it saves the team
+         | result and nothing is broken.
+         */
+        const slotDialog = document.getElementById('slot-dialog');
+
+        if (slotDialog) {
+            const form = document.getElementById('score-form');
+            let confirmed = false;
+
+            function openSlots() {
+                slotDialog.classList.remove('hidden');
+                slotDialog.classList.add('flex');
+                slotDialog.querySelector('select')?.focus();
+            }
+
+            function closeSlots() {
+                slotDialog.classList.add('hidden');
+                slotDialog.classList.remove('flex');
+            }
+
+            document.querySelectorAll('[data-open-slots]').forEach(function (button) {
+                button.addEventListener('click', function (event) {
+                    // Let the browser check the team fields first. Opening the dialog
+                    // over a form that will be rejected anyway wastes the operator's
+                    // time filling it in.
+                    if (form && !form.checkValidity()) {
+                        return;
+                    }
+
+                    if (confirmed) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    openSlots();
+                });
+            });
+
+            // Pressing Save inside the dialog is the real submission.
+            slotDialog.querySelector('[type="submit"]')?.addEventListener('click', function () {
+                confirmed = true;
+            });
+
+            document.querySelectorAll('[data-close-slots]').forEach(function (button) {
+                button.addEventListener('click', closeSlots);
+            });
+
+            slotDialog.addEventListener('click', function (event) {
+                if (event.target === slotDialog) {
+                    closeSlots();
+                }
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' && !slotDialog.classList.contains('hidden')) {
+                    closeSlots();
+                }
+            });
+
+            /*
+             | Stop the same player being chosen in two rows.
+             |
+             | The server refuses it too, and says which row, but finding out after a save
+             | is a poor way to learn it. Anybody already chosen elsewhere is disabled in
+             | the other dropdowns rather than removed, so the list does not reshuffle
+             | while somebody is reading it.
+             */
+            const pickers = Array.from(slotDialog.querySelectorAll('[data-slot-player]'));
+
+            function syncPickers() {
+                const taken = pickers.map(function (select) { return select.value; })
+                    .filter(function (value) { return value !== ''; });
+
+                pickers.forEach(function (select) {
+                    Array.from(select.options).forEach(function (option) {
+                        if (option.value === '' || option.value === select.value) {
+                            option.disabled = false;
+
+                            return;
+                        }
+
+                        option.disabled = taken.indexOf(option.value) !== -1;
+                    });
+                });
+            }
+
+            pickers.forEach(function (select) {
+                select.addEventListener('change', syncPickers);
+            });
+
+            syncPickers();
+
+            // A rejected save comes back with the rows filled in, so the dialog is
+            // reopened rather than hiding what the operator has to correct.
+            @if ($errors->has('slots') || collect($errors->keys())->contains(fn ($key) => str_starts_with($key, 'slots.')))
+                openSlots();
+            @endif
+        }
     })();
 </script>
 @endpush

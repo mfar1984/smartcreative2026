@@ -222,14 +222,26 @@ final class ScoringEngine
      * The count is carried as well as the points, so a tie-break on kills compares
      * kills rather than the points those kills happened to be worth.
      *
+     * Counted by default, because that is what almost every figure in a scoreboard is
+     * and there is no such thing as two and a half kills. A component may declare
+     * itself measured instead, which keeps the fraction: a personal rating of 260.65
+     * rounded down to 260 loses exactly the part that separates two players.
+     *
+     * The flag is opt-in rather than inferred from the value, so no existing profile
+     * changes behaviour on the strength of somebody typing a decimal point by mistake.
+     *
      * @param  array<string, mixed>  $component
      * @param  array<string, mixed>  $inputs
-     * @return array{points: float, count: int|null, disqualified: bool}
+     * @return array{points: float, count: int|float|null, disqualified: bool}
      */
     private function perUnit(array $component, array $inputs): array
     {
-        $units = (int) ($inputs[$component['source'] ?? ''] ?? 0);
+        $raw = $inputs[$component['source'] ?? ''] ?? 0;
         $each = (float) ($component['value'] ?? 0);
+
+        $units = ($component['decimal'] ?? false)
+            ? round((float) $raw, 3)
+            : (int) $raw;
 
         return [
             'points' => $units * $each,

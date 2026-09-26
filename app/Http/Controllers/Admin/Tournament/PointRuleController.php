@@ -275,8 +275,15 @@ class PointRuleController extends Controller
             'player_stats.*.label' => ['nullable', 'string', 'max:60'],
             'player_stats.*.value' => ['nullable', 'numeric', 'between:-100,100'],
             'player_stats.*.required' => ['nullable', 'boolean'],
+            'player_stats.*.decimal' => ['nullable', 'boolean'],
             'player_tiebreak' => ['array'],
             'player_tiebreak.*' => ['nullable', 'string', 'max:40'],
+
+            /*
+             | How many players are named per match. Fifty is not a real ceiling, only a
+             | guard against a typo turning one fixture into a thousand input boxes.
+             */
+            'player_slots' => ['nullable', 'integer', 'min:1', 'max:50'],
 
             'is_active' => ['nullable', 'boolean'],
         ], [
@@ -310,6 +317,7 @@ class PointRuleController extends Controller
                 'player_components' => [],
                 'player_inputs' => [],
                 'player_tiebreak' => [],
+                'player_slots' => null,
             ];
         }
 
@@ -332,19 +340,32 @@ class PointRuleController extends Controller
                 continue;
             }
 
+            /*
+             | Whether the figure is measured or counted.
+             |
+             | A kill is a count: there is no such thing as two and a half of them. MVP
+             | points and damage as a game reports them are measured, and truncating
+             | 260.65 to 260 quietly loses the part that separates two players. The flag
+             | travels on the component because that is what the engine reads when it
+             | turns the figure into points.
+             */
+            $decimal = (bool) ($stat['decimal'] ?? false);
+
             $components[$key] = [
                 'key' => $key,
                 'label' => $label,
                 'type' => PointRule::TYPE_PER_UNIT,
                 'source' => $key,
                 'value' => (float) ($stat['value'] ?? 0),
+                'decimal' => $decimal,
             ];
 
             $inputs[$key] = [
                 'key' => $key,
                 'label' => $label,
-                'type' => 'integer',
+                'type' => $decimal ? 'decimal' : 'integer',
                 'min' => 0,
+                'step' => $decimal ? 0.01 : 1,
                 'required' => (bool) ($stat['required'] ?? false),
             ];
         }
@@ -357,11 +378,17 @@ class PointRuleController extends Controller
             ->values()
             ->all();
 
+        $slots = (int) ($data['player_slots'] ?? 0);
+
         return [
             'track_players' => $mode,
             'player_components' => array_values($components),
             'player_inputs' => array_values($inputs),
             'player_tiebreak' => $tiebreak,
+
+            // Nothing to record means nothing to pick, so the slot count is dropped
+            // rather than left pointing at an empty form.
+            'player_slots' => $components !== [] && $slots > 0 ? $slots : null,
         ];
     }
 
@@ -563,9 +590,11 @@ class PointRuleController extends Controller
                     'label' => $c['label'] ?? ($c['key'] ?? ''),
                     'value' => $c['value'] ?? 0,
                     'required' => (bool) ($rule->playerInput($c['key'] ?? '')['required'] ?? false),
+                    'decimal' => (bool) ($c['decimal'] ?? false),
                 ])
                 ->values()
                 ->all(),
+            'playerSlots' => $rule->player_slots,
             'playerTiebreak' => $rule->player_tiebreak ?? [],
             'playerTiebreakOptions' => collect($rule->player_components ?? [])
                 ->mapWithKeys(fn (array $c) => [$c['key'] => $c['label'] ?? $c['key']])

@@ -325,7 +325,14 @@ class PlayerScoringTest extends TestCase
 
         $this->assertSame(2, $overall->matches_played);
         $this->assertSame(10.0, $overall->total_points);
-        $this->assertSame(3500, $overall->componentCount('damage'));
+
+        /*
+         | Float, not int. A personal figure can be measured as well as counted: a rating
+         | of 260.65 truncated to 260 loses exactly the part that separates two players,
+         | so this accessor keeps the fraction. Damage entered as whole numbers still
+         | totals 3500, and 3500.0 prints as 3500.
+         */
+        $this->assertSame(3500.0, $overall->componentCount('damage'));
     }
 
     /**
@@ -390,7 +397,7 @@ class PlayerScoringTest extends TestCase
 
         $this->assertSame(5.0, $rows[0]->total_points);
         $this->assertSame(5.0, $rows[1]->total_points);
-        $this->assertSame(2400, $rows[0]->componentCount('damage'));
+        $this->assertSame(2400.0, $rows[0]->componentCount('damage'));
         $this->assertSame(1, $rows[0]->rank);
         $this->assertSame(2, $rows[1]->rank);
         $this->assertSame(0.0, $rows[0]->componentTotal('damage'));

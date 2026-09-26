@@ -85,6 +85,7 @@ class PointRule extends Model
         'player_components',
         'player_inputs',
         'player_tiebreak',
+        'player_slots',
         'is_active',
         'created_by',
     ];
@@ -99,6 +100,7 @@ class PointRule extends Model
             'player_components' => 'array',
             'player_inputs' => 'array',
             'player_tiebreak' => 'array',
+            'player_slots' => 'integer',
             'is_active' => 'boolean',
         ];
     }
@@ -188,6 +190,36 @@ class PointRule extends Model
     public function requiresPlayers(): bool
     {
         return ($this->track_players ?? self::TRACK_OFF) === self::TRACK_REQUIRED;
+    }
+
+    /**
+     * How many players are named per match, or null to take whole rosters.
+     *
+     * A number here changes the way figures are entered: instead of a panel per squad
+     * listing everybody on it, the operator picks that many players out of the whole
+     * fixture. Twenty squads of four is eighty rows nobody will type; the eight best is
+     * a leaderboard somebody will actually keep.
+     *
+     * Only meaningful while tracking is on, and only once there is something to record,
+     * so both are checked here rather than at each call site.
+     */
+    public function playerSlots(): ?int
+    {
+        if (! $this->tracksPlayers() || ($this->player_inputs ?? []) === []) {
+            return null;
+        }
+
+        $slots = (int) ($this->player_slots ?? 0);
+
+        return $slots > 0 ? $slots : null;
+    }
+
+    /**
+     * Whether personal figures are entered by naming a few players.
+     */
+    public function picksPlayers(): bool
+    {
+        return $this->playerSlots() !== null;
     }
 
     /**

@@ -69,9 +69,13 @@ class TournamentMatchPlayer extends Model
         return (float) data_get($this->component_points, $key, 0);
     }
 
-    public function componentCount(string $key): int
+    /**
+     * Float rather than int, for the same reason the standings accessor is: a personal
+     * figure can be measured as well as counted.
+     */
+    public function componentCount(string $key): float
     {
-        return (int) data_get($this->component_counts, $key, 0);
+        return (float) data_get($this->component_counts, $key, 0);
     }
 
     /**

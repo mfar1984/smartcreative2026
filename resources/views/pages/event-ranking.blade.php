@@ -153,47 +153,27 @@
                             </p>
                         @endif
 
-                        {{-- ===== Top three, on their own ===== --}}
-                        @php $podium = $rows->take(3); @endphp
-
+                        {{-- ===== Top three, on a podium =====
+                             The figures shown are the ones the point rule counts, so a
+                             battle royale reads Elims / Placement / WWCD and a league
+                             reads whatever it keeps. Nothing is named in the markup. --}}
                         @if ($rows->count() >= 3 && ! $notStarted)
-                            <div class="px-5 md:px-7 pt-6 pb-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                @foreach ($podium as $standing)
-                                    @php
-                                        $tone = match ($standing->rank) {
-                                            1 => ['ring-amber-300', 'bg-amber-50', 'text-amber-700', 'bg-amber-400'],
-                                            2 => ['ring-slate-300', 'bg-slate-50', 'text-slate-600', 'bg-slate-400'],
-                                            default => ['ring-orange-200', 'bg-orange-50', 'text-orange-700', 'bg-orange-300'],
-                                        };
-                                    @endphp
-
-                                    <div class="relative rounded-xl ring-1 {{ $tone[0] }} {{ $tone[1] }} px-4 py-4 overflow-hidden">
-                                        <div class="absolute top-0 left-0 w-1 h-full {{ $tone[3] }}"></div>
-
-                                        <div class="flex items-baseline gap-2">
-                                            <span class="text-2xl font-bold tabular-nums {{ $tone[2] }}">{{ $standing->rank }}</span>
-                                            <span class="text-xs font-semibold uppercase tracking-wide {{ $tone[2] }}">
-                                                {{ ['1' => 'First', '2' => 'Second', '3' => 'Third'][(string) $standing->rank] ?? '' }}
-                                            </span>
-                                        </div>
-
-                                        <div class="flex items-center gap-2.5 mt-1.5 min-w-0">
-                                            <x-team-crest :registration="$standing->entrant?->registration"
-                                                          :name="$standing->entrant?->displayName() ?? ''"
-                                                          size="md" />
-
-                                            <p class="text-sm font-bold text-gray-900 truncate">
-                                                {{ $standing->entrant?->displayName() ?? '—' }}
-                                            </p>
-                                        </div>
-
-                                        <p class="text-xs text-gray-500 mt-1.5 tabular-nums">
-                                            {{ $standing->total_points + 0 }} pts
-                                            &middot; {{ $standing->played }} {{ Str::plural('match', $standing->played) }}
-                                        </p>
-                                    </div>
-                                @endforeach
-                            </div>
+                            <x-ranking-podium
+                                heading="Team Ranking"
+                                :rows="$rows->take(3)->map(fn ($standing) => [
+                                    'rank' => $standing->rank,
+                                    'name' => $standing->entrant?->displayName() ?? '—',
+                                    'registration' => $standing->entrant?->registration,
+                                    'show_crest' => true,
+                                    'figures' => collect($board['columns'])
+                                        ->mapWithKeys(fn (array $column) => [
+                                            strtoupper($column['label']) => $column['counted']
+                                                ? $standing->componentCount($column['key']) + 0
+                                                : $standing->componentTotal($column['key']) + 0,
+                                        ])
+                                        ->put('TOTAL', $standing->total_points + 0)
+                                        ->all(),
+                                ])->all()" />
                         @endif
 
                         {{-- ===== The full table ===== --}}
@@ -362,6 +342,26 @@
                                 Individual scores, counted separately from the team table above.
                             </p>
                         </div>
+
+                        {{-- The same podium the teams get. A player's crest is their
+                             squad's, so it is left off: three identical badges beside
+                             three different names would say nothing. --}}
+                        @if ($board['players']->count() >= 3)
+                            <x-ranking-podium
+                                heading="Player Ranking"
+                                :rows="$board['players']->take(3)->map(fn ($player) => [
+                                    'rank' => $player->rank,
+                                    'name' => $player->display_name,
+                                    'figures' => collect($board['player_columns'])
+                                        ->mapWithKeys(fn (array $column) => [
+                                            strtoupper($column['label']) => $column['counted']
+                                                ? $player->componentCount($column['key']) + 0
+                                                : $player->componentTotal($column['key']) + 0,
+                                        ])
+                                        ->put('POINTS', $player->total_points + 0)
+                                        ->all(),
+                                ])->all()" />
+                        @endif
 
                         <div class="overflow-x-auto">
                             <table class="w-full">

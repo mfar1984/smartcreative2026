@@ -68,8 +68,16 @@ class TournamentPlayerStanding extends Model
         return (float) data_get($this->component_totals, $key, 0);
     }
 
-    public function componentCount(string $key): int
+    /**
+     * A recorded figure rather than the points it earned.
+     *
+     * Float rather than int, because a personal figure can be measured as well as
+     * counted: damage and a rating carry a fraction, and casting to an integer here
+     * would drop it after the engine had deliberately kept it. A whole number is
+     * unaffected, since 24.0 prints as 24.
+     */
+    public function componentCount(string $key): float
     {
-        return (int) data_get($this->component_counts, $key, 0);
+        return (float) data_get($this->component_counts, $key, 0);
     }
 }

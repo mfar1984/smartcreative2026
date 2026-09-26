@@ -314,29 +314,30 @@
                             and can still settle a tie, in the same way a WWCD does for a squad.
                         </p>
 
-                        <div class="space-y-2 max-w-2xl">
+                        <div class="space-y-2 max-w-3xl">
                             <div class="grid grid-cols-12 gap-3 px-1">
-                                <span class="col-span-6 text-xs font-bold uppercase tracking-wide text-gray-500">What is recorded</span>
-                                <span class="col-span-3 text-xs font-bold uppercase tracking-wide text-gray-500">Points each</span>
-                                <span class="col-span-3 text-xs font-bold uppercase tracking-wide text-gray-500">Must be filled</span>
+                                <span class="col-span-5 text-xs font-bold uppercase tracking-wide text-gray-500">What is recorded</span>
+                                <span class="col-span-2 text-xs font-bold uppercase tracking-wide text-gray-500">Points each</span>
+                                <span class="col-span-3 text-xs font-bold uppercase tracking-wide text-gray-500">Decimals</span>
+                                <span class="col-span-2 text-xs font-bold uppercase tracking-wide text-gray-500">Required</span>
                             </div>
 
                             @for ($slot = 0; $slot < $statSlots; $slot++)
                                 @php $row = $statRows[$slot] ?? null; @endphp
 
                                 <div class="grid grid-cols-12 gap-3 items-center">
-                                    <div class="col-span-6">
+                                    <div class="col-span-5">
                                         <label for="player-stat-{{ $slot }}" class="sr-only">Player stat {{ $slot + 1 }}</label>
                                         <input type="hidden" name="player_stats[{{ $slot }}][key]" value="{{ $row['key'] ?? '' }}">
                                         <input type="text" id="player-stat-{{ $slot }}"
                                                name="player_stats[{{ $slot }}][label]"
                                                value="{{ $row['label'] ?? '' }}"
                                                maxlength="60"
-                                               placeholder="{{ $slot === 0 ? 'e.g. Kills' : ($slot === 1 ? 'e.g. Knocks' : 'Leave blank to skip') }}"
+                                               placeholder="{{ $slot === 0 ? 'e.g. Elims' : ($slot === 1 ? 'e.g. Damage' : 'Leave blank to skip') }}"
                                                class="{{ $input }}">
                                     </div>
 
-                                    <div class="col-span-3">
+                                    <div class="col-span-2">
                                         <label for="player-stat-value-{{ $slot }}" class="sr-only">Points per unit for stat {{ $slot + 1 }}</label>
                                         <input type="number" step="0.5" id="player-stat-value-{{ $slot }}"
                                                name="player_stats[{{ $slot }}][value]"
@@ -344,13 +345,25 @@
                                                class="{{ $input }} text-center tabular-nums">
                                     </div>
 
+                                    {{-- A kill is counted and a rating is measured. Without this the
+                                         figure is rounded down on the way in, and 260.65 becomes 260. --}}
                                     <div class="col-span-3">
+                                        <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                                            <input type="hidden" name="player_stats[{{ $slot }}][decimal]" value="0">
+                                            <input type="checkbox" name="player_stats[{{ $slot }}][decimal]" value="1"
+                                                   @checked($row['decimal'] ?? false)
+                                                   class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                            <span class="text-xs text-gray-600">Allow decimals</span>
+                                        </label>
+                                    </div>
+
+                                    <div class="col-span-2">
                                         <label class="inline-flex items-center gap-2 cursor-pointer select-none">
                                             <input type="hidden" name="player_stats[{{ $slot }}][required]" value="0">
                                             <input type="checkbox" name="player_stats[{{ $slot }}][required]" value="1"
                                                    @checked($row['required'] ?? false)
                                                    class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
-                                            <span class="text-xs text-gray-600">Required</span>
+                                            <span class="text-xs text-gray-600">Yes</span>
                                         </label>
                                     </div>
                                 </div>
@@ -363,6 +376,21 @@
                             stays in the database but stops being counted.
                         </p>
                     </div>
+
+                    {{-- How the figures get entered.
+                         Whole rosters is right for a five-a-side, where ten people fit on
+                         one screen. It is unusable for a lobby of twenty squads, which is
+                         eighty rows for one fixture. --}}
+                    <x-admin.field-row
+                        label="Players named per match"
+                        help="Leave blank to list every player on each squad's roster. Enter 8 to name the eight best of the whole fixture instead, picked from a dropdown when the result is saved."
+                        for="player_slots"
+                        error="player_slots">
+                        <input type="number" id="player_slots" name="player_slots" min="1" max="50"
+                               value="{{ old('player_slots', $playerSlots) }}"
+                               placeholder="Whole roster"
+                               class="{{ $input }} max-w-32 text-center tabular-nums">
+                    </x-admin.field-row>
 
                     @if (filled($playerTiebreakOptions))
                         <div class="px-5 py-4 border-t border-gray-100">
