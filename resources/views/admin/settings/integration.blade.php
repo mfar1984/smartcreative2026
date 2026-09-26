@@ -607,11 +607,41 @@
                             expire, so this is not something to repeat before each event.
                         </p>
                         <ol class="list-decimal ml-5 space-y-2">
-                            <li>At <span class="font-mono text-xs">developers.facebook.com/apps</span>, create an app. Pick the Business type.</li>
-                            <li>Open the Graph API Explorer, choose that app, and generate a user token with <span class="font-mono text-xs">pages_show_list</span> and <span class="font-mono text-xs">pages_read_engagement</span>.</li>
-                            <li>Request <span class="font-mono text-xs">/me/accounts</span>. The reply lists your Pages with an <span class="font-mono text-xs">id</span> and an <span class="font-mono text-xs">access_token</span> for each. Those are the two values above.</li>
+                            <li>
+                                At <span class="font-mono text-xs">developers.facebook.com/apps</span>,
+                                create an app. On the use cases step, switch the filter to
+                                <strong>All</strong> and pick <strong>Manage everything on your Page</strong>.
+                            </li>
+                            <li>
+                                When asked about a business portfolio, choose not to connect one. The
+                                Page is your own, so there is nothing to bring in.
+                            </li>
+                            <li>
+                                On the dashboard, customise that use case and add the optional
+                                <span class="font-mono text-xs">pages_read_engagement</span> permission.
+                                <span class="font-mono text-xs">pages_show_list</span> is already
+                                required by the use case, so it is there.
+                            </li>
+                            <li>
+                                Open the Graph API Explorer, choose that app, and generate a user
+                                token with those two permissions.
+                            </li>
+                            <li>
+                                Request <span class="font-mono text-xs">/me/accounts</span>. The reply
+                                lists your Pages, each with an <span class="font-mono text-xs">id</span>
+                                and an <span class="font-mono text-xs">access_token</span>. Those are
+                                the two values above.
+                            </li>
                             <li>Paste them in, save, then press Check Live Status.</li>
                         </ol>
+                        <p class="text-gray-500">
+                            Two use cases look right and are not. <strong>Facebook Login</strong>
+                            cannot be combined with the Page one, and a use case cannot be removed
+                            once the app exists. <strong>Access the Live Video API</strong> insists on
+                            <span class="font-mono text-xs">publish_video</span>, which is permission
+                            to broadcast; this integration only ever reads, so granting it would hand
+                            over more than it needs.
+                        </p>
                         <p class="text-gray-500">
                             No App Review is needed while the app is only ever used against a Page
                             you administer yourself. Review is what Facebook asks for before an app
