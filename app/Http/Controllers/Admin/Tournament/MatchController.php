@@ -445,6 +445,21 @@ class MatchController extends Controller
             ]);
         }
 
+        /*
+         | The form sends a field first and another last. The first without the last
+         | means the server stopped reading part way, which PHP does silently past
+         | max_input_vars. Saving the part that arrived would be saving a result with
+         | squads missing from it, so nothing is saved and the operator is told why.
+         */
+        if ($request->has('_form_start') && ! $request->has('_form_complete')) {
+            return back()->withErrors([
+                'score' => sprintf(
+                    'Only part of this form reached the server (it stops reading after %d fields), so nothing was saved. Close any player panels you did not change and save again.',
+                    (int) ini_get('max_input_vars'),
+                ),
+            ]);
+        }
+
         $request->validate(['proof' => ['nullable', 'image', 'max:5120']]);
 
         /*
@@ -1320,6 +1335,16 @@ class MatchController extends Controller
             $rows = [];
 
             foreach ($roster as $participant) {
+                /*
+                 | Not sent at all: the squad's panel was never opened, so nothing about
+                 | this player was decided on this save. What is on file stays exactly as
+                 | it is. The form leaves unopened panels out to stay under PHP's limit on
+                 | fields per request; a required profile still sends everything.
+                 */
+                if (! $rule->requiresPlayers() && ! is_array($submitted[$entrantId][$participant->id] ?? null)) {
+                    continue;
+                }
+
                 $raw = $submitted[$entrantId][$participant->id] ?? [];
                 $tookPart = (bool) ($raw['took_part'] ?? false);
 

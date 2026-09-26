@@ -103,10 +103,19 @@
                  on the sport anywhere here: PUBG asks for placement, kills and players
                  because its profile says so, and badminton asks for sets because its
                  profile says so. --}}
+            {{-- data-skip-unopened: a squad's player panel that was never opened is not
+                 sent. Twenty squads of five with eight stats each is close to a thousand
+                 fields, which is where PHP stops reading a form and silently drops the
+                 rest; the last squad on the list then arrived with no result at all. --}}
             <form action="{{ route('admin.tournaments.matches.score.save', $match) }}" method="POST"
-                  enctype="multipart/form-data" id="score-form">
+                  enctype="multipart/form-data" id="score-form"
+                  @if (! $rule->requiresPlayers()) data-skip-unopened @endif>
                 @csrf
                 @method('PUT')
+
+                {{-- First and last field of the form. If the first arrives without the
+                     last, the server only received part of it and refuses to save. --}}
+                <input type="hidden" name="_form_start" value="1">
 
                 <x-admin.panel :title="'Result — ' . $rule->name" icon="clipboard" :flush="true">
                     <div class="overflow-x-auto">
@@ -270,7 +279,10 @@
                                          asked for, because sixteen teams of four would
                                          otherwise be sixty-four rows on one screen. --}}
                                     @if ($showPlayers)
-                                        <tr id="players-{{ $entrantId }}" hidden data-player-block="{{ $entrantId }}">
+                                        {{-- Came back from a rejected save with figures in it:
+                                             sent again, so what was typed is not lost. --}}
+                                        <tr id="players-{{ $entrantId }}" hidden data-player-block="{{ $entrantId }}"
+                                            @if (old('players.' . $entrantId) !== null) data-opened="1" @endif>
                                             <td colspan="{{ count($inputs) + 1 }}" class="px-4 pb-4 pt-0 bg-gray-50/70">
                                                 <div class="rounded-lg border border-gray-200 bg-white overflow-hidden">
                                                     <div class="flex items-center gap-2 px-3 py-2 bg-blue-50/60 border-b border-gray-200">
@@ -743,6 +755,8 @@
                         </div>
                     </div>
                 @endif
+
+                <input type="hidden" name="_form_complete" value="1">
             </form>
 
             {{-- ============ A squad out of a lobby ============
@@ -957,6 +971,12 @@
                 const open = block.hasAttribute('hidden');
 
                 open ? block.removeAttribute('hidden') : block.setAttribute('hidden', '');
+
+                // Opened once is enough to be sent: closing it again after typing
+                // must not throw the figures away.
+                if (open) {
+                    block.dataset.opened = '1';
+                }
                 button.setAttribute('aria-expanded', open ? 'true' : 'false');
 
                 const chevron = button.querySelector('[data-chevron]');
@@ -1033,6 +1053,30 @@
         document.querySelectorAll('[data-player-block]').forEach(function (block) {
             refresh(block.dataset.playerBlock);
         });
+
+        /*
+         | Leave out the player panels nobody opened.
+         |
+         | A panel that stayed closed cannot have been changed, and the server keeps
+         | whatever is on file for a player it is not sent. Without this the form grew
+         | past PHP's limit on fields per request and the last squad was cut off.
+         | Done at the moment of sending, so everything above can still read them.
+         */
+        const scoreForm = document.getElementById('score-form');
+
+        if (scoreForm && scoreForm.hasAttribute('data-skip-unopened')) {
+            scoreForm.addEventListener('submit', function () {
+                scoreForm.querySelectorAll('[data-player-block]').forEach(function (block) {
+                    if (block.dataset.opened === '1') {
+                        return;
+                    }
+
+                    block.querySelectorAll('input, select, textarea').forEach(function (field) {
+                        field.disabled = true;
+                    });
+                });
+            });
+        }
 
         /*
          | Star of the Match: picking a player fills the award in.
