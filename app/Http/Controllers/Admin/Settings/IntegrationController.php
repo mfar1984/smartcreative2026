@@ -1245,7 +1245,7 @@ class IntegrationController extends Controller
         if (! $result['ok']) {
             AdminLogger::activity('settings.facebook.connect-failed', 'Facebook Page connection failed.');
 
-            return back()->with('test_facebook_error', $result['message']);
+            return back()->with('connect_facebook_error', $result['message']);
         }
 
         AdminLogger::audit(
@@ -1257,7 +1257,7 @@ class IntegrationController extends Controller
 
         AdminLogger::activity('settings.facebook.connect', 'Connected a Facebook Page for live streaming.');
 
-        return back()->with('test_facebook_success', $result['message']);
+        return back()->with('connect_facebook_success', $result['message']);
     }
 
     /**
