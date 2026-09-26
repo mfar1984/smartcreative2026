@@ -27,6 +27,14 @@
         $tracksPlayers = ! $picksPlayers && $playerInputs !== [] && $rosters !== [];
 
         /*
+         | Star of the Match rides in the same dialog as the top players, so pressing
+         | Save asks for everything about the players in one place. Either one alone is
+         | enough reason to open it.
+         */
+        $hasAwards = $matchAwards !== [] && $pickable !== [];
+        $opensDialog = $picksPlayers || $hasAwards;
+
+        /*
          | Marks only one competitor in the fixture may hold, and who currently holds
          | each of them.
          |
@@ -484,8 +492,12 @@
                     <p class="text-xs text-gray-500 max-w-md">
                         Saving works the standings out again straight away. Nothing waits on a
                         background worker.
-                        @if ($picksPlayers)
+                        @if ($picksPlayers && $hasAwards)
+                            You will be asked for the top {{ $playerSlots }} players and Star of the Match first.
+                        @elseif ($picksPlayers)
                             You will be asked for the top {{ $playerSlots }} players first.
+                        @elseif ($hasAwards)
+                            You will be asked for Star of the Match first.
                         @endif
                     </p>
 
@@ -494,7 +506,7 @@
                          runs the script still saves the team result rather than leaving
                          the operator with a button that does nothing. --}}
                     <button type="submit" @disabled(! $canScore)
-                            @if ($picksPlayers) data-open-slots @endif
+                            @if ($opensDialog) data-open-slots @endif
                             class="rounded-lg border border-blue-600 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
                         {{ $match->isSettled() ? 'Correct Result' : 'Save Result' }}
                     </button>
@@ -505,13 +517,15 @@
                      so there is one request and one transaction. A separate form would
                      mean a team result that is saved and personal figures that might not
                      be. --}}
-                @if ($picksPlayers)
+                @if ($opensDialog)
                     @php
                         // A row that came back from a rejected save wins over what is on
                         // file, so nothing anybody typed is lost to a validation error.
-                        $existingSlots = old('slots', collect($slotRows)
-                            ->map(fn (array $row) => ['participant' => $row['participant']] + $row['inputs'])
-                            ->all());
+                        $existingSlots = $picksPlayers
+                            ? old('slots', collect($slotRows)
+                                ->map(fn (array $row) => ['participant' => $row['participant']] + $row['inputs'])
+                                ->all())
+                            : [];
                     @endphp
 
                     <div id="slot-dialog"
@@ -522,11 +536,15 @@
                             <div class="flex items-start justify-between gap-4 px-5 py-4 border-b border-gray-200">
                                 <div>
                                     <h2 id="slot-dialog-title" class="text-base font-bold text-gray-900">
-                                        Top {{ $playerSlots }} players
+                                        {{ $picksPlayers ? 'Top ' . $playerSlots . ' players' : 'Star of the Match' }}
                                     </h2>
                                     <p class="text-sm text-gray-500 mt-0.5">
-                                        {{ $match->label() }} &middot; name only the players worth recording.
-                                        Leave a row blank to skip it.
+                                        @if ($picksPlayers)
+                                            {{ $match->label() }} &middot; name only the players worth recording.
+                                            Leave a row blank to skip it.
+                                        @else
+                                            {{ $match->label() }} &middot; one player per award, as the game showed it.
+                                        @endif
                                     </p>
                                 </div>
 
@@ -544,6 +562,7 @@
                             @enderror
 
                             <div class="overflow-y-auto">
+                                @if ($picksPlayers)
                                 <table class="w-full text-sm">
                                     <thead class="bg-gray-50 sticky top-0">
                                         <tr>
@@ -613,12 +632,92 @@
                                         @endfor
                                     </tbody>
                                 </table>
+                                @endif
+
+                                {{-- ===== Star of the Match =====
+                                     One block per award the profile hands out. The player is
+                                     picked from everybody in this fixture, and only that
+                                     award's own figures are asked for, because those are the
+                                     figures its card on the website carries. --}}
+                                @if ($hasAwards)
+                                    <div @class(['px-5 py-4', 'border-t border-gray-200' => $picksPlayers])>
+                                        <p class="text-xs font-bold uppercase tracking-wide text-gray-500">Star of the Match</p>
+                                        <p class="text-xs text-gray-500 mt-0.5">
+                                            Copied from the game's result screen. Leave an award to nobody if it was not given.
+                                        </p>
+
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                                            @foreach ($matchAwards as $award)
+                                                @php
+                                                    $akey = $award['key'];
+                                                    $saved = $awardRows->get($akey);
+                                                    $chosen = (int) old("awards.{$akey}.participant", $saved?->event_participant_id ?? 0);
+                                                    $headlineLabel = collect($award['fields'])->firstWhere('key', $award['headline'])['label'] ?? $award['headline'];
+                                                @endphp
+
+                                                <div class="rounded-lg border border-gray-200 bg-gray-50/60 p-3.5">
+                                                    <div class="flex items-center justify-between gap-2">
+                                                        <p class="text-sm font-bold text-gray-900">{{ $award['label'] }}</p>
+                                                        <span class="text-xs text-gray-400">Headline: {{ $headlineLabel }}</span>
+                                                    </div>
+
+                                                    <label for="award-{{ $akey }}" class="sr-only">Player who took {{ $award['label'] }}</label>
+                                                    <select id="award-{{ $akey }}" name="awards[{{ $akey }}][participant]"
+                                                            class="mt-2 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                                                        <option value="">Not awarded</option>
+                                                        @foreach ($pickable as $group)
+                                                            <optgroup label="{{ $group['name'] }}">
+                                                                @foreach ($group['players'] as $personId => $label)
+                                                                    <option value="{{ $personId }}" @selected($chosen === (int) $personId)>{{ $label }}</option>
+                                                                @endforeach
+                                                            </optgroup>
+                                                        @endforeach
+                                                    </select>
+
+                                                    @error("awards.{$akey}.participant")
+                                                        <span class="block text-xs text-red-600 mt-1">{{ $message }}</span>
+                                                    @enderror
+
+                                                    <div class="grid grid-cols-2 gap-2 mt-2.5">
+                                                        @foreach ($award['fields'] as $field)
+                                                            @php
+                                                                $fkey = $field['key'];
+                                                                $isHeadline = $fkey === $award['headline'];
+                                                            @endphp
+
+                                                            <div>
+                                                                <label for="award-{{ $akey }}-{{ $fkey }}"
+                                                                       @class(['block text-xs font-semibold mb-1', 'text-blue-700' => $isHeadline, 'text-gray-600' => ! $isHeadline])>
+                                                                    {{ $field['label'] }}
+                                                                    @if ($isHeadline)
+                                                                        <span class="text-red-500" aria-hidden="true">*</span>
+                                                                    @endif
+                                                                </label>
+                                                                <input type="number"
+                                                                       id="award-{{ $akey }}-{{ $fkey }}"
+                                                                       name="awards[{{ $akey }}][{{ $fkey }}]"
+                                                                       min="0"
+                                                                       step="{{ ($field['decimal'] ?? false) ? '0.01' : '1' }}"
+                                                                       value="{{ old("awards.{$akey}.{$fkey}", data_get($saved?->figures, $fkey)) }}"
+                                                                       class="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-center tabular-nums bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+
+                                                                @error("awards.{$akey}.{$fkey}")
+                                                                    <span class="block text-xs text-red-600 mt-1">{{ $message }}</span>
+                                                                @enderror
+                                                            </div>
+                                                        @endforeach
+                                                    </div>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                @endif
                             </div>
 
                             <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-t border-gray-200 bg-gray-50">
                                 <p class="text-xs text-gray-500 max-w-sm">
-                                    Personal points are counted on their own leaderboard and never added
-                                    to a team's total.
+                                    Personal figures are counted on their own and never added to a team's
+                                    total.
                                 </p>
 
                                 <div class="flex flex-wrap gap-2.5">
@@ -927,7 +1026,7 @@
 
             // A rejected save comes back with the rows filled in, so the dialog is
             // reopened rather than hiding what the operator has to correct.
-            @if ($errors->has('slots') || collect($errors->keys())->contains(fn ($key) => str_starts_with($key, 'slots.')))
+            @if ($errors->has('slots') || collect($errors->keys())->contains(fn ($key) => str_starts_with($key, 'slots.') || str_starts_with($key, 'awards.')))
                 openSlots();
             @endif
         }

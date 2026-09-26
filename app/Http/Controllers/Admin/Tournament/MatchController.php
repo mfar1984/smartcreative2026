@@ -8,6 +8,7 @@ use App\Models\PointRule;
 use App\Models\Tournament;
 use App\Models\TournamentEntrant;
 use App\Models\TournamentMatch;
+use App\Models\TournamentMatchAward;
 use App\Models\TournamentMatchEntrant;
 use App\Models\TournamentMatchPlayer;
 use App\Models\TournamentStage;
@@ -222,6 +223,7 @@ class MatchController extends Controller
             'entrants.entrant.registration:id,team_name,reference',
             'entrants.players',
             'proofs',
+            'awards',
         ]);
 
         $rule = $match->tournament->pointRule;
@@ -254,6 +256,11 @@ class MatchController extends Controller
             'playerSlots' => $rule?->playerSlots(),
             'pickable' => $this->pickableFor($match, $rule),
             'slotRows' => $this->slotRowsFor($match, $rule),
+
+            // Star of the Match: what the profile hands out, and who holds each one in
+            // this fixture already, so a correction opens with the saved choices.
+            'matchAwards' => $rule?->matchAwards() ?? [],
+            'awardRows' => $match->awards->keyBy('award_key'),
         ]);
     }
 
@@ -268,7 +275,9 @@ class MatchController extends Controller
      */
     private function pickableFor(TournamentMatch $match, ?PointRule $rule): array
     {
-        if ($rule === null || ! $rule->picksPlayers()) {
+        // Wanted by either use of the dropdown: naming the top players, or picking who
+        // took each Star of the Match award.
+        if ($rule === null || (! $rule->picksPlayers() && $rule->matchAwards() === [])) {
             return [];
         }
 
@@ -464,6 +473,10 @@ class MatchController extends Controller
             ? $this->validateSlots($request, $match, $rule)
             : $this->validatePlayers($request, $match, $rule);
 
+        // Star of the Match, checked before anything is written so a mistyped award
+        // cannot leave a result half saved.
+        $awards = $this->validateAwards($request, $match, $rule);
+
         if ($request->hasFile('proof')) {
             $file = $request->file('proof');
 
@@ -474,7 +487,7 @@ class MatchController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($match, $rule, $data, $players, $engine, $request) {
+        DB::transaction(function () use ($match, $rule, $data, $players, $awards, $engine, $request) {
             $before = $match->entrants->mapWithKeys(
                 fn ($line) => [$line->tournament_entrant_id => $line->inputs],
             )->all();
@@ -535,7 +548,20 @@ class MatchController extends Controller
                 'scored_at' => now(),
             ]);
 
+            $this->saveAwards($match, $rule, $awards, $request);
+
             AdminLogger::audit($match, 'tournament.match_scored', $before, $data['lines']);
+
+            if ($awards !== []) {
+                AdminLogger::audit($match, 'tournament.match_awards_recorded', null, [
+                    'awards' => collect($awards)
+                        ->map(fn (?array $given) => $given === null ? null : [
+                            'participant' => $given['participant']->id,
+                            'figures' => $given['figures'],
+                        ])
+                        ->all(),
+                ]);
+            }
 
             /*
              | The player ledger gets its own audit entry rather than being folded into
@@ -648,6 +674,10 @@ class MatchController extends Controller
             // above to be unsettled, so nothing is being unpicked from a played match.
             $this->unseat($match->winner_to_match_id, $match->winner_to_slot);
             $this->unseat($match->loser_to_match_id, $match->loser_to_slot);
+
+            // Star of the Match goes for the same reason the personal figures below do:
+            // an award for a match that is no longer recorded as played describes nothing.
+            $match->awards()->delete();
 
             foreach ($match->entrants as $line) {
                 // The personal figures go with the result. They describe a match that
@@ -1384,6 +1414,192 @@ class MatchController extends Controller
         }
 
         return $out;
+    }
+
+    /**
+     * Check who took each Star of the Match award and the figures on their card.
+     *
+     * Returns one entry per award the profile hands out, keyed by the award: null
+     * where nobody was given it, otherwise the person, the squad they played for and
+     * their figures.
+     *
+     * The squad is worked out from the person's registration, never read from the
+     * request, and a person who is not in this fixture is refused. Nobody is a real
+     * answer: a match can end without a support player worth naming.
+     *
+     * @return array<string, array{participant: EventParticipant, entrant: int, figures: array<string, int|float|null>}|null>
+     */
+    private function validateAwards(Request $request, TournamentMatch $match, PointRule $rule): array
+    {
+        $definitions = $rule->matchAwards();
+
+        if ($definitions === []) {
+            return [];
+        }
+
+        $owners = [];
+        $people = [];
+
+        foreach ($this->rostersFor($match, $rule) as $entrantId => $roster) {
+            foreach ($roster as $person) {
+                $owners[(int) $person->id] = (int) $entrantId;
+                $people[(int) $person->id] = $person;
+            }
+        }
+
+        $submitted = $request->input('awards', []);
+        $submitted = is_array($submitted) ? $submitted : [];
+        $errors = [];
+        $out = [];
+
+        foreach ($definitions as $definition) {
+            $key = $definition['key'];
+            $label = $definition['label'];
+            $row = is_array($submitted[$key] ?? null) ? $submitted[$key] : [];
+            $chosen = $row['participant'] ?? null;
+
+            // One value from one dropdown. Anything else is a hand-made request, and
+            // casting an array to a number would quietly pick somebody.
+            if (is_array($chosen)) {
+                $errors["awards.{$key}.participant"] = sprintf('%s can only be given to one player.', $label);
+
+                continue;
+            }
+
+            if ($chosen === null || $chosen === '') {
+                $out[$key] = null;
+
+                continue;
+            }
+
+            if (! is_numeric($chosen) || ! array_key_exists((int) $chosen, $owners)) {
+                $errors["awards.{$key}.participant"] = sprintf('%s can only be given to a player in this fixture.', $label);
+
+                continue;
+            }
+
+            $personId = (int) $chosen;
+            $figures = [];
+
+            foreach ($definition['fields'] as $field) {
+                $fieldKey = $field['key'];
+                $value = $row[$fieldKey] ?? null;
+
+                if (is_array($value)) {
+                    $errors["awards.{$key}.{$fieldKey}"] = sprintf('%s on %s must be one number.', $field['label'], $label);
+
+                    continue;
+                }
+
+                if ($value === null || trim((string) $value) === '') {
+                    // Not supplied, which the card shows as a dash. Different from a
+                    // zero somebody typed.
+                    $figures[$fieldKey] = null;
+
+                    continue;
+                }
+
+                if (! is_numeric($value)) {
+                    $errors["awards.{$key}.{$fieldKey}"] = sprintf(
+                        '%s on %s must be a number, without commas.',
+                        $field['label'],
+                        $label,
+                    );
+
+                    continue;
+                }
+
+                $number = ($field['decimal'] ?? false) ? round((float) $value, 3) : (int) $value;
+
+                if ($number < 0) {
+                    $errors["awards.{$key}.{$fieldKey}"] = sprintf('%s on %s cannot be below zero.', $field['label'], $label);
+
+                    continue;
+                }
+
+                $figures[$fieldKey] = $number;
+            }
+
+            /*
+             | The headline is what the award is for. Going All Out without the number
+             | of eliminations is a name with nothing to say, so it is asked for rather
+             | than saved blank.
+             */
+            $headline = $definition['headline'];
+
+            if (! isset($errors["awards.{$key}.{$headline}"]) && ($figures[$headline] ?? null) === null) {
+                $headlineLabel = collect($definition['fields'])->firstWhere('key', $headline)['label'] ?? $headline;
+
+                $errors["awards.{$key}.{$headline}"] = sprintf(
+                    'Enter %s for %s, or give the award to nobody.',
+                    $headlineLabel,
+                    $label,
+                );
+
+                continue;
+            }
+
+            $out[$key] = [
+                'participant' => $people[$personId],
+                'entrant' => $owners[$personId],
+                'figures' => $figures,
+            ];
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Write the Star of the Match awards for this fixture.
+     *
+     * Only awards the profile still hands out are touched. One withheld on this save
+     * is removed; one the profile has since dropped is left exactly as it was given,
+     * because nothing on the form could have been a decision about it.
+     *
+     * Labels, figures and the public name are copied onto the row, so the card reads
+     * the same after the rule or the player's account changes.
+     *
+     * @param  array<string, array{participant: EventParticipant, entrant: int, figures: array<string, int|float|null>}|null>  $awards
+     */
+    private function saveAwards(TournamentMatch $match, PointRule $rule, array $awards, Request $request): void
+    {
+        foreach ($rule->matchAwards() as $position => $definition) {
+            $key = $definition['key'];
+            $given = $awards[$key] ?? null;
+
+            if ($given === null) {
+                $match->awards()->where('award_key', $key)->delete();
+
+                continue;
+            }
+
+            $person = $given['participant'];
+            $line = $match->entrants->firstWhere('tournament_entrant_id', $given['entrant']);
+
+            TournamentMatchAward::updateOrCreate(
+                ['tournament_match_id' => $match->id, 'award_key' => $key],
+                [
+                    'tournament_id' => $match->tournament_id,
+                    'tournament_entrant_id' => $given['entrant'],
+                    'event_participant_id' => $person->id,
+                    'award_label' => $definition['label'],
+                    'award_position' => $position,
+                    'headline_key' => $definition['headline'],
+                    'fields' => $definition['fields'],
+                    'figures' => $given['figures'],
+
+                    // What the public sees them as, never the name on an identity card.
+                    'display_name' => PlayerStandingsCalculator::publicLabel($person),
+                    'ign' => $person->ign_player_id,
+                    'entrant_name' => $line?->entrant?->displayName() ?? 'Competitor',
+                    'recorded_by' => $request->user()->id,
+                ],
+            );
+        }
     }
 
     /**

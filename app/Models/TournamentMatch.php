@@ -113,6 +113,14 @@ class TournamentMatch extends Model
         return $this->hasMany(TournamentProof::class, 'tournament_match_id');
     }
 
+    /**
+     * Star of the Match awards given in this fixture.
+     */
+    public function awards(): HasMany
+    {
+        return $this->hasMany(TournamentMatchAward::class, 'tournament_match_id')->orderBy('award_position');
+    }
+
     /* ---------------------------------------------------------------------
      | Reading
      * ------------------------------------------------------------------ */

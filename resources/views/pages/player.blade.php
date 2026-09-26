@@ -194,6 +194,34 @@
                 </p>
             </article>
 
+            {{-- ===== Star of the Match =====
+                 One card for every award this player has been given, newest first. Each
+                 is a record of one match, so a second award adds a card and never
+                 changes the first. --}}
+            @if ($profile['match_awards']->isNotEmpty())
+                <section class="mb-6" aria-labelledby="match-awards-title">
+                    <div class="flex flex-wrap items-baseline justify-between gap-3 mb-3">
+                        <h2 id="match-awards-title" class="text-xs font-bold uppercase tracking-widest text-gray-500">
+                            Star of the Match
+                        </h2>
+                        <p class="text-sm text-gray-400">
+                            {{ $profile['match_awards']->count() }}
+                            {{ Str::plural('award', $profile['match_awards']->count()) }}
+                        </p>
+                    </div>
+
+                    <div @class([
+                        'grid grid-cols-1 gap-4',
+                        'lg:grid-cols-2' => $profile['match_awards']->count() > 1,
+                        'max-w-2xl' => $profile['match_awards']->count() === 1,
+                    ])>
+                        @foreach ($profile['match_awards'] as $entry)
+                            <x-match-award-card :award="$entry['award']" :number="$entry['number']" />
+                        @endforeach
+                    </div>
+                </section>
+            @endif
+
             {{-- ===== Honours =====
                  Announced results only. A team leading a half-played table has not won
                  anything yet, and this is the section read as a record. --}}

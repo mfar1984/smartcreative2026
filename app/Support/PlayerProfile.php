@@ -7,6 +7,8 @@ use App\Models\EventParticipant;
 use App\Models\Tournament;
 use App\Models\TournamentChampion;
 use App\Models\TournamentEntrant;
+use App\Models\TournamentMatch;
+use App\Models\TournamentMatchAward;
 use App\Models\TournamentPlayerAward;
 use App\Models\TournamentPlayerStanding;
 use App\Models\TournamentStanding;
@@ -101,8 +103,51 @@ final class PlayerProfile
             'appearances' => $appearances,
             'podiums' => self::podiums($entrants),
             'awards' => self::awards($people),
+            'match_awards' => self::matchAwards($people),
             'totals' => self::totals($appearances),
         ];
+    }
+
+    /**
+     * Every Star of the Match award this person has been given, newest first.
+     *
+     * Only from fixtures with a result, and only where the tournament's table would
+     * be public too: an organiser who hid the ranking hid what happened in its
+     * matches as well.
+     *
+     * Each is numbered in the order it was earned, so the first award a player ever
+     * received stays number one however many follow it.
+     *
+     * @param  Collection<int, EventParticipant>  $people
+     * @return Collection<int, array{award: TournamentMatchAward, number: int}>
+     */
+    private static function matchAwards(Collection $people): Collection
+    {
+        return TournamentMatchAward::query()
+            ->whereIn('event_participant_id', $people->pluck('id'))
+            ->whereHas('match', fn ($query) => $query->whereIn('status', [
+                TournamentMatch::STATUS_COMPLETED,
+                TournamentMatch::STATUS_WALKOVER,
+            ]))
+            ->with([
+                'match:id,tournament_id,tournament_stage_id,round,position,bracket_side,map,scheduled_at,scored_at,status',
+                'match.stage:id,name',
+                'tournament:id,name,event_id,status,settings,published_at',
+                'tournament.event:id,title,slug',
+                'entrant:id,event_registration_id',
+                'entrant.registration:id,team_name,logo_path',
+            ])
+            ->get()
+            ->filter(fn (TournamentMatchAward $award) => $award->tournament !== null && self::visible($award->tournament))
+            ->sortBy(fn (TournamentMatchAward $award) => [
+                ($award->match?->scheduled_at ?? $award->match?->scored_at)?->timestamp ?? 0,
+                $award->match?->position ?? 0,
+                $award->award_position,
+            ])
+            ->values()
+            ->map(fn (TournamentMatchAward $award, int $index) => ['award' => $award, 'number' => $index + 1])
+            ->reverse()
+            ->values();
     }
 
     /**

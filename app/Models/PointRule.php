@@ -86,6 +86,7 @@ class PointRule extends Model
         'player_inputs',
         'player_tiebreak',
         'player_slots',
+        'match_awards',
         'is_active',
         'created_by',
     ];
@@ -101,6 +102,7 @@ class PointRule extends Model
             'player_inputs' => 'array',
             'player_tiebreak' => 'array',
             'player_slots' => 'integer',
+            'match_awards' => 'array',
             'is_active' => 'boolean',
         ];
     }
@@ -220,6 +222,28 @@ class PointRule extends Model
     public function picksPlayers(): bool
     {
         return $this->playerSlots() !== null;
+    }
+
+    /**
+     * The Star of the Match awards this profile hands out, in the order set.
+     *
+     * Each one names the figures its card carries and which of them is the headline:
+     * Going All Out leads on eliminations, Best Companion on rescues. Only meaningful
+     * where individual players are tracked, which is the same switch that keeps
+     * personal figures off racing and badminton, so it is checked here once.
+     *
+     * @return array<int, array{key: string, label: string, headline: string, fields: array<int, array{key: string, label: string, decimal: bool}>}>
+     */
+    public function matchAwards(): array
+    {
+        if (! $this->tracksPlayers()) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $this->match_awards ?? [],
+            fn ($award) => is_array($award) && filled($award['key'] ?? null) && ($award['fields'] ?? []) !== [],
+        ));
     }
 
     /**

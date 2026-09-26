@@ -26,12 +26,15 @@
     $box = match ($size) {
         'lg' => 'w-16 h-16 rounded-2xl',
         'md' => 'w-11 h-11 rounded-xl',
+        // Inline with a line of text, such as the team line on an award card.
+        'xs' => 'w-5 h-5 rounded-md',
         default => 'w-8 h-8 rounded-lg',
     };
 
     $type = match ($size) {
         'lg' => 'text-xl',
         'md' => 'text-sm',
+        'xs' => 'text-[8px]',
         default => 'text-xs',
     };
 

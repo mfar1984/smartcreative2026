@@ -433,6 +433,105 @@
                             </p>
                         </div>
                     @endif
+
+                    {{-- ===== Star of the Match =====
+                         The awards a game announces at the end of a fixture, such as
+                         Going All Out and Best Companion. Each is given to one player
+                         per match, chosen when the result is saved, and carries only the
+                         figures listed here. Nothing below feeds the leaderboard above. --}}
+                    @php
+                        $awardRows = old('match_awards', $matchAwardRows);
+                        $awardSlots = min(4, max(2, count($awardRows) + 1));
+                    @endphp
+
+                    <div class="px-5 py-4 border-t border-gray-100">
+                        <p class="text-sm font-semibold text-gray-900">Star of the Match awards</p>
+                        <p class="text-sm text-gray-600 mt-1 max-w-3xl">
+                            Name each award the game shows after a match and the figures on its card.
+                            When a result is saved, one player is picked for each award. Leave the name
+                            blank to skip a row.
+                        </p>
+
+                        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
+                            @for ($a = 0; $a < $awardSlots; $a++)
+                                @php
+                                    $award = $awardRows[$a] ?? [];
+                                    $awardFields = array_values($award['fields'] ?? []);
+                                    $headlineAt = (string) ($award['headline'] ?? '0');
+                                @endphp
+
+                                <div class="rounded-lg border border-gray-200 bg-gray-50/60 p-4">
+                                    <input type="hidden" name="match_awards[{{ $a }}][key]" value="{{ $award['key'] ?? '' }}">
+
+                                    <label for="award-{{ $a }}" class="block text-xs font-bold uppercase tracking-wide text-gray-500 mb-1.5">
+                                        Award {{ $a + 1 }}
+                                    </label>
+                                    <input type="text" id="award-{{ $a }}"
+                                           name="match_awards[{{ $a }}][label]"
+                                           value="{{ $award['label'] ?? '' }}"
+                                           maxlength="60"
+                                           placeholder="{{ $a === 0 ? 'e.g. Going All Out' : ($a === 1 ? 'e.g. Best Companion' : 'Leave blank to skip') }}"
+                                           class="{{ $input }} bg-white">
+                                    @error("match_awards.{$a}.label")
+                                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                                    @enderror
+
+                                    <div class="grid grid-cols-12 gap-2 mt-3 px-0.5">
+                                        <span class="col-span-7 text-xs font-bold uppercase tracking-wide text-gray-500">Figure on the card</span>
+                                        <span class="col-span-2 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Headline</span>
+                                        <span class="col-span-3 text-xs font-bold uppercase tracking-wide text-gray-500">Decimals</span>
+                                    </div>
+
+                                    <div class="space-y-1.5 mt-1.5">
+                                        @for ($f = 0; $f < 6; $f++)
+                                            @php $field = $awardFields[$f] ?? []; @endphp
+
+                                            <div class="grid grid-cols-12 gap-2 items-center">
+                                                <div class="col-span-7">
+                                                    <label for="award-{{ $a }}-field-{{ $f }}" class="sr-only">Award {{ $a + 1 }} figure {{ $f + 1 }}</label>
+                                                    <input type="hidden" name="match_awards[{{ $a }}][fields][{{ $f }}][key]" value="{{ $field['key'] ?? '' }}">
+                                                    <input type="text" id="award-{{ $a }}-field-{{ $f }}"
+                                                           name="match_awards[{{ $a }}][fields][{{ $f }}][label]"
+                                                           value="{{ $field['label'] ?? '' }}"
+                                                           maxlength="60"
+                                                           placeholder="{{ $a === 0 ? (['Knock Outs', 'Elims', 'Bonus', 'Damage'][$f] ?? '') : ($a === 1 ? (['Assists', 'Rescue', 'Health Restored', 'Survival Time'][$f] ?? '') : '') }}"
+                                                           class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                                                    @error("match_awards.{$a}.fields.{$f}.label")
+                                                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                                                    @enderror
+                                                </div>
+
+                                                {{-- One headline per award, so one radio group per award. --}}
+                                                <div class="col-span-2 flex justify-center">
+                                                    <input type="radio"
+                                                           name="match_awards[{{ $a }}][headline]"
+                                                           value="{{ $f }}"
+                                                           @checked($headlineAt === (string) $f)
+                                                           aria-label="Use figure {{ $f + 1 }} as the headline of award {{ $a + 1 }}"
+                                                           class="w-4 h-4 border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                                </div>
+
+                                                <div class="col-span-3">
+                                                    <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                                                        <input type="hidden" name="match_awards[{{ $a }}][fields][{{ $f }}][decimal]" value="0">
+                                                        <input type="checkbox" name="match_awards[{{ $a }}][fields][{{ $f }}][decimal]" value="1"
+                                                               @checked($field['decimal'] ?? false)
+                                                               class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                                        <span class="text-xs text-gray-600">Allow</span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        @endfor
+                                    </div>
+                                </div>
+                            @endfor
+                        </div>
+
+                        <p class="text-xs text-gray-500 mt-3 max-w-3xl">
+                            Figures are copied onto each award when it is given, so renaming one here later
+                            does not change a card that has already been shown.
+                        </p>
+                    </div>
                 </div>
             </x-admin.panel>
 

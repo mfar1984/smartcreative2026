@@ -11,6 +11,7 @@ use App\Support\Tournament\StandingsCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Point Rules: the scoring an operator sets, rather than the scoring a programmer
@@ -150,7 +151,7 @@ class PointRuleController extends Controller
             ]);
         }
 
-        $tracked = ['name', 'squad_size', 'components', 'tiebreak', 'track_players', 'player_components', 'player_tiebreak'];
+        $tracked = ['name', 'squad_size', 'components', 'tiebreak', 'track_players', 'player_components', 'player_tiebreak', 'player_slots', 'match_awards'];
         $before = $rule->only($tracked);
 
         $rule->update($this->assemble($data));
@@ -232,7 +233,7 @@ class PointRuleController extends Controller
      */
     private function validated(Request $request, ?PointRule $rule = null): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'name' => [
                 'required', 'string', 'max:190',
                 Rule::unique('point_rules', 'name')->ignore($rule?->id),
@@ -285,10 +286,133 @@ class PointRuleController extends Controller
              */
             'player_slots' => ['nullable', 'integer', 'min:1', 'max:50'],
 
+            /*
+             | Star of the Match. Each award is a name, the figures its card carries,
+             | and which of those is the headline. Four awards and six figures each is
+             | room for any game's end-of-match screen without the form growing into a
+             | spreadsheet.
+             */
+            'match_awards' => ['array', 'max:4'],
+            'match_awards.*.key' => ['nullable', 'string', 'max:40'],
+            'match_awards.*.label' => ['nullable', 'string', 'max:60'],
+            'match_awards.*.headline' => ['nullable', 'integer', 'min:0', 'max:5'],
+            'match_awards.*.fields' => ['array', 'max:6'],
+            'match_awards.*.fields.*.key' => ['nullable', 'string', 'max:40'],
+            'match_awards.*.fields.*.label' => ['nullable', 'string', 'max:60'],
+            'match_awards.*.fields.*.decimal' => ['nullable', 'boolean'],
+
             'is_active' => ['nullable', 'boolean'],
         ], [
             'name.unique' => 'A point rule with that name already exists.',
         ]);
+
+        // Checked here rather than when the rule is assembled, so a half-filled award
+        // is reported alongside everything else instead of after the operator has
+        // already confirmed a recalculation.
+        $this->assembleAwards($data);
+
+        return $data;
+    }
+
+    /**
+     * Turn the award rows the form collected into what is stored.
+     *
+     * A row with no name is skipped, which is how the spare rows on the form stay
+     * harmless. A named award with nothing to show on its card is refused rather than
+     * saved, because a card that only says who won and not for what is not an award.
+     *
+     * Keys are kept when an award or a figure is renamed, so editing a label does not
+     * orphan what a correction to an earlier fixture will look up.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<int, array{key: string, label: string, headline: string, fields: array<int, array{key: string, label: string, decimal: bool}>}>
+     */
+    private function assembleAwards(array $data): array
+    {
+        if (($data['track_players'] ?? PointRule::TRACK_OFF) === PointRule::TRACK_OFF) {
+            return [];
+        }
+
+        $awards = [];
+        $errors = [];
+
+        foreach ($data['match_awards'] ?? [] as $index => $row) {
+            $label = trim((string) ($row['label'] ?? ''));
+
+            if ($label === '') {
+                continue;
+            }
+
+            $fields = [];
+            $headline = null;
+
+            foreach ($row['fields'] ?? [] as $position => $field) {
+                $fieldLabel = trim((string) ($field['label'] ?? ''));
+
+                if ($fieldLabel === '') {
+                    continue;
+                }
+
+                $fieldKey = trim((string) ($field['key'] ?? ''));
+                $fieldKey = $fieldKey !== '' ? $fieldKey : Str::slug($fieldLabel, '_');
+
+                if ($fieldKey === '' || array_key_exists($fieldKey, $fields)) {
+                    $errors["match_awards.{$index}.fields.{$position}.label"] = sprintf(
+                        '"%s" is listed twice on %s, or is not a name that can be stored.',
+                        $fieldLabel,
+                        $label,
+                    );
+
+                    continue;
+                }
+
+                $fields[$fieldKey] = [
+                    'key' => $fieldKey,
+                    'label' => $fieldLabel,
+                    'decimal' => (bool) ($field['decimal'] ?? false),
+                ];
+
+                if (isset($row['headline']) && (string) $row['headline'] === (string) $position) {
+                    $headline = $fieldKey;
+                }
+            }
+
+            if ($fields === []) {
+                $errors["match_awards.{$index}.label"] = sprintf(
+                    '%s needs at least one figure to show on its card.',
+                    $label,
+                );
+
+                continue;
+            }
+
+            $key = trim((string) ($row['key'] ?? ''));
+            $key = $key !== '' ? $key : Str::slug($label, '_');
+
+            if ($key === '' || array_key_exists($key, $awards)) {
+                $errors["match_awards.{$index}.label"] = sprintf(
+                    'Two awards cannot both be called %s.',
+                    $label,
+                );
+
+                continue;
+            }
+
+            $awards[$key] = [
+                'key' => $key,
+                'label' => $label,
+                // The first figure leads when none was picked, which is what somebody
+                // listing Elims first on Going All Out would expect.
+                'headline' => $headline ?? array_key_first($fields),
+                'fields' => array_values($fields),
+            ];
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        return array_values($awards);
     }
 
     /**
@@ -318,6 +442,9 @@ class PointRuleController extends Controller
                 'player_inputs' => [],
                 'player_tiebreak' => [],
                 'player_slots' => null,
+
+                // Awards are about named players, so they go with the rest of it.
+                'match_awards' => null,
             ];
         }
 
@@ -389,6 +516,11 @@ class PointRuleController extends Controller
             // Nothing to record means nothing to pick, so the slot count is dropped
             // rather than left pointing at an empty form.
             'player_slots' => $components !== [] && $slots > 0 ? $slots : null,
+
+            // Independent of the stats above. An award carries its own figures,
+            // copied off the game's result screen, so a profile can hand out Star of
+            // the Match without keeping a leaderboard at all.
+            'match_awards' => ($awards = $this->assembleAwards($data)) !== [] ? $awards : null,
         ];
     }
 
@@ -616,6 +748,31 @@ class PointRuleController extends Controller
                 ->values()
                 ->all(),
             'playerSlots' => $rule->player_slots,
+
+            /*
+             | Awards pulled back apart into form rows. The headline is sent as the
+             | position of its figure, because that is what the radio on each figure
+             | row posts.
+             */
+            'matchAwardRows' => collect($rule->match_awards ?? [])
+                ->filter(fn ($award) => is_array($award))
+                ->map(function (array $award) {
+                    $fields = array_values($award['fields'] ?? []);
+                    $headline = array_search(
+                        $award['headline'] ?? null,
+                        array_column($fields, 'key'),
+                        true,
+                    );
+
+                    return [
+                        'key' => $award['key'] ?? '',
+                        'label' => $award['label'] ?? '',
+                        'headline' => $headline === false ? 0 : $headline,
+                        'fields' => $fields,
+                    ];
+                })
+                ->values()
+                ->all(),
             'playerTiebreak' => $rule->player_tiebreak ?? [],
             'playerTiebreakOptions' => collect($rule->player_components ?? [])
                 ->mapWithKeys(fn (array $c) => [$c['key'] => $c['label'] ?? $c['key']])
