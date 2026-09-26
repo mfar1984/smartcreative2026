@@ -5,6 +5,7 @@ namespace App\Support\Tournament;
 use App\Models\Tournament;
 use App\Models\TournamentEntrant;
 use App\Models\TournamentMatch;
+use App\Models\TournamentMatchEntrant;
 use App\Models\TournamentStage;
 use Illuminate\Support\Facades\DB;
 
@@ -122,25 +123,71 @@ final class StageAdvancer
         }
 
         /*
-         | Everybody the standings did not mark as advancing is out. Done here rather
-         | than when the next draw is generated, so the entrant list is truthful the
-         | moment a stage finishes rather than only later.
+         | The next stage was drawn from these qualifiers. Changing who is in now would
+         | leave its fixtures describing a field that no longer exists, so nothing is
+         | moved; drawing that stage again is what brings the two back into line.
          */
-        $advancingIds = $stage->tournament
+        if ($next->hasDraw()) {
+            return;
+        }
+
+        $this->syncQualifiers($stage);
+    }
+
+    /**
+     * Make who is in and who is out agree with a finished stage's standings as they
+     * stand now.
+     *
+     * Eliminating on the first close was not enough. A correction saved after the
+     * stage had closed could lift a squad into the qualifying places, and nothing put
+     * it back in: v18 finished 16th of a top 16 and was still out, while the squad it
+     * overtook was eliminated as well, leaving fifteen for the Final.
+     *
+     * Only this stage's own table is read, and only active and eliminated squads are
+     * moved. A squad that withdrew or was disqualified stays as it was.
+     */
+    public function syncQualifiers(TournamentStage $stage): void
+    {
+        $through = $stage->tournament
             ->standings()
             ->where('tournament_stage_id', $stage->id)
             ->where('advances', true)
             ->pluck('tournament_entrant_id');
 
-        if ($advancingIds->isEmpty()) {
+        /*
+         | Only a squad drawn into this stage can qualify from it. A table can list
+         | more than that, a bracket's lists the whole tournament, and a squad knocked
+         | out a stage earlier must not come back in on a tie at nil.
+         */
+        $drawnHere = TournamentMatchEntrant::query()
+            ->whereHas('match', fn ($query) => $query->where('tournament_stage_id', $stage->id))
+            ->whereNotNull('tournament_entrant_id')
+            ->distinct()
+            ->pluck('tournament_entrant_id');
+
+        $through = $through->intersect($drawnHere)->values();
+
+        // A stage with no cut has nothing to decide. Checked after the intersect too,
+        // because an empty list below would read as "nobody qualified" and put every
+        // squad out.
+        if ($through->isEmpty()) {
             return;
         }
 
-        $stage->tournament
-            ->entrants()
-            ->where('status', TournamentEntrant::STATUS_ACTIVE)
-            ->whereNotIn('id', $advancingIds)
-            ->update(['status' => TournamentEntrant::STATUS_ELIMINATED]);
+        DB::transaction(function () use ($stage, $through) {
+            // In: qualified here but marked out, which only a correction saved after
+            // the stage closed can cause.
+            TournamentEntrant::whereIn('id', $through)
+                ->where('status', TournamentEntrant::STATUS_ELIMINATED)
+                ->update(['status' => TournamentEntrant::STATUS_ACTIVE]);
+
+            // Out: everybody else still in, exactly as closing the stage always did.
+            $stage->tournament
+                ->entrants()
+                ->where('status', TournamentEntrant::STATUS_ACTIVE)
+                ->whereNotIn('id', $through)
+                ->update(['status' => TournamentEntrant::STATUS_ELIMINATED]);
+        });
     }
 
     /**

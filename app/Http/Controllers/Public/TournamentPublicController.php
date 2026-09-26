@@ -238,6 +238,9 @@ class TournamentPublicController extends Controller
     {
         $event = Event::where('slug', $slug)->firstOrFail();
 
+        // Which stage the visitor picked from the tabs, if any.
+        $requestedStage = (int) request()->query('stage', 0);
+
         $tournaments = Tournament::query()
             ->where('event_id', $event->id)
             ->whereIn('status', [
@@ -279,12 +282,43 @@ class TournamentPublicController extends Controller
                 ->orderBy('sequence')
                 ->get();
 
-            $finalStage = $drawn->first(fn (TournamentStage $stage) => ! $stage->isPlayedOut())
+            $current = $drawn->first(fn (TournamentStage $stage) => ! $stage->isPlayedOut())
                 ?? $drawn->last();
 
-            if ($finalStage === null) {
+            if ($current === null) {
                 continue;
             }
+
+            /*
+             | A visitor can open any stage that has been drawn, such as the Qualified
+             | table once the Final is under way. Asked for by id and only honoured when
+             | that stage is one of this tournament's drawn stages; anything else falls
+             | back to the stage being played now.
+             */
+            $finalStage = $drawn->firstWhere('id', $requestedStage) ?? $current;
+
+            $stageTabs = $drawn->map(function (TournamentStage $stage) use ($current, $finalStage, $event, $tournament) {
+                $settled = $stage->matches()->whereIn('status', [
+                    TournamentMatch::STATUS_COMPLETED,
+                    TournamentMatch::STATUS_WALKOVER,
+                ])->count();
+
+                return [
+                    'name' => $stage->name,
+                    'selected' => $stage->id === $finalStage->id,
+                    'state' => match (true) {
+                        $stage->isPlayedOut() => 'Finished',
+                        $settled > 0 => 'Live',
+                        default => 'Up next',
+                    },
+                    // The stage being played now is the page's default, so its link
+                    // is the plain address rather than one carrying a stage id.
+                    'url' => ($stage->id === $current->id
+                        ? route('events.ranking', $event->slug)
+                        : route('events.ranking', ['slug' => $event->slug, 'stage' => $stage->id]))
+                        . '#board-' . $tournament->id,
+                ];
+            })->all();
 
             /*
              | Counted over the stage on screen rather than the whole tournament, so
@@ -307,6 +341,7 @@ class TournamentPublicController extends Controller
             $boards[] = [
                 'tournament' => $tournament,
                 'stage' => $finalStage,
+                'stage_tabs' => $stageTabs,
 
                 // Where the cut is, so the page can draw the line somebody has to
                 // finish above. Zero on a last stage, where there is nothing to

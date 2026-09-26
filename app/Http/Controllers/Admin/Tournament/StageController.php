@@ -6,7 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Tournament;
 use App\Models\TournamentStage;
 use App\Services\AdminLogger;
+use App\Models\TournamentMatchEntrant;
 use App\Support\Tournament\Draw\DrawFactory;
+use App\Support\Tournament\StageAdvancer;
+use App\Support\Tournament\StandingsCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -87,15 +90,46 @@ class StageController extends Controller
     /**
      * Write every fixture for a stage.
      */
-    public function generate(Request $request, Tournament $tournament, TournamentStage $stage, DrawFactory $factory)
-    {
+    public function generate(
+        Request $request,
+        Tournament $tournament,
+        TournamentStage $stage,
+        DrawFactory $factory,
+        StandingsCalculator $calculator,
+        StageAdvancer $advancer,
+    ) {
         $this->assertOwnership($tournament, $stage);
+
+        /*
+         | A draw takes whoever is active, so who is active is checked against the
+         | stage before this one right now, not trusted from whenever it last closed.
+         | A correction saved after it closed can change who qualified.
+         */
+        $previous = $tournament->stages()
+            ->where('sequence', '<', $stage->sequence)
+            ->orderByDesc('sequence')
+            ->first();
+
+        if ($previous !== null && $previous->hasDraw() && $previous->isPlayedOut()) {
+            $calculator->recalculate($tournament->fresh());
+            $advancer->syncQualifiers($previous);
+        }
 
         try {
             $count = $factory->generate($stage, $request->user()->id);
         } catch (RuntimeException $e) {
             return back()->withErrors(['stage' => $e->getMessage()]);
         }
+
+        /*
+         | The new stage's table, built now rather than on the first score.
+         |
+         | Standings were only worked out when a result was saved, so a freshly drawn
+         | Final showed "No table for this stage yet" on the public page until the first
+         | match was in. The table lists everybody drawn, on nil, from the moment of the
+         | draw.
+         */
+        $calculator->recalculate($tournament->fresh());
 
         AdminLogger::activity('tournaments.matches.generate', sprintf(
             'Generated %d fixtures for stage %s of tournament %s.',
@@ -110,11 +144,21 @@ class StageController extends Controller
             'matches' => $count,
         ]);
 
+        // How many were drawn in, so the operator can check it against the cut
+        // before anybody plays.
+        $drawnIn = TournamentMatchEntrant::query()
+            ->whereHas('match', fn ($query) => $query->where('tournament_stage_id', $stage->id))
+            ->whereNotNull('tournament_entrant_id')
+            ->distinct()
+            ->count('tournament_entrant_id');
+
         return back()->with('status', sprintf(
-            '%d %s written for %s. Times are spaced by %d minutes and can be changed.',
+            '%d %s written for %s with %d %s. Times are spaced by %d minutes and can be changed.',
             $count,
             Str::plural('fixture', $count),
             $stage->name,
+            $drawnIn,
+            Str::plural('team', $drawnIn),
             (int) $tournament->setting('buffer_minutes', 15),
         ));
     }
@@ -122,8 +166,12 @@ class StageController extends Controller
     /**
      * Throw a draw away so the stage can be drawn again.
      */
-    public function discard(Tournament $tournament, TournamentStage $stage, DrawFactory $factory)
-    {
+    public function discard(
+        Tournament $tournament,
+        TournamentStage $stage,
+        DrawFactory $factory,
+        StandingsCalculator $calculator,
+    ) {
         $this->assertOwnership($tournament, $stage);
 
         try {
@@ -131,6 +179,9 @@ class StageController extends Controller
         } catch (RuntimeException $e) {
             return back()->withErrors(['stage' => $e->getMessage()]);
         }
+
+        // The discarded stage's table goes with its draw.
+        $calculator->recalculate($tournament->fresh());
 
         AdminLogger::activity('tournaments.matches.generate', sprintf(
             'Discarded the draw for stage %s of tournament %s.',

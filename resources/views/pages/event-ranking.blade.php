@@ -64,8 +64,10 @@
         </div>
     </section>
 
+    {{-- As wide as the heading above it, so the two line up and a table with ten
+         stat columns has room to breathe instead of scrolling sideways. --}}
     <section class="py-10 md:py-16 bg-gray-50">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6">
+        <div class="container mx-auto px-4 sm:px-6 lg:px-8">
 
             @forelse ($boards as $board)
                 @php
@@ -89,7 +91,44 @@
                     $notStarted = $board['matches_done'] === 0;
                 @endphp
 
-                <article class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-8 last:mb-0">
+                <article id="board-{{ $tournament->id }}" class="scroll-mt-24 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mb-8 last:mb-0">
+
+                    {{-- ===== Stage tabs =====
+                         One per stage that has been drawn, in playing order, so the
+                         Qualified table stays readable once the Final is under way. Plain
+                         links, so a tab can be shared and works before any script. --}}
+                    @if (count($board['stage_tabs']) > 1)
+                        <nav class="flex flex-wrap gap-2 px-5 md:px-7 pt-4 pb-1 bg-gradient-to-r from-slate-900 to-slate-800" aria-label="Stages">
+                            @foreach ($board['stage_tabs'] as $tab)
+                                <a href="{{ $tab['url'] }}"
+                                   @if ($tab['selected']) aria-current="page" @endif
+                                   @class([
+                                       'inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition',
+                                       'bg-white text-slate-900 shadow' => $tab['selected'],
+                                       'bg-white/5 text-slate-300 ring-1 ring-white/10 hover:bg-white/10 hover:text-white' => ! $tab['selected'],
+                                   ])>
+                                    @if ($tab['state'] === 'Live')
+                                        <span class="relative flex w-2 h-2" aria-hidden="true">
+                                            <span class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                                            <span class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
+                                        </span>
+                                    @elseif ($tab['state'] === 'Finished')
+                                        <svg @class(['w-3.5 h-3.5', 'text-emerald-600' => $tab['selected'], 'text-emerald-400' => ! $tab['selected']]) fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                                        </svg>
+                                    @endif
+
+                                    {{ $tab['name'] }}
+
+                                    <span @class([
+                                        'text-[10px] font-bold uppercase tracking-wider',
+                                        'text-slate-500' => $tab['selected'],
+                                        'text-slate-400' => ! $tab['selected'],
+                                    ])>{{ $tab['state'] }}</span>
+                                </a>
+                            @endforeach
+                        </nav>
+                    @endif
 
                     {{-- ===== Board header: what this table is, and how far through ===== --}}
                     <header class="px-5 md:px-7 py-5 bg-gradient-to-r from-slate-900 to-slate-800 text-white">
@@ -337,9 +376,15 @@
                          name and in-game name reaches this page. --}}
                     @if ($board['players']->isNotEmpty())
                         <div class="px-5 md:px-7 py-4 bg-gray-50 border-t border-gray-200">
-                            <p class="text-xs font-bold uppercase tracking-widest text-gray-600">Top Players</p>
+                            <p class="text-xs font-bold uppercase tracking-widest text-gray-600">
+                                Top Players
+                                @if (count($board['stage_tabs']) > 1)
+                                    <span class="normal-case tracking-normal font-semibold text-gray-400">&middot; all stages</span>
+                                @endif
+                            </p>
                             <p class="text-sm text-gray-500 mt-0.5">
-                                Individual scores, counted separately from the team table above.
+                                Individual scores across the whole tournament, counted separately from the
+                                team table above. This is what the MVP is decided on.
                             </p>
                         </div>
 
