@@ -158,10 +158,18 @@ final class StandingsCalculator
             $played = 0;
             $won = 0;
             $lost = 0;
-            $anyDisqualified = false;
 
             foreach ($own as $line) {
                 $played++;
+
+                /*
+                 | A match the squad was disqualified from, such as fielding no players,
+                 | counts for nothing: that match only. The rule says "disqualify the
+                 | match", and the squad's other matches still stand.
+                 */
+                if ($line->is_disqualified) {
+                    continue;
+                }
 
                 foreach ($line->component_points ?? [] as $key => $value) {
                     $totals[$key] = ($totals[$key] ?? 0) + (float) $value;
@@ -171,19 +179,25 @@ final class StandingsCalculator
                     $counts[$key] = ($counts[$key] ?? 0) + (int) $value;
                 }
 
-                $anyDisqualified = $anyDisqualified || $line->is_disqualified;
-
                 if ($line->match?->winner_entrant_id !== null) {
                     $line->match->winner_entrant_id === $entrantId ? $won++ : $lost++;
                 }
             }
 
             /*
-             | An entrant disqualified from the whole tournament stays on the table
-             | marked DQ rather than disappearing. Removing them would make the table
-             | disagree with the matches that were actually played.
+             | Out of the tournament only by a decision about the squad itself: it was
+             | disqualified or it withdrew. It stays on the table, marked, rather than
+             | disappearing, and it cannot take a place through.
+             |
+             | A single disqualified match used to count here as well, which threw a
+             | squad out of the whole stage for one match with nobody present. v18 had
+             | one such match in M1, played the rest, scored, and was sunk below the cut
+             | line anyway.
              */
-            $isDq = $entrant->status === TournamentEntrant::STATUS_DISQUALIFIED || $anyDisqualified;
+            $isDq = in_array($entrant->status, [
+                TournamentEntrant::STATUS_DISQUALIFIED,
+                TournamentEntrant::STATUS_WITHDRAWN,
+            ], true);
 
             $rows[] = [
                 'entrant_id' => $entrantId,

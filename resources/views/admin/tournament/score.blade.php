@@ -736,8 +736,115 @@
                 @endif
             </form>
 
+            {{-- ============ A squad out of a lobby ============
+                 A lobby has no other side to hand a walkover to, so this is about one
+                 squad. It changes that squad only; the fixture and everybody else's
+                 result stand, and a later Correct does not undo it. --}}
+            @if ($canScore && $match->round === null)
+                @php
+                    $outSquads = $lines->filter(fn ($line) => in_array($line->entrant?->status, [
+                        \App\Models\TournamentEntrant::STATUS_WITHDRAWN,
+                        \App\Models\TournamentEntrant::STATUS_DISQUALIFIED,
+                    ], true));
+                @endphp
+
+                <div class="mt-5">
+                    <x-admin.panel title="Withdrawn or Disqualified" icon="lock">
+                        <div class="px-5 py-4">
+                            <p class="text-sm text-gray-600 mb-4">
+                                For a squad that pulled out of the tournament or broke the rules. It takes that
+                                squad out of the rest of the tournament and off the qualifying places; every other
+                                squad's result in this match stands. A squad that only missed this match is entered
+                                in the result above with <span class="font-semibold">Players 0</span>, which scores
+                                them nothing for this match and keeps them in the tournament.
+                            </p>
+
+                            @if ($outSquads->isNotEmpty())
+                                <ul class="mb-5 divide-y divide-gray-100 rounded-lg border border-gray-200">
+                                    @foreach ($outSquads as $line)
+                                        <li class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+                                            <span class="text-sm">
+                                                <span class="font-semibold text-gray-900">{{ $line->entrant->displayName() }}</span>
+                                                <span class="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800">
+                                                    {{ \App\Models\TournamentEntrant::STATUSES[$line->entrant->status] ?? $line->entrant->status }}
+                                                </span>
+                                                @if ($line->entrant->reason)
+                                                    <span class="block text-xs text-gray-500 mt-0.5">{{ $line->entrant->reason }}</span>
+                                                @endif
+                                            </span>
+
+                                            <form action="{{ route('admin.tournaments.matches.resolve', $match) }}" method="POST"
+                                                  onsubmit="return confirm('Put {{ addslashes($line->entrant->displayName()) }} back in the tournament?');">
+                                                @csrf
+                                                <input type="hidden" name="squad_action" value="reinstate">
+                                                <input type="hidden" name="entrant_id" value="{{ $line->tournament_entrant_id }}">
+                                                <button type="submit"
+                                                        class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                                    Reinstate
+                                                </button>
+                                            </form>
+                                        </li>
+                                    @endforeach
+                                </ul>
+                            @endif
+
+                            <form action="{{ route('admin.tournaments.matches.resolve', $match) }}" method="POST"
+                                  onsubmit="return confirm('Take this squad out of the tournament and rebuild the standings?');"
+                                  class="space-y-4">
+                                @csrf
+
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label for="entrant_id" class="block text-xs font-semibold text-gray-700 mb-1">
+                                            Squad <span class="text-red-500" aria-hidden="true">*</span>
+                                        </label>
+                                        <select id="entrant_id" name="entrant_id" required
+                                                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                                            <option value="">Pick a squad</option>
+                                            @foreach ($lines as $line)
+                                                @if ($line->entrant && ! $outSquads->contains('id', $line->id))
+                                                    <option value="{{ $line->tournament_entrant_id }}" @selected((int) old('entrant_id') === (int) $line->tournament_entrant_id)>
+                                                        {{ $line->entrant->displayName() }}
+                                                    </option>
+                                                @endif
+                                            @endforeach
+                                        </select>
+                                        @error('entrant_id')<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
+                                    </div>
+
+                                    <div>
+                                        <label for="squad_action" class="block text-xs font-semibold text-gray-700 mb-1">What happened</label>
+                                        <select id="squad_action" name="squad_action" required
+                                                class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                                            <option value="withdrawal" @selected(old('squad_action') === 'withdrawal')>Withdrawal — pulled out of the tournament</option>
+                                            <option value="disqualification" @selected(old('squad_action') === 'disqualification')>Disqualification — broke the rules</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label for="squad_reason" class="block text-xs font-semibold text-gray-700 mb-1">
+                                            Reason <span class="text-red-500" aria-hidden="true">*</span>
+                                        </label>
+                                        <input type="text" id="squad_reason" name="reason" required maxlength="255"
+                                               value="{{ old('reason') }}"
+                                               placeholder="e.g. Did not turn up for M1 to M3, no reason given"
+                                               class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                                        @error('reason')<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
+                                    </div>
+                                </div>
+
+                                <button type="submit"
+                                        class="rounded-lg border border-amber-300 bg-white px-5 py-2.5 text-sm font-semibold text-amber-700 hover:bg-amber-50 transition">
+                                    Record It
+                                </button>
+                            </form>
+                        </div>
+                    </x-admin.panel>
+                </div>
+            @endif
+
             {{-- ============ Walkover, forfeit, DQ ============ --}}
-            @if ($canScore)
+            @if ($canScore && $match->round !== null)
                 <div class="mt-5">
                     <x-admin.panel title="Nobody Played" icon="lock">
                         <div class="px-5 py-4">

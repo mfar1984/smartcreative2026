@@ -171,8 +171,10 @@
                                                 <span class="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-800 align-middle">Won</span>
                                             @endif
 
+                                            {{-- This match only: too few players, so it counts
+                                                 for nothing. The squad is still in. --}}
                                             @if ($line->is_disqualified)
-                                                <span class="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800 align-middle">DQ</span>
+                                                <span class="ml-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-600 align-middle">Not counted</span>
                                             @endif
 
                                             {{-- The figures have nowhere to go on a phone, so they read

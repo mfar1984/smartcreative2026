@@ -253,7 +253,7 @@
 
                                                         @if ($standing->is_disqualified)
                                                             <span class="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800 align-middle">
-                                                                Disqualified
+                                                                {{ $standing->entrant?->status === \App\Models\TournamentEntrant::STATUS_WITHDRAWN ? 'Withdrawn' : 'Disqualified' }}
                                                             </span>
                                                         @elseif ($advancing)
                                                             <span class="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-800 align-middle">

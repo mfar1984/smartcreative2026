@@ -840,6 +840,20 @@ class MatchController extends Controller
     ) {
         $match->load(['tournament', 'entrants.entrant']);
 
+        /*
+         | A lobby or a heat is about one squad, never the fixture.
+         |
+         | The walkover below settles a two-sided match: one side did not appear, so
+         | the other goes through. A lobby has no other side. Recording it there
+         | flagged the whole fixture as a walkover, changed no squad, showed nothing
+         | on the table, and was wiped by the next Correct, because saving a score
+         | means the match was played. Worse, choosing Withdrawal or Disqualification
+         | took every squad but the one picked out of the tournament.
+         */
+        if ($match->round === null) {
+            return $this->resolveLobbySquad($request, $match, $calculator, $playerCalculator, $advancer);
+        }
+
         $data = $request->validate([
             'resolution' => ['required', Rule::in([
                 TournamentMatch::RESOLUTION_WALKOVER,
@@ -916,6 +930,75 @@ class MatchController extends Controller
         return redirect()
             ->route('admin.tournaments.matches', ['tournament' => $match->tournament_id, 'tab' => 'completed'])
             ->with('status', sprintf('%s recorded as a %s.', $match->label(), $data['resolution']));
+    }
+
+    /**
+     * Take one squad out of the tournament from a lobby, or put it back.
+     *
+     * Changes the squad and nothing else. The fixture keeps its status and every
+     * other squad's result, so correcting a score afterwards cannot undo this: it is
+     * a decision about the squad, stored on the squad. A squad that only missed one
+     * match is entered in the result with no players, which scores them nothing for
+     * that match and leaves them in the tournament.
+     */
+    private function resolveLobbySquad(
+        Request $request,
+        TournamentMatch $match,
+        StandingsCalculator $calculator,
+        PlayerStandingsCalculator $playerCalculator,
+        StageAdvancer $advancer,
+    ) {
+        $inFixture = $match->entrants->pluck('tournament_entrant_id')->filter()->map(fn ($id) => (int) $id)->all();
+
+        $data = $request->validate([
+            'squad_action' => ['required', Rule::in(['withdrawal', 'disqualification', 'reinstate'])],
+            'entrant_id' => ['required', 'integer', Rule::in($inFixture)],
+            'reason' => ['required_unless:squad_action,reinstate', 'nullable', 'string', 'max:255'],
+        ], [
+            'entrant_id.required' => 'Pick the squad this is about.',
+            'entrant_id.in' => 'That squad is not in this fixture.',
+            'reason.required_unless' => 'Say why. A withdrawal or a disqualification without a reason cannot be defended later.',
+        ]);
+
+        $entrant = TournamentEntrant::findOrFail($data['entrant_id']);
+        $before = ['status' => $entrant->status, 'reason' => $entrant->reason];
+
+        $entrant->update(match ($data['squad_action']) {
+            'withdrawal' => ['status' => TournamentEntrant::STATUS_WITHDRAWN, 'reason' => $data['reason']],
+            'disqualification' => ['status' => TournamentEntrant::STATUS_DISQUALIFIED, 'reason' => $data['reason']],
+            'reinstate' => ['status' => TournamentEntrant::STATUS_ACTIVE, 'reason' => null],
+        });
+
+        AdminLogger::audit($entrant, 'tournament.squad_' . $data['squad_action'], $before, [
+            'status' => $entrant->status,
+            'reason' => $entrant->reason,
+            'recorded_in' => $match->label(),
+        ]);
+
+        $calculator->recalculate($match->tournament->fresh());
+        $playerCalculator->recalculate($match->tournament->fresh());
+        $advancer->advance($match->fresh(['stage']));
+
+        $name = $entrant->displayName();
+
+        AdminLogger::activity('tournaments.matches.score', sprintf(
+            '%s %s in %s.',
+            $name,
+            match ($data['squad_action']) {
+                'withdrawal' => 'recorded as withdrawn',
+                'disqualification' => 'recorded as disqualified',
+                'reinstate' => 'reinstated',
+            },
+            $match->tournament->name,
+        ));
+
+        return redirect()
+            ->route('admin.tournaments.matches.score', $match)
+            ->with('status', match ($data['squad_action']) {
+                'withdrawal' => sprintf('%s recorded as withdrawn. Standings updated.', $name),
+                'disqualification' => sprintf('%s recorded as disqualified. Standings updated.', $name),
+                'reinstate' => sprintf('%s is back in the tournament. Standings updated.', $name),
+            });
     }
 
     /* ---------------------------------------------------------------------

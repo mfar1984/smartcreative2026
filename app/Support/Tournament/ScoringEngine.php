@@ -102,6 +102,16 @@ final class ScoringEngine
             $disqualified = $disqualified || $result['disqualified'];
         }
 
+        /*
+         | Disqualified from this match: the result counts for nothing. Zeroed on the
+         | line itself as well as left out of the table, so the match-by-match record
+         | on the team page and the total on the standings cannot disagree.
+         */
+        if ($disqualified) {
+            $components = array_map(fn () => 0.0, $components);
+            $counts = array_map(fn () => 0, $counts);
+        }
+
         return [
             'points' => round(array_sum($components), 3),
             'components' => $components,
