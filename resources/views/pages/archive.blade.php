@@ -171,10 +171,15 @@
                                 <div class="mx-5 md:mx-6 rounded-xl border border-amber-300 bg-gradient-to-r from-amber-50 to-white px-4 py-3.5">
                                     <p class="text-xs font-bold uppercase tracking-widest text-amber-700">Champion</p>
 
-                                    <div class="flex items-end justify-between gap-3 mt-1">
-                                        <p class="text-base font-bold text-gray-900 leading-snug">
-                                            {{ $entry['champion']->display_name }}
-                                        </p>
+                                    <div class="flex items-center justify-between gap-3 mt-1.5">
+                                        <div class="flex items-center gap-2.5 min-w-0">
+                                            <x-team-crest :registration="$entry['champion']->entrant?->registration"
+                                                          :name="$entry['champion']->display_name" />
+
+                                            <p class="text-base font-bold text-gray-900 leading-snug truncate">
+                                                {{ $entry['champion']->display_name }}
+                                            </p>
+                                        </div>
 
                                         @if ((float) $entry['champion']->total_points > 0)
                                             <p class="text-sm font-semibold text-gray-500 tabular-nums shrink-0">

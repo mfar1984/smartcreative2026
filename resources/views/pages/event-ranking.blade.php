@@ -177,11 +177,17 @@
                                             </span>
                                         </div>
 
-                                        <p class="text-sm font-bold text-gray-900 mt-1.5 truncate">
-                                            {{ $standing->entrant?->displayName() ?? '—' }}
-                                        </p>
+                                        <div class="flex items-center gap-2.5 mt-1.5 min-w-0">
+                                            <x-team-crest :registration="$standing->entrant?->registration"
+                                                          :name="$standing->entrant?->displayName() ?? ''"
+                                                          size="md" />
 
-                                        <p class="text-xs text-gray-500 mt-0.5 tabular-nums">
+                                            <p class="text-sm font-bold text-gray-900 truncate">
+                                                {{ $standing->entrant?->displayName() ?? '—' }}
+                                            </p>
+                                        </div>
+
+                                        <p class="text-xs text-gray-500 mt-1.5 tabular-nums">
                                             {{ $standing->total_points + 0 }} pts
                                             &middot; {{ $standing->played }} {{ Str::plural('match', $standing->played) }}
                                         </p>
@@ -241,45 +247,56 @@
                                             </td>
 
                                             <td class="px-3 md:px-5 py-3.5">
-                                                {{-- A link when there is a registration behind the row,
-                                                     which is what carries the match by match record. An
-                                                     entrant added by hand has none, so it stays text
-                                                     rather than becoming a link to nothing. --}}
-                                                @if ($standing->entrant?->event_registration_id)
-                                                    <a href="{{ route('events.team', [$event->slug, $standing->entrant->event_registration_id]) }}"
-                                                       class="font-semibold text-gray-900 text-sm md:text-base hover:text-blue-600 hover:underline transition">
-                                                        {{ $standing->entrant->displayName() }}
-                                                    </a>
-                                                @else
-                                                    <span class="font-semibold text-gray-900 text-sm md:text-base">
-                                                        {{ $standing->entrant?->displayName() ?? '—' }}
-                                                    </span>
-                                                @endif
+                                                {{-- Crest beside the name, and the badges kept in the
+                                                     right-hand column so they line up under the name
+                                                     rather than under the logo. --}}
+                                                <div class="flex items-start gap-2.5 md:gap-3">
+                                                    <x-team-crest :registration="$standing->entrant?->registration"
+                                                                  :name="$standing->entrant?->displayName() ?? ''"
+                                                                  class="mt-0.5" />
 
-                                                @if ($standing->is_disqualified)
-                                                    <span class="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800 align-middle">
-                                                        Disqualified
-                                                    </span>
-                                                @elseif ($advancing)
-                                                    <span class="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-800 align-middle">
-                                                        Through
-                                                    </span>
-                                                @endif
+                                                    <div class="min-w-0">
+                                                        {{-- A link when there is a registration behind the row,
+                                                             which is what carries the match by match record. An
+                                                             entrant added by hand has none, so it stays text
+                                                             rather than becoming a link to nothing. --}}
+                                                        @if ($standing->entrant?->event_registration_id)
+                                                            <a href="{{ route('events.team', [$event->slug, $standing->entrant->event_registration_id]) }}"
+                                                               class="font-semibold text-gray-900 text-sm md:text-base hover:text-blue-600 hover:underline transition">
+                                                                {{ $standing->entrant->displayName() }}
+                                                            </a>
+                                                        @else
+                                                            <span class="font-semibold text-gray-900 text-sm md:text-base">
+                                                                {{ $standing->entrant?->displayName() ?? '—' }}
+                                                            </span>
+                                                        @endif
 
-                                                @if ($standing->is_tied && ! $notStarted)
-                                                    <span class="block text-xs text-amber-700 mt-0.5">Level after every tie-break</span>
-                                                @endif
+                                                        @if ($standing->is_disqualified)
+                                                            <span class="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800 align-middle">
+                                                                Disqualified
+                                                            </span>
+                                                        @elseif ($advancing)
+                                                            <span class="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-800 align-middle">
+                                                                Through
+                                                            </span>
+                                                        @endif
 
-                                                {{-- The per-component figures have nowhere to go on a phone,
-                                                     so they read as one line under the name instead. --}}
-                                                <span class="block md:hidden text-xs text-gray-500 mt-1 tabular-nums">
-                                                    @foreach ($board['columns'] as $column)
-                                                        {{ $column['label'] }}
-                                                        {{ $column['counted']
-                                                            ? $standing->componentCount($column['key'])
-                                                            : $standing->componentTotal($column['key']) + 0 }}@unless ($loop->last) &middot; @endunless
-                                                    @endforeach
-                                                </span>
+                                                        @if ($standing->is_tied && ! $notStarted)
+                                                            <span class="block text-xs text-amber-700 mt-0.5">Level after every tie-break</span>
+                                                        @endif
+
+                                                        {{-- The per-component figures have nowhere to go on a phone,
+                                                             so they read as one line under the name instead. --}}
+                                                        <span class="block md:hidden text-xs text-gray-500 mt-1 tabular-nums">
+                                                            @foreach ($board['columns'] as $column)
+                                                                {{ $column['label'] }}
+                                                                {{ $column['counted']
+                                                                    ? $standing->componentCount($column['key'])
+                                                                    : $standing->componentTotal($column['key']) + 0 }}@unless ($loop->last) &middot; @endunless
+                                                            @endforeach
+                                                        </span>
+                                                    </div>
+                                                </div>
                                             </td>
 
                                             <td class="px-2 py-3.5 text-right tabular-nums text-sm text-gray-500 hidden sm:table-cell">
@@ -378,7 +395,18 @@
                                             </td>
 
                                             <td class="px-3 md:px-5 py-3.5">
-                                                <span class="font-semibold text-gray-900 text-sm md:text-base">{{ $player->display_name }}</span>
+                                                {{-- Through to their own record when the row still points at
+                                                     a registration. A frozen leaderboard row whose person has
+                                                     since been removed stays as text. --}}
+                                                @if ($player->event_participant_id)
+                                                    <a href="{{ route('player', $player->event_participant_id) }}"
+                                                       class="font-semibold text-gray-900 text-sm md:text-base hover:text-blue-600 hover:underline transition">
+                                                        {{ $player->display_name }}
+                                                    </a>
+                                                @else
+                                                    <span class="font-semibold text-gray-900 text-sm md:text-base">{{ $player->display_name }}</span>
+                                                @endif
+
                                                 @if ($player->ign)
                                                     <span class="block text-xs text-gray-500">{{ $player->ign }}</span>
                                                 @endif
@@ -388,12 +416,19 @@
                                             </td>
 
                                             <td class="px-3 py-3.5 text-sm text-gray-700 hidden sm:table-cell">
-                                                {{ $player->entrant?->displayName() ?? '—' }}
-                                                @if ($player->entrant_is_disqualified)
-                                                    <span class="ml-1 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800">
-                                                        Team disqualified
+                                                <div class="flex items-center gap-2.5">
+                                                    <x-team-crest :registration="$player->entrant?->registration"
+                                                                  :name="$player->entrant?->displayName() ?? ''" />
+
+                                                    <span class="min-w-0">
+                                                        {{ $player->entrant?->displayName() ?? '—' }}
+                                                        @if ($player->entrant_is_disqualified)
+                                                            <span class="ml-1 rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800">
+                                                                Team disqualified
+                                                            </span>
+                                                        @endif
                                                     </span>
-                                                @endif
+                                                </div>
                                             </td>
 
                                             @foreach ($board['player_columns'] as $column)

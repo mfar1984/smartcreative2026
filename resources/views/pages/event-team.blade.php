@@ -6,14 +6,6 @@
     @php
         $name = $entrant->displayName();
 
-        // Two letters off the name for the crest. Cheap, and it gives every team a
-        // mark of its own without anybody having to upload one.
-        $initials = collect(preg_split('/\s+/', trim($name)))
-            ->filter()
-            ->take(2)
-            ->map(fn (string $word) => mb_strtoupper(mb_substr($word, 0, 1)))
-            ->implode('');
-
         $played = $lines->count();
 
         // Summed from the match lines on screen rather than read off the standing, so
@@ -67,10 +59,11 @@
             </a>
 
             <div class="flex flex-wrap items-start gap-5">
-                <div class="w-16 h-16 md:w-18 md:h-18 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-900 ring-1 ring-white/10 flex items-center justify-center text-xl font-bold text-blue-300 shrink-0"
-                     style="width:4.5rem;height:4.5rem">
-                    {{ $initials !== '' ? $initials : '—' }}
-                </div>
+                {{-- The squad's own badge where one was uploaded, initials where it was
+                     not. Drawn larger here than in the table, because this page is
+                     about this one team. --}}
+                <x-team-crest :registration="$registration" :name="$name" size="lg" tone="dark" />
+
 
                 <div class="min-w-0">
                     <p class="text-xs font-bold uppercase tracking-widest text-blue-300 mb-1.5">
@@ -263,7 +256,11 @@
                                 : null;
                         @endphp
 
-                        <span class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3.5 py-2 text-sm">
+                        {{-- The whole chip is the link, because the name inside it is a
+                             short target on a phone. Every person on this page is on an
+                             entry that was drawn, so each of them has a record to open. --}}
+                        <a href="{{ route('player', $person) }}"
+                           class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3.5 py-2 text-sm hover:border-blue-300 hover:bg-blue-50 transition">
                             @if ($person->isManager())
                                 <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-bold text-indigo-800">
                                     {{ $person->also_plays ? 'Manager & Player' : 'Manager' }}
@@ -275,7 +272,11 @@
                             @if ($second)
                                 <span class="text-xs text-gray-400 tabular-nums">{{ $second }}</span>
                             @endif
-                        </span>
+
+                            <svg class="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                        </a>
                     @empty
                         <p class="text-sm text-gray-500">Nobody is listed on this entry.</p>
                     @endforelse

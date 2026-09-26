@@ -12,6 +12,7 @@ use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\Payment\ChipWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\Payment\RegistrationPaymentController;
+use App\Http\Controllers\Public\PlayerMessageController;
 use App\Http\Controllers\Public\TournamentPublicController;
 use App\Http\Controllers\RegistrationController;
 use App\Http\Controllers\ServiceController;
@@ -52,6 +53,32 @@ Route::get('/archive', [TournamentPublicController::class, 'archive'])->name('ar
 Route::get('/events/{slug}/team/{registration}', [TournamentPublicController::class, 'team'])
     ->whereNumber('registration')
     ->name('events.team');
+
+/*
+| One competitor across every event they have entered, reached by tapping a name on a
+| leaderboard or a roster.
+|
+| Not nested under an event, because the page's whole purpose is to cross events. Keyed
+| on the registration row that was tapped rather than on the identity card number that
+| joins the rows together, so the number is never in a URL and nobody can test whether
+| a card they know is registered.
+*/
+Route::get('/player/{participant}', [TournamentPublicController::class, 'player'])
+    ->whereNumber('participant')
+    ->name('player');
+
+/*
+| Passing a message to a competitor without handing over their details.
+|
+| The profile shows a masked address; this is what is behind it. The message reaches
+| the office, which holds the real address and decides whether to forward anything.
+| Throttled on the same terms as the contact form, which is the only protection either
+| of them has beyond the CSRF token.
+*/
+Route::post('/player/{participant}/message', [PlayerMessageController::class, 'store'])
+    ->whereNumber('participant')
+    ->middleware('throttle:5,1')
+    ->name('player.message');
 /*
 | The three service pages. Each is laid out differently on purpose: they are bought
 | for different reasons, and a visitor comparing them should be able to tell them

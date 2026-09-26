@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Public;
 
 use App\Http\Controllers\Controller;
 use App\Models\Event;
+use App\Models\EventParticipant;
 use App\Models\EventRegistration;
 use App\Models\Tournament;
 use App\Models\TournamentChampion;
@@ -12,6 +13,7 @@ use App\Models\TournamentMatch;
 use App\Models\TournamentMatchEntrant;
 use App\Models\TournamentPlayerAward;
 use App\Models\TournamentStage;
+use App\Support\PlayerProfile;
 
 /**
  * What the public sees.
@@ -34,12 +36,28 @@ use App\Models\TournamentStage;
 class TournamentPublicController extends Controller
 {
     /**
-     * Champions, newest first, grouped by year.
+     * Announced results, in two categories.
+     *
+     * Team and personal are separated rather than interleaved, because they are won
+     * differently and read differently. A squad's podium place is the result of the
+     * competition; an individual award is a judgement about one player inside it. A
+     * visitor looking for one is not usually looking for the other.
+     *
+     * Both sides are frozen at publish. Correcting a match afterwards never rewrites
+     * what was announced, which is the whole reason this page reads champions and
+     * awards rather than standings.
      */
     public function hallOfFame()
     {
         $champions = TournamentChampion::query()
-            ->with(['tournament:id,name,event_id,published_at', 'tournament.event:id,title,slug,starts_at'])
+            ->with([
+                'tournament:id,name,event_id,published_at',
+                'tournament.event:id,title,slug,category,starts_at',
+                // The squad's own badge beside its name, the way the standings show it.
+                'entrant:id,event_registration_id',
+                'entrant.registration:id,team_name,logo_path',
+            ])
+            ->whereNotNull('published_at')
             ->orderByDesc('published_at')
             ->orderBy('rank')
             ->get()
@@ -55,26 +73,59 @@ class TournamentPublicController extends Controller
             ->sortKeysDesc();
 
         /*
-         | Published individual awards, keyed by tournament so the page can show them
-         | under the podium they belong to. Frozen at publish for the same reason the
-         | champions are: an announced MVP must not change when a match is corrected.
+         | Individual awards, grouped by year in their own right rather than hung under
+         | a podium. An award can be given for a tournament whose podium was never
+         | published, and hanging it off one would have hidden it.
          |
-         | Read separately from the champions, so a tournament may appear with a podium
-         | and no awards, or with awards and no podium.
+         | event_participant_id is selected so each name can lead to that player's
+         | record. It is an id and nothing more: no personal detail is carried here.
          */
         $awards = TournamentPlayerAward::query()
             ->whereNotNull('published_at')
+            ->with([
+                'tournament:id,name,event_id,published_at',
+                'tournament.event:id,title,slug,category,starts_at',
+            ])
             ->orderBy('award_key')
             ->orderBy('rank')
             ->get([
-                'id', 'tournament_id', 'award_key', 'award_label', 'rank',
-                'display_name', 'ign', 'entrant_name', 'total_points',
+                'id', 'tournament_id', 'event_participant_id', 'award_key', 'award_label',
+                'rank', 'display_name', 'ign', 'entrant_name', 'total_points',
             ])
-            ->groupBy('tournament_id');
+            ->groupBy(fn (TournamentPlayerAward $award) => $award->tournament?->event?->starts_at?->format('Y')
+                ?? $award->tournament?->published_at?->format('Y')
+                ?? 'Undated')
+            ->sortKeysDesc();
 
         return view('pages.hall-of-fame', [
             'years' => $champions,
-            'awards' => $awards,
+            'awardYears' => $awards,
+        ]);
+    }
+
+    /**
+     * One competitor's record, across every event they have entered.
+     *
+     * Reached by tapping a name on the player leaderboard or on a team's roster. The
+     * assembly lives in PlayerProfile because joining one person's appearances
+     * together is a decision about data rather than about a request, and it is worth
+     * testing on its own.
+     *
+     * Requested by the id of the row that was tapped, never by the identity card
+     * number that joins them. Somebody who knew a card number could otherwise check
+     * whether it was registered by putting it in the address bar.
+     */
+    public function player(EventParticipant $participant)
+    {
+        $profile = PlayerProfile::build($participant);
+
+        // Registered, but nothing about them is public: either they were never drawn
+        // into a tournament, or every tournament they entered has its table hidden.
+        abort_if($profile === null, 404);
+
+        return view('pages.player', [
+            'participant' => $participant,
+            'profile' => $profile,
         ]);
     }
 
@@ -105,6 +156,10 @@ class TournamentPublicController extends Controller
             ->with([
                 'event:id,slug,title,category,location,starts_at,ends_at',
                 'champions',
+                // So the winner's badge can sit beside their name, as it does on the
+                // standings and the Hall of Fame.
+                'champions.entrant:id,event_registration_id',
+                'champions.entrant.registration:id,team_name,logo_path',
                 'pointRule:id,name,track_players',
             ])
             ->withCount([
@@ -268,7 +323,9 @@ class TournamentPublicController extends Controller
                     ->all(),
                 'groups' => $tournament->standings()
                     ->where('tournament_stage_id', $finalStage->id)
-                    ->with(['entrant.registration:id,team_name,reference', 'group:id,name'])
+                    // logo_path is selected because the table draws each entry's crest
+                    // beside its name. Left out, every row fell back to initials.
+                    ->with(['entrant.registration:id,team_name,reference,logo_path', 'group:id,name'])
                     ->orderBy('rank')
                     ->get()
                     ->groupBy(fn ($s) => $s->group?->name ?? 'Overall'),
@@ -292,13 +349,13 @@ class TournamentPublicController extends Controller
                 'players' => $tournament->tracksPlayers()
                     ? $tournament->playerStandings()
                         ->whereNull('tournament_stage_id')
-                        ->with('entrant.registration:id,team_name')
+                        ->with('entrant.registration:id,team_name,logo_path')
                         ->orderBy('rank')
                         ->limit(20)
                         ->get([
-                            'id', 'tournament_id', 'tournament_entrant_id', 'display_name',
-                            'ign', 'matches_played', 'component_totals', 'component_counts',
-                            'total_points', 'rank', 'entrant_is_disqualified',
+                            'id', 'tournament_id', 'tournament_entrant_id', 'event_participant_id',
+                            'display_name', 'ign', 'matches_played', 'component_totals',
+                            'component_counts', 'total_points', 'rank', 'entrant_is_disqualified',
                         ])
                     : collect(),
             ];
