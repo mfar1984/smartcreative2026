@@ -456,6 +456,14 @@ final class PlayerProfile
             'teams' => $rows->map(fn (array $a) => $a['registration']?->id)->filter()->unique()->count(),
             'matches' => $played,
             'points' => $rows->sum(fn (array $a) => (float) ($a['standing']?->total_points ?? 0)),
+
+            /*
+             | The player's own points, where any game they entered kept them. This is
+             | the figure the heading shows on a page about one person; the squad's
+             | points stay in the career rows, labelled as the squad's.
+             */
+            'own_points' => $rows->sum(fn (array $a) => (float) ($a['personal']?->total_points ?? 0)),
+            'has_own' => $rows->contains(fn (array $a) => $a['personal'] !== null),
             'best' => $played > 0
                 ? $rows->map(fn (array $a) => $a['standing']?->rank)->filter()->min()
                 : null,

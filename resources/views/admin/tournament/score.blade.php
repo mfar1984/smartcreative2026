@@ -643,7 +643,9 @@
                                     <div @class(['px-5 py-4', 'border-t border-gray-200' => $picksPlayers])>
                                         <p class="text-xs font-bold uppercase tracking-wide text-gray-500">Star of the Match</p>
                                         <p class="text-xs text-gray-500 mt-0.5">
-                                            Copied from the game's result screen. Leave an award to nobody if it was not given.
+                                            Copied from the game's result screen. Picking a player fills in what is already
+                                            recorded for them in this match, and what is saved here counts on the player
+                                            leaderboard too. Leave an award to nobody if it was not given.
                                         </p>
 
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
@@ -663,12 +665,13 @@
 
                                                     <label for="award-{{ $akey }}" class="sr-only">Player who took {{ $award['label'] }}</label>
                                                     <select id="award-{{ $akey }}" name="awards[{{ $akey }}][participant]"
+                                                            data-award-player="{{ $akey }}"
                                                             class="mt-2 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
                                                         <option value="">Not awarded</option>
-                                                        @foreach ($pickable as $group)
+                                                        @foreach ($pickable as $groupEntrant => $group)
                                                             <optgroup label="{{ $group['name'] }}">
                                                                 @foreach ($group['players'] as $personId => $label)
-                                                                    <option value="{{ $personId }}" @selected($chosen === (int) $personId)>{{ $label }}</option>
+                                                                    <option value="{{ $personId }}" data-entrant="{{ $groupEntrant }}" @selected($chosen === (int) $personId)>{{ $label }}</option>
                                                                 @endforeach
                                                             </optgroup>
                                                         @endforeach
@@ -693,12 +696,18 @@
                                                                         <span class="text-red-500" aria-hidden="true">*</span>
                                                                     @endif
                                                                 </label>
+                                                                {{-- A saved figure belongs to whoever holds the award now,
+                                                                     so it is marked as filled in: picking somebody else
+                                                                     clears it rather than handing them the old numbers. --}}
                                                                 <input type="number"
                                                                        id="award-{{ $akey }}-{{ $fkey }}"
                                                                        name="awards[{{ $akey }}][{{ $fkey }}]"
                                                                        min="0"
                                                                        step="{{ ($field['decimal'] ?? false) ? '0.01' : '1' }}"
                                                                        value="{{ old("awards.{$akey}.{$fkey}", data_get($saved?->figures, $fkey)) }}"
+                                                                       data-award-field="{{ $akey }}"
+                                                                       data-personal-key="{{ $awardFieldMap[$akey][$fkey] ?? '' }}"
+                                                                       @if (! session()->hasOldInput('awards') && data_get($saved?->figures, $fkey) !== null) data-autofilled="1" @endif
                                                                        class="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-center tabular-nums bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
 
                                                                 @error("awards.{$akey}.{$fkey}")
@@ -1023,6 +1032,73 @@
 
         document.querySelectorAll('[data-player-block]').forEach(function (block) {
             refresh(block.dataset.playerBlock);
+        });
+
+        /*
+         | Star of the Match: picking a player fills the award in.
+         |
+         | The figures are read from what is already recorded for that player in this
+         | match, either on their squad's roster panel or in the top players rows, so
+         | an operator who entered them there does not type them again. A figure the
+         | operator typed on the award is never overwritten; one that was filled in is
+         | cleared again when a different player is picked.
+         */
+        function recordedFigure(entrant, person, key) {
+            const roster = document.querySelector('[name="players[' + entrant + '][' + person + '][' + key + ']"]');
+
+            if (roster && roster.value !== '') {
+                return roster.value;
+            }
+
+            const slots = document.querySelectorAll('[data-slot-player]');
+
+            for (let i = 0; i < slots.length; i++) {
+                if (slots[i].value !== person) {
+                    continue;
+                }
+
+                const input = document.querySelector('[name="' + slots[i].name.replace('[participant]', '[' + key + ']') + '"]');
+
+                if (input && input.value !== '') {
+                    return input.value;
+                }
+            }
+
+            return null;
+        }
+
+        document.querySelectorAll('[data-award-player]').forEach(function (select) {
+            const fields = Array.from(document.querySelectorAll('[data-award-field="' + select.dataset.awardPlayer + '"]'));
+
+            fields.forEach(function (field) {
+                field.addEventListener('input', function () {
+                    delete field.dataset.autofilled;
+                });
+            });
+
+            select.addEventListener('change', function () {
+                const option = select.options[select.selectedIndex];
+                const person = select.value;
+                const entrant = option ? (option.dataset.entrant || '') : '';
+
+                fields.forEach(function (field) {
+                    if (field.dataset.autofilled) {
+                        field.value = '';
+                        delete field.dataset.autofilled;
+                    }
+
+                    if (person === '' || !field.dataset.personalKey || field.value !== '') {
+                        return;
+                    }
+
+                    const value = recordedFigure(entrant, person, field.dataset.personalKey);
+
+                    if (value !== null) {
+                        field.value = value;
+                        field.dataset.autofilled = '1';
+                    }
+                });
+            });
         });
 
         /*

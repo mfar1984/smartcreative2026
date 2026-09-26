@@ -261,6 +261,10 @@ class MatchController extends Controller
             // this fixture already, so a correction opens with the saved choices.
             'matchAwards' => $rule?->matchAwards() ?? [],
             'awardRows' => $match->awards->keyBy('award_key'),
+
+            // Which personal stat each award figure is, so picking a player fills the
+            // award from what is already recorded for them in this match.
+            'awardFieldMap' => $rule ? $this->awardFieldMap($rule) : [],
         ]);
     }
 
@@ -549,6 +553,10 @@ class MatchController extends Controller
             ]);
 
             $this->saveAwards($match, $rule, $awards, $request);
+
+            // What was typed on an award is the player's figures for this match, so it
+            // counts on the player leaderboard too. Typed once, not twice.
+            $this->mergeAwardFigures($match, $rule, $awards, $engine, $request);
 
             AdminLogger::audit($match, 'tournament.match_scored', $before, $data['lines']);
 
@@ -1204,6 +1212,48 @@ class MatchController extends Controller
                 $clean[$key] = $value;
             }
 
+            /*
+             | A squad with nobody present cannot have scored.
+             |
+             | Nobody present disqualifies the match, so the squad gets nothing for it.
+             | Kills alongside it mean the head count was typed wrong, not that nobody
+             | played, and saving it silently threw the squad's match away. v18 lost M4
+             | that way: one kill, Players 0.
+             */
+            foreach ($rule->components ?? [] as $penalty) {
+                if (($penalty['type'] ?? null) !== PointRule::TYPE_PENALTY_TABLE || ! array_key_exists('disqualify_at', $penalty)) {
+                    continue;
+                }
+
+                $source = $penalty['source'] ?? '';
+                $present = $clean[$source] ?? null;
+
+                if ($present === null || (int) $present > (int) $penalty['disqualify_at']) {
+                    continue;
+                }
+
+                foreach ($rule->components ?? [] as $scoring) {
+                    if (($scoring['type'] ?? null) !== PointRule::TYPE_PER_UNIT) {
+                        continue;
+                    }
+
+                    $units = $clean[$scoring['source'] ?? ''] ?? null;
+
+                    if (is_numeric($units) && $units > 0) {
+                        $errors["lines.{$entrantId}.{$source}"] = sprintf(
+                            '%s has %s %s but %s is %d. A squad with nobody playing cannot score, so enter how many started the match.',
+                            $line->entrant?->displayName() ?? 'This competitor',
+                            $units + 0,
+                            strtolower($scoring['label'] ?? $scoring['key'] ?? 'kills'),
+                            $definitions->get($source)['label'] ?? $source,
+                            (int) $present,
+                        );
+
+                        break;
+                    }
+                }
+            }
+
             $lines[$entrantId] = $clean;
         }
 
@@ -1648,6 +1698,133 @@ class MatchController extends Controller
      *
      * @param  array<string, array{participant: EventParticipant, entrant: int, figures: array<string, int|float|null>}|null>  $awards
      */
+    /**
+     * The personal stat an award figure is, or null when the profile keeps none.
+     *
+     * Matched on the key first, then on the label, because a stat renamed on the
+     * profile keeps its old key: Elims on PMPL is still stored as "kills".
+     *
+     * @param  array<string, mixed>  $field
+     */
+    private function personalKeyFor(PointRule $rule, array $field): ?string
+    {
+        $inputs = collect($rule->player_inputs ?? []);
+
+        if ($inputs->contains('key', $field['key'] ?? null)) {
+            return $field['key'];
+        }
+
+        $label = mb_strtolower(trim((string) ($field['label'] ?? '')));
+
+        return $inputs->first(fn (array $input) => mb_strtolower(trim((string) ($input['label'] ?? ''))) === $label)['key'] ?? null;
+    }
+
+    /**
+     * [award key][award figure key] => personal stat key, for every award.
+     *
+     * @return array<string, array<string, string>>
+     */
+    private function awardFieldMap(PointRule $rule): array
+    {
+        if (! $rule->tracksPlayers()) {
+            return [];
+        }
+
+        $map = [];
+
+        foreach ($rule->matchAwards() as $award) {
+            foreach ($award['fields'] as $field) {
+                if ($personal = $this->personalKeyFor($rule, $field)) {
+                    $map[$award['key']][$field['key']] = $personal;
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * Write each award's figures onto the player's own row for this match.
+     *
+     * The award card and the player leaderboard describe the same figures. Without
+     * this they had to be typed twice, once on each, and a figure typed on only one
+     * of them left the other wrong. Only the figures the award supplied are set; any
+     * other stat already on the player's row for this match is kept.
+     *
+     * @param  array<string, array{participant: EventParticipant, entrant: int, figures: array<string, int|float|null>}|null>  $awards
+     */
+    private function mergeAwardFigures(
+        TournamentMatch $match,
+        PointRule $rule,
+        array $awards,
+        ScoringEngine $engine,
+        Request $request,
+    ): void {
+        $definitions = collect($rule->player_inputs ?? [])->keyBy('key');
+
+        if (! $rule->tracksPlayers() || $definitions->isEmpty()) {
+            return;
+        }
+
+        foreach ($rule->matchAwards() as $award) {
+            $given = $awards[$award['key']] ?? null;
+
+            if ($given === null) {
+                continue;
+            }
+
+            $line = $match->entrants->firstWhere('tournament_entrant_id', $given['entrant']);
+
+            if ($line === null) {
+                continue;
+            }
+
+            $person = $given['participant'];
+            $row = $line->players()->where('event_participant_id', $person->id)->first();
+
+            $inputs = [];
+
+            foreach ($definitions as $key => $definition) {
+                $inputs[$key] = $row?->input($key);
+            }
+
+            $changed = false;
+
+            foreach ($award['fields'] as $field) {
+                $personal = $this->personalKeyFor($rule, $field);
+                $value = $given['figures'][$field['key']] ?? null;
+
+                if ($personal === null || $value === null) {
+                    continue;
+                }
+
+                $inputs[$personal] = ($definitions->get($personal)['type'] ?? 'integer') === 'decimal'
+                    ? round((float) $value, 3)
+                    : (int) $value;
+
+                $changed = true;
+            }
+
+            if (! $changed) {
+                continue;
+            }
+
+            $result = $engine->scorePlayer($rule, $inputs);
+
+            $line->players()->updateOrCreate(
+                ['event_participant_id' => $person->id],
+                [
+                    'took_part' => true,
+                    'inputs' => $inputs,
+                    'points' => $result['points'],
+                    'component_points' => $result['components'],
+                    'component_counts' => $result['counts'],
+                    'recorded_by' => $request->user()->id,
+                ],
+            );
+        }
+    }
+
     private function saveAwards(TournamentMatch $match, PointRule $rule, array $awards, Request $request): void
     {
         foreach ($rule->matchAwards() as $position => $definition) {

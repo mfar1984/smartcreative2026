@@ -84,8 +84,14 @@
                 </div>
 
                 <div>
-                    <span class="block text-xl md:text-2xl font-bold tabular-nums">{{ $totals['points'] + 0 }}</span>
-                    <span class="text-xs font-semibold uppercase tracking-widest text-gray-400">Points</span>
+                    {{-- Their own points when a game kept them, otherwise the squad's,
+                         and said which. --}}
+                    <span class="block text-xl md:text-2xl font-bold tabular-nums">
+                        {{ ($totals['has_own'] ? $totals['own_points'] : $totals['points']) + 0 }}
+                    </span>
+                    <span class="text-xs font-semibold uppercase tracking-widest text-gray-400">
+                        {{ $totals['has_own'] ? 'Own points' : 'Team points' }}
+                    </span>
                 </div>
 
                 {{-- Withheld until something has been played. Before the first result
