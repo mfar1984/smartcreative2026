@@ -428,7 +428,35 @@
              aria-modal="true"
              aria-labelledby="player-message-title">
 
-            <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl overflow-hidden max-h-full overflow-y-auto">
+            @php
+                /*
+                 | The field styling, written out once.
+                 |
+                 | Spelled out in full rather than leaning on a forms plugin, because this
+                 | project does not load @tailwindcss/forms and Tailwind's preflight sets
+                 | border-width to 0 on every element. A class list carrying only
+                 | border-gray-300 therefore paints a colour onto a border that is not
+                 | there, and the field renders as blank space with no height — which is
+                 | exactly how these boxes were behaving. `border` and the padding are what
+                 | make a box; the colour only decides what shade it is.
+                 |
+                 | Held in variables so the four fields cannot drift apart from each other
+                 | the way they would if the same long string were pasted four times.
+                 */
+                $box = 'w-full rounded-lg border bg-white px-3.5 py-2.5 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
+
+                // Label beside the field on a comfortable screen, above it on a narrow
+                // one. Two columns on a phone would leave the input too narrow to read
+                // what has been typed into it.
+                $row = 'sm:flex sm:items-start sm:gap-4';
+                $lab = 'block text-sm font-semibold text-gray-700 mb-1.5 sm:mb-0 sm:w-32 sm:shrink-0 sm:pt-2.5';
+
+                // Matches the label column plus the gap, so the buttons line up with the
+                // fields above rather than floating against the panel edge.
+                $act = 'sm:pl-36';
+            @endphp
+
+            <div class="w-full max-w-xl rounded-2xl bg-white shadow-xl overflow-hidden max-h-full overflow-y-auto">
                 <div class="flex items-start justify-between gap-4 px-5 md:px-6 py-4 border-b border-gray-100">
                     <div>
                         <h2 id="player-message-title" class="text-base font-bold text-gray-900">
@@ -452,53 +480,72 @@
                 <form action="{{ route('player.message', $participant) }}" method="POST" class="px-5 md:px-6 py-5 space-y-4">
                     @csrf
 
-                    <div>
-                        <label for="pm-name" class="block text-sm font-semibold text-gray-700 mb-1.5">Your name</label>
-                        <input type="text" id="pm-name" name="name" value="{{ old('name') }}" required maxlength="120"
-                               class="w-full rounded-lg border-gray-300 text-sm focus:border-blue-500 focus:ring-blue-500">
-                        @error('name')
-                            <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
-                        @enderror
+                    <div class="{{ $row }}">
+                        <label for="pm-name" class="{{ $lab }}">Your name</label>
+                        <div class="sm:flex-1 sm:min-w-0">
+                            <input type="text" id="pm-name" name="name" value="{{ old('name') }}" required maxlength="120"
+                                   placeholder="Who the organiser should say this is from"
+                                   @error('name') aria-describedby="pm-name-error" aria-invalid="true" @enderror
+                                   class="{{ $box }} @error('name') border-red-500 @else border-gray-300 @enderror">
+                            @error('name')
+                                <p id="pm-name-error" class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                            @enderror
+                        </div>
                     </div>
 
-                    <div>
-                        <label for="pm-email" class="block text-sm font-semibold text-gray-700 mb-1.5">Your email</label>
-                        <input type="email" id="pm-email" name="email" value="{{ old('email') }}" required maxlength="190"
-                               class="w-full rounded-lg border-gray-300 text-sm focus:border-blue-500 focus:ring-blue-500">
-                        @error('email')
-                            <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
-                        @enderror
+                    <div class="{{ $row }}">
+                        <label for="pm-email" class="{{ $lab }}">Your email</label>
+                        <div class="sm:flex-1 sm:min-w-0">
+                            <input type="email" id="pm-email" name="email" value="{{ old('email') }}" required maxlength="190"
+                                   placeholder="name@example.com"
+                                   @error('email') aria-describedby="pm-email-error" aria-invalid="true" @enderror
+                                   class="{{ $box }} @error('email') border-red-500 @else border-gray-300 @enderror">
+                            @error('email')
+                                <p id="pm-email-error" class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                            @enderror
+                        </div>
                     </div>
 
-                    <div>
-                        <label for="pm-phone" class="block text-sm font-semibold text-gray-700 mb-1.5">
-                            Your telephone <span class="font-normal text-gray-400">(optional)</span>
+                    <div class="{{ $row }}">
+                        <label for="pm-phone" class="{{ $lab }}">
+                            Your telephone
+                            <span class="block font-normal text-xs text-gray-400 sm:mt-0.5">optional</span>
                         </label>
-                        <input type="text" id="pm-phone" name="phone" value="{{ old('phone') }}" maxlength="30"
-                               class="w-full rounded-lg border-gray-300 text-sm focus:border-blue-500 focus:ring-blue-500">
-                        @error('phone')
-                            <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
-                        @enderror
+                        <div class="sm:flex-1 sm:min-w-0">
+                            <input type="text" id="pm-phone" name="phone" value="{{ old('phone') }}" maxlength="30"
+                                   placeholder="Only if you would rather be called"
+                                   @error('phone') aria-describedby="pm-phone-error" aria-invalid="true" @enderror
+                                   class="{{ $box }} @error('phone') border-red-500 @else border-gray-300 @enderror">
+                            @error('phone')
+                                <p id="pm-phone-error" class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                            @enderror
+                        </div>
                     </div>
 
-                    <div>
-                        <label for="pm-message" class="block text-sm font-semibold text-gray-700 mb-1.5">Message</label>
-                        <textarea id="pm-message" name="message" rows="4" required minlength="10" maxlength="3000"
-                                  class="w-full rounded-lg border-gray-300 text-sm focus:border-blue-500 focus:ring-blue-500">{{ old('message') }}</textarea>
-                        @error('message')
-                            <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
-                        @enderror
+                    <div class="{{ $row }}">
+                        <label for="pm-message" class="{{ $lab }}">Message</label>
+                        <div class="sm:flex-1 sm:min-w-0">
+                            <textarea id="pm-message" name="message" rows="5" required minlength="10" maxlength="3000"
+                                      placeholder="What you would like passed on."
+                                      @error('message') aria-describedby="pm-message-error" aria-invalid="true" @enderror
+                                      class="{{ $box }} resize-y @error('message') border-red-500 @else border-gray-300 @enderror">{{ old('message') }}</textarea>
+                            @error('message')
+                                <p id="pm-message-error" class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                            @enderror
+                        </div>
                     </div>
 
-                    <div class="flex flex-wrap justify-end gap-2.5 pt-1">
-                        <button type="button" data-player-message-close
-                                class="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
-                            Cancel
-                        </button>
-                        <button type="submit"
-                                class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition">
-                            Send message
-                        </button>
+                    <div class="{{ $act }}">
+                        <div class="flex flex-wrap justify-end gap-2.5 pt-1">
+                            <button type="button" data-player-message-close
+                                    class="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                Cancel
+                            </button>
+                            <button type="submit"
+                                    class="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition">
+                                Send message
+                            </button>
+                        </div>
                     </div>
                 </form>
             </div>
