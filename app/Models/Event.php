@@ -67,6 +67,7 @@ class Event extends Model
         'requires_server_id',
         'requires_ign_name',
         'requires_logo',
+        'offers_wifi',
         'status',
         'registration_mode',
         'min_players',
@@ -98,6 +99,7 @@ class Event extends Model
             'requires_server_id' => 'boolean',
             'requires_ign_name' => 'boolean',
             'requires_logo' => 'boolean',
+            'offers_wifi' => 'boolean',
         ];
     }
 
@@ -113,6 +115,23 @@ class Event extends Model
     public function participants()
     {
         return $this->hasManyThrough(EventParticipant::class, EventRegistration::class);
+    }
+
+    public function wifiCredentials(): HasMany
+    {
+        return $this->hasMany(WifiCredential::class);
+    }
+
+    /**
+     * Whether registering for this event comes with a Wi-Fi login.
+     *
+     * A method rather than reading the column directly at each call site, because every
+     * one of them is asking the same question and a flag is the sort of thing that grows
+     * a second condition later.
+     */
+    public function offersWifi(): bool
+    {
+        return (bool) $this->offers_wifi;
     }
 
     /** Everything extra a registrant may pay for, in display order. */

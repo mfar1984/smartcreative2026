@@ -17,6 +17,7 @@ use App\Http\Controllers\Public\TournamentPublicController;
 use App\Http\Controllers\RegistrationController;
 use App\Http\Controllers\ServiceController;
 use App\Http\Controllers\ShopController;
+use App\Http\Controllers\WifiProvisionController;
 
 // Home route
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -79,6 +80,28 @@ Route::post('/player/{participant}/message', [PlayerMessageController::class, 's
     ->whereNumber('participant')
     ->middleware('throttle:5,1')
     ->name('player.message');
+/*
+| The venue's router asking which Wi-Fi accounts to create.
+|
+| Outbound from the router and inbound to us, which is the whole design: the router
+| never has to accept a connection, so its management interface stays closed to the
+| internet. The alternative was exposing RouterOS so this application could reach in and
+| create accounts, and a router is the one box on a network whose compromise takes
+| everything behind it.
+|
+| The secret in the path is the whole authentication, for the same reason as the Infobip
+| route above: a scheduled fetch on a network device cannot hold a session or a CSRF
+| token. It is scoped to one event, so a leak stops there, and the credentials it returns
+| expire with the event, which is the protection that still holds once it has leaked.
+|
+| Throttled because each call writes a provisioned_at across every row for the event. A
+| scheduled fetch runs every few minutes at most; anything faster is not a router.
+*/
+Route::get('/wifi/{token}/provision.rsc', [WifiProvisionController::class, 'script'])
+    ->where('token', '[A-Za-z0-9]{32,64}')
+    ->middleware('throttle:20,1')
+    ->name('wifi.provision');
+
 /*
 | The three service pages. Each is laid out differently on purpose: they are bought
 | for different reasons, and a visitor comparing them should be able to tell them

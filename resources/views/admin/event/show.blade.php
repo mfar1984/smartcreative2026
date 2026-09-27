@@ -126,6 +126,150 @@
             {{-- Details --}}
             <div class="lg:col-span-2">
                 <x-admin.panel title="Event Details" icon="clipboard">
+
+                    {{--
+                        Venue Wi-Fi, and only when the event offers it.
+
+                        Above Status because these two are the things somebody opens this
+                        page to do on the days around an event, and neither is a property of
+                        the event so much as a job waiting to be done.
+
+                        The two rows are deliberately in the order they have to happen. The
+                        router fetches, then people are told. Reversed, competitors get a
+                        correct password that fails, and from then on they will not believe
+                        the password whatever anyone says.
+                    --}}
+                    @if ($wifi)
+                        <x-admin.field-row
+                            label="Command Fetch"
+                            help="Paste into the router's terminal, or put it on a scheduler. Safe to run again.">
+
+                            <div class="flex flex-wrap items-stretch gap-2">
+                                {{-- Read only and selected on click. It is here to be
+                                     copied, not edited, and a stray keystroke in it would
+                                     produce a command that silently fetches nothing. --}}
+                                <input type="text"
+                                       id="wifi-command"
+                                       value="{{ $wifi['command'] }}"
+                                       readonly
+                                       onclick="this.select()"
+                                       class="flex-1 min-w-0 rounded-lg border border-gray-300 bg-gray-50 px-3.5 py-2.5 text-xs font-mono text-gray-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40">
+
+                                <button type="button"
+                                        data-copy-target="wifi-command"
+                                        class="shrink-0 inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                    <x-admin.icon name="clipboard" class="w-4 h-4" />
+                                    <span data-copy-label>Copy</span>
+                                </button>
+                            </div>
+
+                            <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+                                <span class="text-gray-500">
+                                    <strong class="font-semibold text-gray-900 tabular-nums">{{ $wifi['provisioned'] }}</strong>
+                                    of {{ $wifi['issued'] }} on the router
+                                </span>
+
+                                @if ($wifi['missing'] > 0)
+                                    <span class="inline-flex items-center gap-1.5 text-amber-700">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                        {{ $wifi['missing'] }} competitor{{ $wifi['missing'] === 1 ? '' : 's' }} with no login yet
+                                    </span>
+                                @endif
+
+                                @if ($wifi['expires_on'])
+                                    <span class="text-gray-500">Logins die after {{ $wifi['expires_on']->format('d M Y') }}</span>
+                                @endif
+                            </div>
+
+                            @if ($canUpdate)
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    @if ($wifi['missing'] > 0)
+                                        <form action="{{ route('admin.event.registration.wifi.issue', $event) }}" method="POST">
+                                            @csrf
+                                            <button type="submit"
+                                                    class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition">
+                                                Issue the {{ $wifi['missing'] }} missing
+                                            </button>
+                                        </form>
+                                    @endif
+
+                                    {{-- Rotating breaks the scheduled fetch until the new
+                                         command is pasted in, so it asks first. --}}
+                                    <form action="{{ route('admin.event.registration.wifi.rotate', $event) }}" method="POST"
+                                          onsubmit="return confirm('This replaces the address above. The router will fetch nothing until you paste the new command in. Continue?');">
+                                        @csrf
+                                        <button type="submit"
+                                                class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                            New address
+                                        </button>
+                                    </form>
+                                </div>
+                            @endif
+
+                            <p class="text-xs text-gray-500 mt-3">
+                                Anyone holding this address can read every login on this event, so keep
+                                it off group chats. The real protection is that the logins stop working
+                                after the event.
+                            </p>
+                        </x-admin.field-row>
+
+                        <x-admin.field-row
+                            label="Sending User & Password"
+                            help="Only sends to people whose login is already on the router. Pressing it again reaches whoever was missed, not everybody twice.">
+
+                            <div class="md:pt-1.5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+                                <span class="text-gray-900">
+                                    <strong class="font-semibold tabular-nums">{{ $wifi['delivered'] }}</strong>
+                                    <span class="text-gray-500">of {{ $wifi['issued'] }} told</span>
+                                </span>
+
+                                @if ($wifi['provisioned'] < $wifi['issued'])
+                                    <span class="inline-flex items-center gap-1.5 text-xs text-amber-700">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                        {{ $wifi['issued'] - $wifi['provisioned'] }} still waiting on the router
+                                    </span>
+                                @endif
+                            </div>
+
+                            <div class="mt-3 flex flex-wrap gap-2">
+                                @if ($canUpdate)
+                                    <form action="{{ route('admin.event.registration.wifi.send', $event) }}" method="POST"
+                                          onsubmit="return confirm('Email their Wi-Fi login to everybody who has not been told yet?');">
+                                        @csrf
+                                        <button type="submit"
+                                                @disabled($wifi['provisioned'] === 0)
+                                                class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
+                                            <x-admin.icon name="send" class="w-4 h-4" />
+                                            Send by email
+                                        </button>
+                                    </form>
+                                @endif
+
+                                @if ($canExportParticipants)
+                                    <a href="{{ route('admin.event.registration.wifi.slips', $event) }}"
+                                       target="_blank"
+                                       class="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3.5 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                        <x-admin.icon name="clipboard" class="w-4 h-4" />
+                                        Print slips for the counter
+                                    </a>
+                                @endif
+                            </div>
+
+                            @if ($wifi['provisioned'] === 0)
+                                <p class="text-xs text-amber-700 mt-3">
+                                    Nothing to send yet. Run the fetch command above first, otherwise an
+                                    email would carry a login that fails when somebody tries it.
+                                </p>
+                            @else
+                                <p class="text-xs text-gray-500 mt-3">
+                                    Competitors with no email address on file are skipped and counted back
+                                    to you. The printed slips are for them, and for anyone who arrives
+                                    having lost the email.
+                                </p>
+                            @endif
+                        </x-admin.field-row>
+                    @endif
+
                     <x-admin.field-row label="Status">
                         <div class="md:pt-1.5 flex flex-wrap items-center gap-2">
                             <x-admin.badge :tone="$statusTones[$event->status] ?? 'gray'">{{ $event->statusLabel() }}</x-admin.badge>
@@ -322,3 +466,62 @@
         </x-admin.panel>
     </x-admin.page-card>
 @endsection
+
+@push('scripts')
+<script>
+    (function () {
+        /*
+         | Copy buttons.
+         |
+         | The fetch command is long, monospaced, and gets pasted into a router terminal
+         | where one missing character produces a command that silently fetches nothing.
+         | Selecting it by hand in a narrow input is exactly where that goes wrong.
+         |
+         | Written against any element carrying data-copy-target rather than one id, so a
+         | second copyable field later needs no new script.
+         */
+        document.querySelectorAll('[data-copy-target]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const field = document.getElementById(button.dataset.copyTarget);
+
+                if (!field) {
+                    return;
+                }
+
+                const label = button.querySelector('[data-copy-label]');
+                const done = function () {
+                    if (!label) {
+                        return;
+                    }
+
+                    // Confirmation has to be visible, because a copy that worked and one
+                    // that silently failed look identical otherwise.
+                    const was = label.textContent;
+                    label.textContent = 'Copied';
+                    setTimeout(function () { label.textContent = was; }, 1500);
+                };
+
+                // The clipboard API needs a secure context, which a venue laptop on plain
+                // HTTP does not have. Selecting the text is the fallback: it leaves the
+                // operator one keystroke away rather than with nothing.
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(field.value).then(done).catch(function () {
+                        field.select();
+                    });
+
+                    return;
+                }
+
+                field.select();
+
+                try {
+                    document.execCommand('copy');
+                    done();
+                } catch (error) {
+                    // Left selected. Ctrl+C is the operator's move from here.
+                }
+            });
+        });
+    })();
+</script>
+@endpush

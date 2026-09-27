@@ -13,6 +13,7 @@ use App\Services\Messaging\StaffAlerts;
 use App\Support\AddonOrder;
 use App\Support\ParticipantOptions;
 use App\Support\PaymentSettings;
+use App\Support\WifiCredentials;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -215,6 +216,25 @@ class RegistrationController extends Controller
             $saved = $registration->participants()->createMany($participants);
 
             $this->recordAnswers($locked, $saved, $answers);
+
+            /*
+             | Wi-Fi logins, when the event offers them.
+             |
+             | Inside the transaction and immediately after the roster is written, so a
+             | credential cannot exist without its participant nor a participant be left
+             | without one. Issuing on registration rather than on payment because an
+             | event may be free, and then there is no payment to wait for.
+             |
+             | The relation is set by hand first. It was loaded before these rows
+             | existed, so asking for it here would either come back empty or cost
+             | another query for people already in memory.
+             */
+            if ($locked->offersWifi()) {
+                $registration->setRelation('participants', $saved);
+                $registration->setRelation('event', $locked);
+
+                WifiCredentials::issueFor($registration);
+            }
 
             if ($order->hasLines()) {
                 $registration->addonLines()->createMany(

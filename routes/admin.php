@@ -19,6 +19,7 @@ use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
 use App\Http\Controllers\Admin\Shop\SettingsController as ShopSettingsController;
 use App\Http\Controllers\Admin\Event\RegistrationController as EventRegistrationController;
 use App\Http\Controllers\Admin\Event\SettingsController as EventSettingsController;
+use App\Http\Controllers\Admin\Event\WifiController as EventWifiController;
 use App\Http\Controllers\Admin\Settings\EasyParcelController;
 use App\Http\Controllers\Admin\Settings\GeneralConfigController;
 use App\Http\Controllers\Admin\Settings\IntegrationController;
@@ -103,6 +104,36 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::delete('registration/{event}', [EventRegistrationController::class, 'destroy'])
                 ->middleware('permission:events.delete')
                 ->name('registration.destroy');
+
+            /*
+            | Venue Wi-Fi. Four actions on one event's logins.
+            |
+            | Issuing and rotating change the event, so they sit behind events.update.
+            | Sending reaches competitors' inboxes, which is a different capability from
+            | being allowed to edit an event, so it carries the same permission as every
+            | other thing on this site that emails a participant.
+            |
+            | The slips are a read, but a read of every login on the event in plain text,
+            | so they are kept behind the permission that already governs taking
+            | participant detail out of the system rather than behind plain viewing.
+            */
+            Route::post('registration/{event}/wifi/issue', [EventWifiController::class, 'issue'])
+                ->middleware('permission:events.update')
+                ->name('registration.wifi.issue');
+
+            Route::post('registration/{event}/wifi/rotate', [EventWifiController::class, 'rotate'])
+                ->middleware('permission:events.update')
+                ->name('registration.wifi.rotate');
+
+            // Throttled: one press queues an email to every competitor on the event, and
+            // a double click would be two hundred duplicates.
+            Route::post('registration/{event}/wifi/send', [EventWifiController::class, 'send'])
+                ->middleware(['permission:participants.notify', 'throttle:4,1'])
+                ->name('registration.wifi.send');
+
+            Route::get('registration/{event}/wifi/slips', [EventWifiController::class, 'slips'])
+                ->middleware('permission:participants.export')
+                ->name('registration.wifi.slips');
 
             // Participants - tabs: Individual, Team, Paid, Unpaid
             Route::get('participants', [ParticipantController::class, 'index'])

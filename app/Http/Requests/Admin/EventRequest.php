@@ -80,6 +80,7 @@ class EventRequest extends FormRequest
             'asks_server_id' => ['boolean'],
             'asks_ign_name' => ['boolean'],
             'asks_logo' => ['boolean'],
+            'offers_wifi' => ['boolean'],
             'requires_player_id' => ['boolean'],
             'requires_server_id' => ['boolean'],
             'requires_ign_name' => ['boolean'],

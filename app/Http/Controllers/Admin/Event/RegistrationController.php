@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Admin\Event;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\EventRequest;
 use App\Models\Event;
+use App\Models\EventRegistration;
+use App\Models\WifiCredential;
 use App\Services\AdminLogger;
 use App\Services\EventAddonWriter;
 use App\Services\EventQuestionWriter;
 use App\Support\ParticipantOptions;
 use App\Support\PaymentSettings;
+use App\Support\WifiCredentials;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -119,6 +122,77 @@ class RegistrationController extends Controller
             ->with('status', sprintf('Event %s created.', $event->title));
     }
 
+    /**
+     * What the Event Details panel needs to say about venue Wi-Fi.
+     *
+     * The counts are kept apart rather than summed into one number because they answer
+     * different questions, and the differences between them are the only useful thing on
+     * screen when somebody reports that the Wi-Fi does not work.
+     *
+     * Issued but not on the router means a correct login that fails. On the router but not
+     * sent means a working login nobody has been told. Those need opposite responses, and a
+     * single total would hide both.
+     *
+     * @return array<string, mixed>
+     */
+    private function wifiState(Event $event): array
+    {
+        $base = fn () => WifiCredential::query()
+            ->where('event_id', $event->id)
+            ->live()
+            ->forAttending();
+
+        $issued = $base()->count();
+        $provisioned = $base()->whereNotNull('provisioned_at')->count();
+        $delivered = $base()->whereNotNull('delivered_at')->count();
+
+        /*
+         | Everybody who is coming, so the panel can say whether anyone was missed.
+         |
+         | Counted from participants rather than from credentials, because the whole point
+         | is to catch the people who have no credential yet: asking the credentials table
+         | how many credentials are missing cannot work.
+         */
+        $expected = $event->participants()
+            ->whereNotIn('event_registrations.status', [
+                EventRegistration::STATUS_CANCELLED,
+                EventRegistration::STATUS_WAITLISTED,
+            ])
+            ->count();
+
+        $token = WifiCredentials::tokenFor($event);
+        $url = route('wifi.provision', ['token' => $token]);
+
+        return [
+            'issued' => $issued,
+            'provisioned' => $provisioned,
+            'delivered' => $delivered,
+            'expected' => $expected,
+            'missing' => max(0, $expected - $issued),
+            'expires_on' => $event->ends_at,
+
+            'url' => $url,
+
+            /*
+             | The whole thing an operator pastes into a RouterOS terminal, not just the
+             | address.
+             |
+             | The delay is not decoration. fetch returns before the file is finished being
+             | written, and an import that starts too early reads half a script — which
+             | fails in the middle, leaving some accounts created and some not. Two seconds
+             | is cheap insurance against a failure that looks like a corrupt file.
+             |
+             | check-certificate stays on. The router is about to execute what comes back,
+             | so accepting any server that answers would be handing command of it to
+             | whoever can intercept the connection.
+             */
+            'command' => sprintf(
+                '/tool fetch url="%s" dst-path=wifi.rsc check-certificate=yes; :delay 2s; /import file-name=wifi.rsc',
+                $url,
+            ),
+        ];
+    }
+
     public function show(Request $request, Event $event)
     {
         $event->load(['registrations' => fn ($query) => $query->with(['participants', 'addonLines'])->latest()]);
@@ -130,6 +204,11 @@ class RegistrationController extends Controller
                 'ready' => PaymentSettings::isReady(),
                 'currency' => PaymentSettings::currency(),
             ],
+
+            // Only resolved when the event offers Wi-Fi. Reading it otherwise would mint a
+            // fetch token for every event that has ever existed, including the ones that
+            // will never have a router pointed at them.
+            'wifi' => $event->offersWifi() ? $this->wifiState($event) : null,
             'canUpdate' => $request->user()->hasPermission('events.update'),
             'canDelete' => $request->user()->hasPermission('events.delete'),
 

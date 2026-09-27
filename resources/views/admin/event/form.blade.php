@@ -470,6 +470,41 @@
                     </p>
                 </x-admin.field-row>
 
+                {{--
+                    Wi-Fi logins for the venue.
+
+                    One switch and nothing else, because nothing about the network belongs
+                    in this application. Where the portal lives, what the router's address
+                    is, how fast a session may run: none of that is configured here. The
+                    router asks us for a list and we answer.
+
+                    Issued on registration rather than on payment, since an event may be
+                    free and then there is no payment to wait for.
+                --}}
+                <x-admin.field-row
+                    label="Venue Wi-Fi"
+                    help="For an event in a hall with a captive portal. Leave off where the venue provides its own Wi-Fi."
+                    error="offers_wifi">
+
+                    <div>
+                        <input type="hidden" name="offers_wifi" value="0">
+                        <x-admin.toggle
+                            name="offers_wifi"
+                            :checked="(bool) old('offers_wifi', $event->offers_wifi)"
+                            label="Create WiFi portal user and password" />
+                    </div>
+
+                    <p class="text-xs text-gray-500 mt-2">
+                        Every competitor gets their own login, generated when they register. The
+                        logins stop working at the end of the last day of the event, so one that
+                        gets passed around is worth nothing afterwards.
+                        @if ($event->exists)
+                            Turn this on for an event people have already entered and the Event
+                            page will offer to issue the ones that were missed.
+                        @endif
+                    </p>
+                </x-admin.field-row>
+
                 <x-admin.field-row label="Registration Opens" help="Leave blank to accept entries immediately." for="registration_opens_at" error="registration_opens_at">
                     <input type="date" id="registration_opens_at" name="registration_opens_at"
                            value="{{ old('registration_opens_at', $event->registration_opens_at?->toDateString()) }}"
