@@ -32,6 +32,7 @@
     'removable' => false,
     'title' => null,
     'ignFields' => [],
+    'requiresIc' => false,
     'positions' => [],
     'position' => 'manager_only',
     'alsoPlays' => false,
@@ -130,6 +131,38 @@
                    value="{{ $value('ic_number') }}" placeholder="900101011234" class="{{ $field }}">
             @error($errorKey('ic_number'))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
         </div>
+
+        {{--
+            Both sides of the identity card, when the event asks for them.
+
+            Beside the card number because they are the same piece of paper, and a
+            registrant who has just typed the number has it in their hand.
+
+            No `required` attribute even though the server insists. A file input cannot
+            hold a value across a failed submission, so marking it required would block
+            the form on a second attempt: the browser would demand a file the registrant
+            has already picked and the page can no longer show. The server decides.
+        --}}
+        @if ($requiresIc)
+            <div class="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p class="sm:col-span-2 text-xs text-amber-800">
+                    A photograph of each side of this person's identity card. JPG, PNG or WebP,
+                    up to 2 MB each. Held privately and never published.
+                </p>
+
+                @foreach (['ic_front' => 'I.C. Front', 'ic_back' => 'I.C. Back'] as $side => $sideLabel)
+                    <div>
+                        <label for="{{ $id($side) }}" class="{{ $label }}">
+                            {{ $sideLabel }} <span class="text-red-600" aria-hidden="true">*</span>
+                        </label>
+                        <input type="file" id="{{ $id($side) }}" name="{{ $name($side) }}"
+                               accept="image/jpeg,image/png,image/webp"
+                               class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 file:mr-3 file:rounded file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-gray-700 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                        @error($errorKey($side))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
+                    </div>
+                @endforeach
+            </div>
+        @endif
 
         {{--
             Game account. Asked only for events that need it, and placed next to

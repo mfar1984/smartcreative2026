@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\Campaign\AudienceController;
 use App\Http\Controllers\Admin\Campaign\CampaignController;
 use App\Http\Controllers\Admin\Campaign\CampaignReportController;
 use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
+use App\Http\Controllers\Admin\Event\IdentityCardController;
 use App\Http\Controllers\Admin\Event\ParticipantController;
 use App\Http\Controllers\Admin\Payment\PaymentController;
 use App\Http\Controllers\Admin\Portfolio\GalleryController as PortfolioGalleryController;
@@ -154,6 +155,24 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('participants/{registration}', [ParticipantController::class, 'show'])
                 ->middleware('permission:participants.view')
                 ->name('participants.show');
+
+            /*
+             | One side of a competitor's identity card.
+             |
+             | Behind participants.export rather than participants.view, and that is the
+             | point of putting it here. Viewing a record is reading what somebody typed;
+             | this is reading a photograph of their government identity document, which is
+             | the same class of thing as taking the participant list out of the building.
+             |
+             | Declared after {registration} above but distinguished by its own segment, and
+             | the side is matched against a whitelist in the controller rather than being
+             | interpolated anywhere near a column name.
+             */
+            Route::get('participants/ic/{participant}/{side}', [IdentityCardController::class, 'show'])
+                ->middleware(['permission:participants.export', 'throttle:60,1'])
+                ->whereNumber('participant')
+                ->where('side', 'front|back')
+                ->name('participants.ic');
 
             // Its own permission: this one reaches somebody's inbox, which is a
             // different thing from being allowed to read the record.

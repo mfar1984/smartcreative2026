@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\Event;
 use App\Models\EventParticipant;
+use App\Models\EventRegistration;
 use App\Support\AddonOrder;
 use App\Support\ParticipantOptions;
 use Illuminate\Foundation\Http\FormRequest;
@@ -71,8 +72,28 @@ class StoreEventRegistrationRequest extends FormRequest
             'participants.*.city' => ['required', 'string', 'max:100'],
             'participants.*.state' => ['required', 'string', 'max:100'],
             'participants.*.country' => ['required', 'string', 'max:100'],
-            'participants.*.phone' => ['required', 'string', 'max:30', 'regex:/^[0-9+\-\s()]+$/'],
-            'participants.*.email' => ['required', 'string', 'email:rfc', 'max:190'],
+            /*
+             | Required from the event's own setting, never from a posted flag.
+             |
+             | Both have been unconditionally required here for as long as this form has
+             | existed, and the defaults on those columns are true, so an event that has
+             | never been touched behaves exactly as it always did. The setting exists to
+             | let one be relaxed where it does not apply, not to weaken the norm.
+             */
+            'participants.*.phone' => [
+                $event->requiresPhone() ? 'required' : 'nullable',
+                'string',
+                'max:30',
+                'regex:/^[0-9+\-\s()]+$/',
+            ],
+            'participants.*.email' => [
+                $event->requiresEmail() ? 'required' : 'nullable',
+                'string',
+                'email:rfc',
+                'max:190',
+            ],
+
+            ...$this->icRules($event),
             // Optional and defaulted to no. An entry is not an agreement to be
             // marketed at, so the absence of an answer is a refusal.
             'participants.*.marketing_consent' => ['nullable', 'boolean'],
@@ -132,6 +153,80 @@ class StoreEventRegistrationRequest extends FormRequest
     }
 
     /**
+     * Rules for the two identity card photographs, when the event asks for them.
+     *
+     * No rule at all when it does not, matching how the game account fields are handled: a
+     * file posted for something the form never drew is simply not validated and never
+     * reaches storage.
+     *
+     * mimetypes rather than the `image` rule, because it is checked against what the file
+     * actually contains rather than what it is called. A scan of a card is a photograph, so
+     * PDF is not accepted: it would be a second format to render, and it is the one people
+     * use to attach a whole document rather than one side.
+     *
+     * @return array<string, array<int, string>>
+     */
+    private function icRules(Event $event): array
+    {
+        if (! $event->requiresIcAttachment()) {
+            return [];
+        }
+
+        /*
+         | Two megabytes, which is generous for a photograph of a card and deliberately
+         | not more.
+         |
+         | A squad of six sends twelve of these in one request, plus the logo. At four
+         | megabytes each that is fifty megabytes in a single POST, which exceeds
+         | post_max_size on most shared hosting — and when that limit is passed PHP
+         | discards the entire body, so the form comes back with every field empty and no
+         | explanation. A smaller cap per file is what keeps the total inside a limit this
+         | application cannot see.
+         */
+        $rules = ['file', 'mimetypes:image/jpeg,image/png,image/webp', 'max:2048'];
+
+        return [
+            'participants.*.ic_front' => ['required', ...$rules],
+            'participants.*.ic_back' => ['required', ...$rules],
+        ];
+    }
+
+    /**
+     * Refuse before PHP silently drops half the uploads.
+     *
+     * max_file_uploads caps how many files arrive in one request, and the ones over the
+     * limit are not rejected: they are simply absent. Validation then reports a missing
+     * identity card for whoever happened to fall off the end, which sends the registrant
+     * hunting for a file they did attach.
+     *
+     * Saying so up front turns an inexplicable failure into a limit with a number on it.
+     * The only real fix is on the server, so the message points there rather than
+     * pretending the entry could be corrected.
+     */
+    private function checkUploadCapacity(Validator $validator): void
+    {
+        if (! $this->event()->requiresIcAttachment()) {
+            return;
+        }
+
+        $people = count((array) $this->input('participants', []));
+
+        // Two photographs each, and the logo shares the same allowance.
+        $needed = ($people * 2) + 1;
+        $allowed = (int) ini_get('max_file_uploads');
+
+        if ($allowed <= 0 || $needed <= $allowed) {
+            return;
+        }
+
+        $validator->errors()->add('participants', sprintf(
+            'This entry needs %d file uploads and this server accepts %d in one submission. Register fewer people at a time, or ask the organiser to raise max_file_uploads.',
+            $needed,
+            $allowed,
+        ));
+    }
+
+    /**
      * @return array<string, string>
      */
     public function messages(): array
@@ -145,6 +240,13 @@ class StoreEventRegistrationRequest extends FormRequest
             'participants.*.phone.regex' => 'The telephone number may only contain digits, spaces and the characters + - ( ).',
             'participants.*.date_of_birth.before' => 'The date of birth must be in the past.',
             'team_name.required' => 'Enter the team or organisation name.',
+
+            'participants.*.ic_front.required' => 'Attach the front of this person\'s identity card.',
+            'participants.*.ic_back.required' => 'Attach the back of this person\'s identity card.',
+            'participants.*.ic_front.mimetypes' => 'The identity card photograph must be a JPG, PNG or WebP image.',
+            'participants.*.ic_back.mimetypes' => 'The identity card photograph must be a JPG, PNG or WebP image.',
+            'participants.*.ic_front.max' => 'Each identity card photograph must be no larger than 4 MB.',
+            'participants.*.ic_back.max' => 'Each identity card photograph must be no larger than 4 MB.',
         ];
 
         // Named per field so somebody who left the Server ID blank is told that,
@@ -196,6 +298,41 @@ class StoreEventRegistrationRequest extends FormRequest
         return $labels;
     }
 
+    /**
+     * Renumber the participant file uploads to match the rows that survived filtering.
+     *
+     * Called from prepareForValidation, which is the last moment before the validator
+     * reads all() and merges files over the input. Anything later is too late: by then the
+     * mismatch has already become a validation error against the wrong person.
+     *
+     * Rows whose data was dropped lose their files with them. That is correct — a block the
+     * registrant blanked out is not a person, and keeping its attachments would leave
+     * identity documents on disk belonging to nobody on the entry.
+     *
+     * @param  array<int, array-key>  $keys  the form's own row keys, in order, that survived
+     */
+    private function realignParticipantFiles(array $keys): void
+    {
+        $files = $this->files->all();
+
+        if (! isset($files['participants']) || ! is_array($files['participants'])) {
+            return;
+        }
+
+        $original = $files['participants'];
+        $aligned = [];
+
+        foreach (array_values($keys) as $position => $key) {
+            if (isset($original[$key])) {
+                $aligned[$position] = $original[$key];
+            }
+        }
+
+        $files['participants'] = $aligned;
+
+        $this->files->replace($files);
+    }
+
     protected function prepareForValidation(): void
     {
         $participants = $this->input('participants', []);
@@ -214,7 +351,7 @@ class StoreEventRegistrationRequest extends FormRequest
         | filled('0') is true, counting it would make every blank block look filled
         | and fail the submission with errors about fields nobody touched.
         */
-        $participants = array_values(array_filter(
+        $kept = array_filter(
             $participants,
             // also_plays joins role and marketing_consent in being ignored here:
             // it too has a hidden 0 in front of it, so counting it would make an
@@ -223,7 +360,23 @@ class StoreEventRegistrationRequest extends FormRequest
                 ->except(['role', 'also_plays', 'marketing_consent'])
                 ->filter(fn ($value) => filled($value))
                 ->isNotEmpty()
-        ));
+        );
+
+        /*
+        | Move the uploaded files onto the same row numbers as the data.
+        |
+        | Re-indexing the rows below would otherwise part each person from their own
+        | attachments, because $_FILES is not touched by merge() and keeps the numbering
+        | the browser sent. Leave a blank block in the middle of a squad and the result is
+        | that one competitor is told to attach an identity card they did attach, a row
+        | with files and no name appears out of nowhere, and — if the two were ever paired
+        | by position instead of by key — one person's identity document is filed under
+        | another person's name. That last one is the reason this is done here rather than
+        | worked around in the controller.
+        */
+        $this->realignParticipantFiles(array_keys($kept));
+
+        $participants = array_values($kept);
 
         $participants = array_map(function (array $row) {
             foreach ([
@@ -273,6 +426,8 @@ class StoreEventRegistrationRequest extends FormRequest
             fn (Validator $validator) => $this->checkRegistrationStillOpen($validator),
             fn (Validator $validator) => $this->checkModeShape($validator),
             fn (Validator $validator) => $this->checkDuplicateIdentityCards($validator),
+            fn (Validator $validator) => $this->checkUniqueContact($validator),
+            fn (Validator $validator) => $this->checkUploadCapacity($validator),
             fn (Validator $validator) => $this->checkSeatsAvailable($validator),
             fn (Validator $validator) => $this->checkAddons($validator),
             fn (Validator $validator) => $this->checkAnswers($validator),
@@ -449,6 +604,119 @@ class StoreEventRegistrationRequest extends FormRequest
      * The same identity card cannot appear twice in this submission, nor on an
      * earlier registration for the same event.
      */
+    /**
+     * One email address and one telephone number per person, across the whole event.
+     *
+     * Only when the event asks for it, because it refuses entries that the rules as they
+     * stand would accept, and that is a decision for an organiser rather than something
+     * that should arrive with an upgrade.
+     *
+     * The rule exists because of what contact detail is now used for. It was harmless for a
+     * manager to put his own address on all five of his players while it was only ever used
+     * to reach whoever registered. It stopped being harmless once every competitor gets
+     * their own Wi-Fi login sent to the address on their row: five logins arrive in the
+     * manager's inbox and the five players get nothing.
+     *
+     * Checked in two directions, and both are needed. Within the submission, because a
+     * squad is entered in one go and the database cannot see a clash that has not been
+     * saved yet. Against the event, because the second team to register would otherwise sail
+     * past a number the first one already used.
+     *
+     * The wording never says who holds the value. Whoever is filling this form in is not
+     * necessarily entitled to know that somebody else on the event used this address, and
+     * "already used by Ahmad" would be telling them.
+     */
+    private function checkUniqueContact(Validator $validator): void
+    {
+        if (! $this->event()->requiresUniqueContact()) {
+            return;
+        }
+
+        $participants = (array) $this->input('participants', []);
+
+        foreach ([
+            'email' => 'email address',
+            'phone' => 'telephone number',
+        ] as $field => $label) {
+            /*
+             | Compared case-insensitively for email and with punctuation stripped for
+             | phone numbers.
+             |
+             | Otherwise the rule is trivially defeated by typing the same address in
+             | different case, or the same number with and without hyphens, which is not
+             | somebody being clever — it is what happens naturally when six rows are
+             | filled in by one person from memory.
+             */
+            $values = collect($participants)
+                ->map(fn ($person) => $this->normaliseContact($field, is_array($person) ? ($person[$field] ?? null) : null))
+                ->filter()
+                ->values();
+
+            foreach ($values->duplicates() as $index => $value) {
+                $validator->errors()->add(
+                    "participants.{$index}.{$field}",
+                    sprintf('This event needs a different %s for each person, and this one is already used above.', $label),
+                );
+            }
+
+            if ($values->isEmpty()) {
+                continue;
+            }
+
+            /*
+             | Normalised on both sides, which means the comparison happens in PHP rather
+             | than in SQL.
+             |
+             | A LOWER() or REPLACE() in the where clause would not use an index, and this
+             | runs while somebody is waiting on a form. Pulling one column for one event is
+             | a few hundred rows at worst.
+             */
+            $taken = EventParticipant::query()
+                ->whereHas('registration', fn ($query) => $query
+                    ->where('event_id', $this->event()->id)
+                    ->where('status', '!=', EventRegistration::STATUS_CANCELLED))
+                ->pluck($field)
+                ->map(fn ($value) => $this->normaliseContact($field, $value))
+                ->filter()
+                ->unique();
+
+            if ($taken->isEmpty()) {
+                continue;
+            }
+
+            foreach ($values as $index => $value) {
+                if ($taken->contains($value)) {
+                    $validator->errors()->add(
+                        "participants.{$index}.{$field}",
+                        sprintf('This %s is already registered for this event. Each person needs their own.', $label),
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * The comparable form of a contact value.
+     *
+     * Email lower-cased, because addresses are not case sensitive in practice and nobody
+     * intends Ali@x.com and ali@x.com to be two people. Telephone reduced to digits, so
+     * 012-345 6789 and 0123456789 are recognised as the one number they are.
+     */
+    private function normaliseContact(string $field, mixed $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        if ($field === 'phone') {
+            $digits = preg_replace('/\D+/', '', $value) ?? '';
+
+            return $digits === '' ? null : $digits;
+        }
+
+        return mb_strtolower(trim($value));
+    }
+
     private function checkDuplicateIdentityCards(Validator $validator): void
     {
         $cards = collect($this->input('participants', []))

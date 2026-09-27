@@ -17,6 +17,8 @@ class EventParticipant extends Model
         'also_plays',
         'full_name',
         'ic_number',
+        'ic_front_path',
+        'ic_back_path',
         'ign_player_id',
         'ign_server_id',
         'ign_name',

@@ -584,6 +584,48 @@
                             <td class="{{ $value }} tabular-nums">{{ $participant->ic_number }}</td>
                         </tr>
 
+                        {{--
+                            The photographs, when this person uploaded any.
+
+                            Links rather than inline <img> on purpose. These are images of a
+                            government identity document, and embedding them would put two of
+                            them on screen for anybody who opens this page for an unrelated
+                            reason — and into the browser cache of whatever machine they are
+                            sitting at. Opening one is then a deliberate act, and the route
+                            behind it records that it happened.
+
+                            Shown whenever a file exists rather than only when the event still
+                            asks, so turning the setting off does not hide documents already
+                            held.
+                        --}}
+                        @if (filled($participant->ic_front_path) || filled($participant->ic_back_path))
+                            <tr>
+                                <th scope="row" class="{{ $label }} text-left">I.C. Attachment</th>
+                                <td class="{{ $value }}">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        @foreach (['front' => 'Front', 'back' => 'Back'] as $side => $sideLabel)
+                                            @if (filled($participant->{'ic_' . $side . '_path'}))
+                                                <a href="{{ route('admin.event.participants.ic', ['participant' => $participant->id, 'side' => $side]) }}"
+                                                   target="_blank"
+                                                   rel="noopener noreferrer"
+                                                   class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                                    <x-admin.icon name="photo" class="w-3.5 h-3.5" />
+                                                    {{ $sideLabel }}
+                                                </a>
+                                            @else
+                                                <span class="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700">
+                                                    {{ $sideLabel }} missing
+                                                </span>
+                                            @endif
+                                        @endforeach
+                                    </div>
+                                    <p class="text-xs text-gray-400 mt-1.5">
+                                        Opens in a new tab. Held on private storage, and each view is recorded.
+                                    </p>
+                                </td>
+                            </tr>
+                        @endif
+
                         {{-- Only for events that ask for one, unless an older row
                              happens to carry it after the setting was changed. --}}
                         @if ($event?->asksIgn() || $participant->hasIgn())

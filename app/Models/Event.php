@@ -68,6 +68,10 @@ class Event extends Model
         'requires_ign_name',
         'requires_logo',
         'offers_wifi',
+        'requires_unique_contact',
+        'requires_email',
+        'requires_phone',
+        'requires_ic_attachment',
         'status',
         'registration_mode',
         'min_players',
@@ -100,6 +104,10 @@ class Event extends Model
             'requires_ign_name' => 'boolean',
             'requires_logo' => 'boolean',
             'offers_wifi' => 'boolean',
+            'requires_unique_contact' => 'boolean',
+            'requires_email' => 'boolean',
+            'requires_phone' => 'boolean',
+            'requires_ic_attachment' => 'boolean',
         ];
     }
 
@@ -132,6 +140,46 @@ class Event extends Model
     public function offersWifi(): bool
     {
         return (bool) $this->offers_wifi;
+    }
+
+    /* ---------------------------------------------------------------------
+     | What the public form insists on
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Whether no two competitors on this event may share an address or a number.
+     *
+     * The rule that makes per-person Wi-Fi delivery mean anything. Without it a manager
+     * can put his own details on every player, and each of those players' logins arrives
+     * in his inbox instead of theirs.
+     */
+    public function requiresUniqueContact(): bool
+    {
+        return (bool) $this->requires_unique_contact;
+    }
+
+    /**
+     * Whether an email address has to be given.
+     *
+     * Forced true whenever the event offers Wi-Fi, here as well as in the admin form.
+     * The form's lock is a courtesy to the operator; this is the one that holds, because a
+     * posted payload can say anything and an event that hands out logins by email without
+     * collecting addresses cannot deliver them.
+     */
+    public function requiresEmail(): bool
+    {
+        return $this->offersWifi() || (bool) $this->requires_email;
+    }
+
+    public function requiresPhone(): bool
+    {
+        return (bool) $this->requires_phone;
+    }
+
+    /** Whether both sides of an identity card have to be uploaded per person. */
+    public function requiresIcAttachment(): bool
+    {
+        return (bool) $this->requires_ic_attachment;
     }
 
     /** Everything extra a registrant may pay for, in display order. */

@@ -375,6 +375,95 @@
                 </div>
 
                 {{--
+                    What the public form insists on.
+
+                    Four separate switches rather than one "strict" setting, because they
+                    answer different questions and an organiser needs them in different
+                    combinations. Asking for an address is not the same as insisting every
+                    address differs, and neither has anything to do with identity documents.
+
+                    Email and Handphone start on. They have been unconditionally required in
+                    the public form for as long as it has existed, so these are here to let
+                    an event relax the rule rather than to introduce it: a children's
+                    competition whose players have no email of their own, or a course taken
+                    at the counter.
+                --}}
+                @php
+                    $wifiOn = (bool) old('offers_wifi', $event->offers_wifi);
+
+                    $requiredRules = [
+                        [
+                            'name' => 'requires_unique_contact',
+                            'label' => 'Unique ID',
+                            'hint' => 'No two competitors on this event may share an email address or a telephone number.',
+                            'checked' => (bool) old('requires_unique_contact', $event->requires_unique_contact),
+                        ],
+                        [
+                            'name' => 'requires_email',
+                            'label' => 'Email',
+                            // Locked rather than hidden, so the reason is visible instead of
+                            // the box appearing to have been ticked by nobody.
+                            'hint' => $wifiOn
+                                ? 'Held on because this event hands out Wi-Fi logins by email.'
+                                : 'An email address has to be given for every competitor.',
+                            'checked' => $wifiOn || (bool) old('requires_email', $event->exists ? $event->requires_email : true),
+                            'locked' => $wifiOn,
+                        ],
+                        [
+                            'name' => 'requires_phone',
+                            'label' => 'Handphone Number',
+                            'hint' => 'A telephone number has to be given for every competitor.',
+                            'checked' => (bool) old('requires_phone', $event->exists ? $event->requires_phone : true),
+                        ],
+                        [
+                            'name' => 'requires_ic_attachment',
+                            'label' => 'Attachment IC Front &amp; Back',
+                            'hint' => 'Two photographs per person. Held on private storage and never published.',
+                            'checked' => (bool) old('requires_ic_attachment', $event->requires_ic_attachment),
+                        ],
+                    ];
+                @endphp
+
+                <x-admin.field-row
+                    label="Required"
+                    help="What a registrant must give. Applies to every person on an entry, not just the manager.">
+
+                    <div class="flex flex-wrap gap-x-8 gap-y-3">
+                        @foreach ($requiredRules as $rule)
+                            @php $locked = $rule['locked'] ?? false; @endphp
+
+                            <div class="min-w-52">
+                                <label for="{{ $rule['name'] }}" class="inline-flex items-center gap-2 {{ $locked ? 'cursor-default' : 'cursor-pointer' }}">
+                                    {{-- An unticked box sends nothing, so a 0 is queued first
+                                         and the checkbox overrides it. A locked box sends
+                                         nothing either, which is why the request decides this
+                                         one again rather than reading it back. --}}
+                                    <input type="hidden" name="{{ $rule['name'] }}" value="{{ $locked ? '1' : '0' }}">
+                                    <input type="checkbox" id="{{ $rule['name'] }}" name="{{ $rule['name'] }}" value="1"
+                                           @checked($rule['checked'])
+                                           @disabled($locked)
+                                           class="h-4 w-4 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40 disabled:opacity-60">
+                                    <span class="text-sm font-medium {{ $locked ? 'text-gray-500' : 'text-gray-800' }}">
+                                        {!! $rule['label'] !!}
+                                    </span>
+                                    @if ($locked)
+                                        <x-admin.icon name="lock" class="w-3.5 h-3.5 text-gray-400" />
+                                    @endif
+                                </label>
+
+                                <p class="text-xs text-gray-500 mt-1 max-w-64">{{ $rule['hint'] }}</p>
+                            </div>
+                        @endforeach
+                    </div>
+
+                    <p class="text-xs text-gray-500 mt-3">
+                        Unique ID is the one that matters where every competitor gets their own
+                        Wi-Fi login: without it a manager can enter his own details for the whole
+                        squad, and each player's login arrives in his inbox rather than theirs.
+                    </p>
+                </x-admin.field-row>
+
+                {{--
                     In-Game fields. Each is asked and made compulsory separately,
                     because the two are different questions: a tournament may want
                     an in-game name on the scoreboard without insisting on a server
@@ -655,6 +744,61 @@
 
             toggle.addEventListener('change', sync);
         });
+
+        /*
+         | Venue Wi-Fi holds the Email requirement on.
+         |
+         | The logins are delivered by email, so an event that offers them and does not
+         | collect addresses has promised something it cannot hand over. The request
+         | decides this again on the way in; this exists so the operator sees it the
+         | moment they flip the switch rather than discovering it after a save.
+         |
+         | The hidden partner input is flipped to 1 alongside, because a disabled
+         | checkbox sends nothing and the hidden field would otherwise carry a 0.
+         */
+        (function () {
+            const wifi = document.querySelector('input[type="checkbox"][name="offers_wifi"]');
+            const email = document.getElementById('requires_email');
+
+            if (!wifi || !email) {
+                return;
+            }
+
+            const hidden = document.querySelector('input[type="hidden"][name="requires_email"]');
+            const label = email.closest('label')?.querySelector('span');
+
+            // What the operator had chosen before Wi-Fi took the decision away, so
+            // turning Wi-Fi back off restores it rather than leaving it stuck on.
+            let chosen = email.checked;
+
+            function sync() {
+                if (wifi.checked) {
+                    if (!email.disabled) {
+                        chosen = email.checked;
+                    }
+
+                    email.checked = true;
+                    email.disabled = true;
+
+                    if (hidden) {
+                        hidden.value = '1';
+                    }
+                } else {
+                    email.disabled = false;
+                    email.checked = chosen;
+
+                    if (hidden) {
+                        hidden.value = '0';
+                    }
+                }
+
+                label?.classList.toggle('text-gray-500', email.disabled);
+                label?.classList.toggle('text-gray-800', !email.disabled);
+            }
+
+            wifi.addEventListener('change', sync);
+            sync();
+        })();
 
     })();
 </script>

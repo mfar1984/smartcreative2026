@@ -521,7 +521,8 @@
                                     :title="$rowTitle"
                                     :questions="$event->questions->all()"
                                     :per-person-addons="$event->addons->filter(fn ($a) => $a->isPerParticipant() && $a->isPurchasable())->values()->all()"
-                                    :ign-fields="$event->ignFormFields()" />
+                                    :ign-fields="$event->ignFormFields()"
+                                    :requires-ic="$event->requiresIcAttachment()" />
                             @endforeach
                         </div>
 
@@ -543,7 +544,8 @@
                                          as one that was on the page from the start. --}}
                                     :questions="$event->questions->all()"
                                     :per-person-addons="$event->addons->filter(fn ($a) => $a->isPerParticipant() && $a->isPurchasable())->values()->all()"
-                                    :ign-fields="$event->ignFormFields()" />
+                                    :ign-fields="$event->ignFormFields()"
+                                    :requires-ic="$event->requiresIcAttachment()" />
                             </template>
                         @endif
 

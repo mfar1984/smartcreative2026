@@ -81,6 +81,10 @@ class EventRequest extends FormRequest
             'asks_ign_name' => ['boolean'],
             'asks_logo' => ['boolean'],
             'offers_wifi' => ['boolean'],
+            'requires_unique_contact' => ['boolean'],
+            'requires_email' => ['boolean'],
+            'requires_phone' => ['boolean'],
+            'requires_ic_attachment' => ['boolean'],
             'requires_player_id' => ['boolean'],
             'requires_server_id' => ['boolean'],
             'requires_ign_name' => ['boolean'],
@@ -218,6 +222,26 @@ class EventRequest extends FormRequest
             $flags[$asks] = $asked;
             $flags[$requires] = $asked && $this->boolean($requires);
         }
+
+        /*
+        | Wi-Fi forces an email address to be collected.
+        |
+        | The logins are delivered by email, so an event that offers them and does not ask
+        | for an address has promised something it cannot hand over. The form disables the
+        | box to say so, but a disabled input sends nothing and so does a tampered payload,
+        | which is why the decision is taken here rather than trusted from the request.
+        |
+        | Only ever forces it on. Turning Wi-Fi off later leaves the requirement where the
+        | operator last put it rather than silently undoing a choice they may have made for
+        | their own reasons.
+        */
+        $offersWifi = $this->boolean('offers_wifi');
+
+        $flags['offers_wifi'] = $offersWifi;
+        $flags['requires_email'] = $offersWifi || $this->boolean('requires_email');
+        $flags['requires_phone'] = $this->boolean('requires_phone');
+        $flags['requires_unique_contact'] = $this->boolean('requires_unique_contact');
+        $flags['requires_ic_attachment'] = $this->boolean('requires_ic_attachment');
 
         $this->merge($flags + [
             'title' => is_string($this->title) ? trim($this->title) : $this->title,

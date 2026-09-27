@@ -27,6 +27,21 @@ class RegistrationController extends Controller
     private const LOGO_DIRECTORY = 'registration-logos';
 
     /**
+     * Where identity card photographs live, and the disk they live on.
+     *
+     * The `local` disk, whose root is outside the published directory, and deliberately
+     * not the public one the logo uses. A logo is meant to be seen, so it sits where the
+     * web server hands it straight out to anybody who works out the URL. A photograph of a
+     * government identity document must never be reachable that way, whatever the filename
+     * is: obscurity is not access control, and these files outlive the event.
+     *
+     * Reading one goes through an admin route that checks who is asking.
+     */
+    private const IC_DISK = 'local';
+
+    private const IC_DIRECTORY = 'participant-ic';
+
+    /**
      * Public tabs, each matching one value returned by Event::lifecycle().
      *
      * Building the tabs on the same rule the card badge uses keeps a card from
@@ -86,6 +101,56 @@ class RegistrationController extends Controller
     }
 
     /**
+     * Put each person's identity card photographs on the private disk.
+     *
+     * Read by position because the request has already aligned the uploads with the rows.
+     * Both sides are handled independently: validation insists on both when the event asks
+     * for them, and a half-filled pair here means the event does not, in which case whatever
+     * did arrive is still worth keeping against the right person.
+     *
+     * @return array<int, array<string, string>>  position => column => stored path
+     */
+    private function storeIdentityCards(StoreEventRegistrationRequest $request, int $count): array
+    {
+        $stored = [];
+
+        for ($index = 0; $index < $count; $index++) {
+            $row = [];
+
+            foreach (['ic_front' => 'ic_front_path', 'ic_back' => 'ic_back_path'] as $field => $column) {
+                $file = $request->file("participants.{$index}.{$field}");
+
+                if ($file !== null) {
+                    // store() names the file from a hash of its contents, so nothing of the
+                    // competitor's own filename — which is often their name or card number —
+                    // ends up on disk.
+                    $row[$column] = $file->store(self::IC_DIRECTORY, self::IC_DISK);
+                }
+            }
+
+            if ($row !== []) {
+                $stored[$index] = $row;
+            }
+        }
+
+        return $stored;
+    }
+
+    /**
+     * Remove identity card photographs that ended up belonging to nobody.
+     *
+     * @param  array<int, array<string, string>>  $stored
+     */
+    private function discardIdentityCards(array $stored): void
+    {
+        foreach ($stored as $row) {
+            foreach ($row as $path) {
+                Storage::disk(self::IC_DISK)->delete($path);
+            }
+        }
+    }
+
+    /**
      * Store a submitted registration.
      *
      * Seats are re-checked inside the transaction with a locking read, because
@@ -117,7 +182,20 @@ class RegistrationController extends Controller
             ? $request->file('logo')->store(self::LOGO_DIRECTORY, 'public')
             : null;
 
-        $outcome = DB::transaction(function () use ($request, $event, $participants, $headCount, $logoPath) {
+        /*
+         | Identity card photographs, stored before the transaction for the same reason as
+         | the logo: a file write cannot be rolled back alongside the database, so holding a
+         | row lock while waiting on disk buys nothing and costs concurrency.
+         |
+         | Keyed by position, which is only safe because the request has already moved the
+         | uploads onto the same row numbers as the data they belong to. Left to itself
+         | $_FILES keeps the numbering the browser sent while the rows are renumbered around
+         | any blank block the registrant left behind, and pairing the two by position then
+         | files one person's identity document under another person's name.
+         */
+        $icPaths = $this->storeIdentityCards($request, count($participants));
+
+        $outcome = DB::transaction(function () use ($request, $event, $participants, $headCount, $logoPath, $icPaths) {
             /** @var Event $locked */
             $locked = Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
 
@@ -213,6 +291,20 @@ class RegistrationController extends Controller
                 ];
             }, $participants, array_keys($participants));
 
+            /*
+             | Attach each pair of identity card photographs to the person it belongs to.
+             |
+             | Matched on the submitted array's own keys rather than on position after
+             | re-indexing, because the two are not the same thing once a row the registrant
+             | removed has been dropped out of the middle. Getting this wrong would file one
+             | competitor's identity document against another's name.
+             */
+            foreach ($icPaths as $index => $paths) {
+                if (isset($participants[$index])) {
+                    $participants[$index] += $paths;
+                }
+            }
+
             $saved = $registration->participants()->createMany($participants);
 
             $this->recordAnswers($locked, $saved, $answers);
@@ -259,6 +351,16 @@ class RegistrationController extends Controller
         });
 
         if (isset($outcome['error'])) {
+            /*
+             | The entry was refused, so the identity card photographs belong to nobody.
+             |
+             | Deleted rather than left for a cleanup job. These are images of government
+             | identity documents: holding one with no row pointing at it means holding
+             | somebody's document with no record of whose it is or why, which is worse than
+             | the wasted disk space an orphaned logo costs.
+             */
+            $this->discardIdentityCards($icPaths);
+
             // Nothing was saved, so the uploaded file has nothing pointing at it.
             if ($logoPath !== null) {
                 Storage::disk('public')->delete($logoPath);
