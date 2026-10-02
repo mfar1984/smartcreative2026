@@ -11,7 +11,11 @@
     @param bool              $isOpenModal  replay old input when reopening after an error
 --}}
 @php
-    $addons = $event->purchasableAddons();
+    // Items assigned to each person are rendered inside that person's card.
+    // The shared picker keeps only registration-level quantity/radio items.
+    $addons = $event->purchasableAddons()
+        ->reject(fn ($addon) => $addon->isAssignedPerParticipant($event))
+        ->values();
 @endphp
 
 @if ($addons->isNotEmpty())
@@ -68,6 +72,7 @@
                      rather than multiplying it. --}}
                 <div class="rounded-lg border border-gray-200 bg-white p-4"
                      data-addon="{{ $addon->id }}"
+                     data-addon-id="{{ $addon->id }}"
                      data-addon-once="{{ number_format($addon->unitPrice(), 2, '.', '') }}"
                      data-addon-name="{{ $addon->name }}"
                      @if ($cap !== null) data-addon-cap="{{ $cap }}" @endif>
@@ -128,6 +133,73 @@
                     @endif
 
                     @if ($addon->hasVariants())
+                        @if ($addon->isRadioSelection())
+                            @php
+                                $selectedChoice = $chosen['choice'] ?? null;
+                                $wasSubmitted = $isOpenModal && $submittedAddons !== [];
+                                $defaultChoice = $startTicked && ! $wasSubmitted
+                                    ? $addon->variants->first(fn ($v) => ! $v->isSoldOut())?->id
+                                    : null;
+                            @endphp
+
+                            <div class="mt-3 space-y-2 border-t border-gray-100 pt-3" data-radio-options>
+                                @unless ($addon->is_required)
+                                    <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2.5 cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition">
+                                        <input type="radio"
+                                               name="addons[{{ $addon->id }}][choice]"
+                                               value=""
+                                               @checked(blank($selectedChoice) && $defaultChoice === null)
+                                               data-addon-choice
+                                               data-price="0"
+                                               data-label="{{ $addon->name }} — None"
+                                               class="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="text-sm text-gray-700">None</span>
+                                    </label>
+                                @endunless
+
+                                @foreach ($addon->variants as $variant)
+                                    @php
+                                        $soldOut = $variant->isSoldOut();
+                                        $left = $variant->stockLeft();
+                                        $inputId = "addon-{$event->slug}-{$addon->id}-radio-{$variant->id}";
+                                    @endphp
+
+                                    <label for="{{ $inputId }}" @class([
+                                        'flex items-center gap-3 rounded-lg border px-3 py-2.5 transition',
+                                        'border-gray-200 cursor-pointer hover:border-blue-300 hover:bg-blue-50' => ! $soldOut,
+                                        'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed' => $soldOut,
+                                    ])>
+                                        <input type="radio"
+                                               id="{{ $inputId }}"
+                                               name="addons[{{ $addon->id }}][choice]"
+                                               value="{{ $variant->id }}"
+                                               @checked((int) $selectedChoice === $variant->id || (blank($selectedChoice) && $defaultChoice === $variant->id))
+                                               @disabled($soldOut)
+                                               @required($addon->is_required)
+                                               data-addon-choice
+                                               data-price="{{ number_format($variant->unitPrice(), 2, '.', '') }}"
+                                               data-label="{{ $addon->name }} ({{ $variant->label }})"
+                                               class="h-4 w-4 shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500">
+
+                                        <span class="min-w-0 flex-1 text-sm">{{ $variant->label }}</span>
+
+                                        @if (! $variant->isFree())
+                                            <span class="text-sm font-semibold tabular-nums whitespace-nowrap">+RM {{ number_format($variant->unitPrice(), 2) }}</span>
+                                        @endif
+
+                                        @if ($soldOut)
+                                            <span class="text-xs font-semibold text-red-600">Sold out</span>
+                                        @elseif ($left !== null && $left <= 10)
+                                            <span class="text-xs text-amber-700">{{ $left }} left</span>
+                                        @endif
+                                    </label>
+                                @endforeach
+                            </div>
+
+                            @error('addons.' . $addon->id . '.choice')
+                                <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                            @enderror
+                        @else
                         @php
                             /*
                              | With options, "included" has to land on one of them or
@@ -210,6 +282,7 @@
                                 </div>
                             @endforeach
                         </div>
+                        @endif
                     @else
                         @php
                             $inputId = "addon-{$event->slug}-{$addon->id}-base";

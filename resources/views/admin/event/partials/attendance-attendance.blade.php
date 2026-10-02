@@ -32,7 +32,7 @@
         Who is at the desk?
     </label>
     <p class="text-xs text-gray-500 mb-3">
-        Team name, a person's name, their identity card number, or the registration reference.
+        Team/group name, a person's name, their identity card number, or the registration reference.
     </p>
 
     <div class="flex flex-wrap items-center gap-2">

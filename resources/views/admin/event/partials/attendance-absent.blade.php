@@ -39,7 +39,7 @@
                 <tr>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Event</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Participant</th>
-                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Team</th>
+                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Entry</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Contact</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Payment</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Open at Counter</th>

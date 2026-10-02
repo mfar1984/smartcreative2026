@@ -119,8 +119,8 @@
                     <button type="button"
                             data-open-entry
                             class="p-1.5 rounded-lg text-blue-600 hover:bg-blue-100 transition"
-                            title="Correct the team name, logo or note"
-                            aria-label="Correct the team name, logo or note">
+                            title="Correct the team/group name, logo or note"
+                            aria-label="Correct the team/group name, logo or note">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                         </svg>
@@ -155,7 +155,7 @@
                     </tr>
                     @if (filled($registration->team_name))
                         <tr>
-                            <th scope="row" class="{{ $label }} text-left">Team</th>
+                            <th scope="row" class="{{ $label }} text-left">{{ $registration->mode === \App\Models\Event::MODE_GROUPING ? 'Group' : 'Team' }}</th>
                             <td class="{{ $value }}">{{ $registration->team_name }}</td>
                         </tr>
                     @endif
@@ -251,8 +251,8 @@
 
                             <div>
                                 <label for="team_name" class="{{ $personLabel }}">
-                                    Team or organisation name
-                                    @if ($registration->mode === \App\Models\Event::MODE_MANAGER)
+                                    {{ $registration->mode === \App\Models\Event::MODE_GROUPING ? 'Group or organisation name' : 'Team or organisation name' }}
+                                    @if (in_array($registration->mode, [\App\Models\Event::MODE_MANAGER, \App\Models\Event::MODE_GROUPING], true))
                                         <span class="text-red-600" aria-hidden="true">*</span>
                                     @endif
                                 </label>

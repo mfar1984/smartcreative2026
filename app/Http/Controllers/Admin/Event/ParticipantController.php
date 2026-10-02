@@ -49,6 +49,7 @@ class ParticipantController extends Controller
      */
     public const TABS = [
         'individual' => ['label' => 'Individual', 'icon' => 'users'],
+        'group' => ['label' => 'Grouping', 'icon' => 'users'],
         'team' => ['label' => 'Team', 'icon' => 'identification'],
         'paid' => ['label' => 'Paid', 'icon' => 'credit-card'],
         'unpaid' => ['label' => 'Unpaid', 'icon' => 'lock'],
@@ -555,11 +556,13 @@ class ParticipantController extends Controller
 
         $target?->load('questions');
 
-        // Counted in players, never in rows. A manager who does not play occupies no
-        // playing place; one who ticked "and Player" is one of the players.
+        // Manager entries count playing places; grouping entries count every person.
         $playing = $registration->participants
             ->filter(fn (EventParticipant $person) => $person->isPlaying())
             ->count();
+        $boundedCount = $target?->isGroupingMode()
+            ? $registration->participants->count()
+            : $playing;
 
         [$min, $max] = $target?->playerBounds() ?? [0, null];
 
@@ -570,6 +573,7 @@ class ParticipantController extends Controller
             'target' => $target,
 
             'playing' => $playing,
+            'boundedCount' => $boundedCount,
             'minPlayers' => $min,
             'maxPlayers' => $max,
 
@@ -578,9 +582,9 @@ class ParticipantController extends Controller
              | zero: a squad over the target's ceiling has to shed people, and one
              | under its floor has to gain them.
              */
-            'mustDrop' => $target === null || $max === null ? 0 : max(0, $playing - $max),
-            'mustAdd' => $target === null ? 0 : max(0, $min - $playing),
-            'addSlots' => $this->addSlots($target, $playing, $min, $max),
+            'mustDrop' => $target === null || $max === null ? 0 : max(0, $boundedCount - $max),
+            'mustAdd' => $target === null ? 0 : max(0, $min - $boundedCount),
+            'addSlots' => $this->addSlots($target, $boundedCount, $min, $max),
 
             // Settled before anything is drawn, because the rest of the page would
             // be a form that cannot be submitted.
@@ -604,7 +608,7 @@ class ParticipantController extends Controller
      */
     private function addSlots(?Event $target, int $playing, int $min, ?int $max): int
     {
-        if ($target === null || ! $target->isManagerMode()) {
+        if ($target === null || ! $target->allowsMultipleParticipants()) {
             return 0;
         }
 
@@ -1182,15 +1186,19 @@ class ParticipantController extends Controller
      */
     private function playerShortfallNote(EventRegistration $registration): string
     {
-        $minimum = $registration->event?->min_players;
+        $event = $registration->event;
+        $minimum = $event?->min_players;
 
         if ($minimum === null || $minimum < 1) {
             return '';
         }
 
-        // Counted through the playing scope, so a manager who also plays keeps the
-        // squad above its minimum instead of the count reading one short.
-        $remaining = $registration->participants()->playing()->count();
+        $remaining = $event?->isGroupingMode()
+            ? $registration->participants()->count()
+            : $registration->participants()->playing()->count();
+        $noun = $event?->isGroupingMode()
+            ? ($remaining === 1 ? 'participant' : 'participants')
+            : ($remaining === 1 ? 'player' : 'players');
 
         if ($remaining >= $minimum) {
             return '';
@@ -1199,7 +1207,7 @@ class ParticipantController extends Controller
         return sprintf(
             ' Note: this entry now has %d %s, below this event\'s minimum of %d.',
             $remaining,
-            $remaining === 1 ? 'player' : 'players',
+            $noun,
             $minimum,
         );
     }
@@ -1525,6 +1533,7 @@ class ParticipantController extends Controller
         $query = EventRegistration::query();
 
         return match ($tab) {
+            'group' => $query->where('mode', Event::MODE_GROUPING),
             'team' => $query->where('mode', Event::MODE_MANAGER),
             'paid' => $query->where('payment_status', EventRegistration::PAYMENT_PAID),
             'unpaid' => $query->where('payment_status', '!=', EventRegistration::PAYMENT_PAID),

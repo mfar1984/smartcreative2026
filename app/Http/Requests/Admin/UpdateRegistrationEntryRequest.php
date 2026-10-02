@@ -55,7 +55,9 @@ class UpdateRegistrationEntryRequest extends FormRequest
              | calls this entry by. An individual entry has no team.
              */
             'team_name' => [
-                $registration->mode === Event::MODE_MANAGER ? 'required' : 'nullable',
+                in_array($registration->mode, [Event::MODE_MANAGER, Event::MODE_GROUPING], true)
+                    ? 'required'
+                    : 'nullable',
                 'string',
                 'max:150',
             ],
@@ -130,7 +132,7 @@ class UpdateRegistrationEntryRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'team_name.required' => 'Enter the team or organisation name.',
+            'team_name.required' => 'Enter the team, group or organisation name.',
             'logo.mimetypes' => 'The image must be a JPG, PNG, WebP or SVG.',
             'logo.max' => 'The image must be no larger than 2 MB.',
         ];

@@ -33,7 +33,7 @@ class StoreEventRegistrationRequest extends FormRequest
         $event = $this->event();
 
         return [
-            'team_name' => [$event->isManagerMode() ? 'required' : 'nullable', 'string', 'max:150'],
+            'team_name' => [$event->usesGroupName() ? 'required' : 'nullable', 'string', 'max:150'],
             'notes' => ['nullable', 'string', 'max:1000'],
 
             // One image for the whole entry. Required from the event's setting
@@ -108,13 +108,12 @@ class StoreEventRegistrationRequest extends FormRequest
             'participants.*.answers.*' => ['nullable', 'boolean'],
 
             /*
-             | Which option each person picked of a per person add-on, as
-             | [addonId => variantId]. Shape only: whether the id is real, in stock
-             | and belongs to this event is settled by AddonOrder against the
-             | database, which is also where the message is worded.
+             | Per-person item input may be either a radio variant id or a
+             | [variantId => quantity] map. AddonOrder validates the configured
+             | shape, catalogue ownership, stock and limits against the database.
              */
             'participants.*.addons' => ['nullable', 'array'],
-            'participants.*.addons.*' => ['nullable', 'integer'],
+            'participants.*.addons.*' => ['nullable'],
 
             'participants.*.gender' => ['required', Rule::in(array_keys(ParticipantOptions::GENDERS))],
             'participants.*.race' => ['required', Rule::in(array_keys(ParticipantOptions::RACES))],
@@ -541,7 +540,7 @@ class StoreEventRegistrationRequest extends FormRequest
             ))
             ->count();
 
-        if (! $event->isManagerMode()) {
+        if (! $event->allowsMultipleParticipants()) {
             if ($participants->count() > 1) {
                 $validator->errors()->add(
                     'participants',
@@ -554,6 +553,36 @@ class StoreEventRegistrationRequest extends FormRequest
                 $validator->errors()->add(
                     'participants',
                     'This event does not use manager or player roles.'
+                );
+            }
+
+            return;
+        }
+
+        if ($event->isGroupingMode()) {
+            // A grouping entry contains ordinary participants only. The first row
+            // is the group contact as well as Participant 1, not a squad manager.
+            if ($managers > 0 || $players > 0 || $plain !== $participants->count()) {
+                $validator->errors()->add(
+                    'participants',
+                    'A grouping registration uses participant roles only.'
+                );
+            }
+
+            [$min, $max] = $event->playerBounds();
+            $count = $participants->count();
+
+            if ($count < $min) {
+                $validator->errors()->add(
+                    'participants',
+                    sprintf('Enter at least %d %s for this group.', $min, $min === 1 ? 'participant' : 'participants')
+                );
+            }
+
+            if ($max !== null && $count > $max) {
+                $validator->errors()->add(
+                    'participants',
+                    sprintf('This event allows at most %d participants per group.', $max)
                 );
             }
 

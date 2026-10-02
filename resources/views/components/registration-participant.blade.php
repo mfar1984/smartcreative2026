@@ -347,57 +347,150 @@
         </label>
     </div>
 
-    {{--
-        Extras chosen for this person rather than as a quantity for the entry.
-
-        A shirt size is the reason this exists. Ordering three larges and two 2XLs
-        as bulk quantities is a correct order that nobody can act on, because the
-        shirts arrive with no names against the sizes.
-    --}}
+    {{-- Extras assigned to this person. Grouping mode puts every offered item
+         here; other modes use the add-on's "Ask each person separately" flag. --}}
     @if ($perPersonAddons !== [])
-        <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
+        <div class="mt-4 pt-4 border-t border-gray-200 space-y-4">
             @foreach ($perPersonAddons as $addon)
                 @php
-                    $aName = "participants[{$index}][addons][{$addon->id}]";
-                    $aId = "pa-{$addon->id}-{$index}";
-                    $chosen = $value('addons')[$addon->id] ?? null;
+                    $addonName = "participants[{$index}][addons][{$addon->id}]";
+                    $addonId = "pa-{$addon->id}-{$index}";
+                    $submitted = $value('addons')[$addon->id] ?? null;
+                    $cap = $addon->perOrderCap();
                 @endphp
 
-                <div>
-                    <label for="{{ $aId }}" class="block text-xs font-semibold text-gray-700 mb-1">
+                <fieldset class="rounded-lg border border-gray-200 bg-white p-3"
+                          data-person-addon
+                          data-addon-id="{{ $addon->id }}"
+                          data-addon-name="{{ $addon->name }}"
+                          data-addon-once="{{ number_format($addon->hasVariants() ? $addon->unitPrice() : 0, 2, '.', '') }}"
+                          @if ($cap !== null) data-addon-cap="{{ $cap }}" @endif>
+                    <legend class="px-1 text-xs font-semibold text-gray-800">
                         {{ $addon->name }}
                         @if ($addon->is_required)
                             <span class="text-red-600" aria-hidden="true">*</span>
                             <span class="sr-only">(required)</span>
                         @endif
-                    </label>
-
-                    <select id="{{ $aId }}" name="{{ $aName }}"
-                            class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
-                        {{-- Always offered, even when compulsory, so an unanswered
-                             form is refused with a message rather than quietly
-                             defaulting somebody to the first size on the list. --}}
-                        <option value="">{{ $addon->is_required ? 'Choose one' : 'None' }}</option>
-
-                        @foreach ($addon->variants as $variant)
-                            @php $sold = $variant->stockLeft() === 0; @endphp
-
-                            <option value="{{ $variant->id }}"
-                                    @selected((int) $chosen === $variant->id)
-                                    @disabled($sold)>
-                                {{ $variant->label }}@if ($variant->unitPrice() > 0) &nbsp;+RM {{ number_format($variant->unitPrice(), 2) }}@endif @if ($sold) &nbsp;(sold out)@endif
-                            </option>
-                        @endforeach
-                    </select>
+                        <span class="ml-1 font-normal text-gray-500">{{ $addon->priceSummaryLabel() }}</span>
+                    </legend>
 
                     @if (filled($addon->description))
-                        <p class="text-xs text-gray-500 mt-1">{{ $addon->description }}</p>
+                        <p class="text-xs text-gray-500 mb-2">{{ $addon->description }}</p>
                     @endif
 
-                    @error("participants.{$index}.addons.{$addon->id}")
-                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
-                    @enderror
-                </div>
+                    @if ($addon->isRadioSelection())
+                        @php
+                            $chosen = is_array($submitted) ? ($submitted['choice'] ?? null) : $submitted;
+                        @endphp
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2" data-radio-options>
+                            @unless ($addon->is_required)
+                                <label class="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition">
+                                    <input type="radio" name="{{ $addonName }}" value=""
+                                           @checked(blank($chosen))
+                                           data-addon-choice data-price="0"
+                                           data-label="{{ $addon->name }} — None"
+                                           class="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500">
+                                    <span class="text-sm text-gray-700">None</span>
+                                </label>
+                            @endunless
+
+                            @foreach ($addon->variants as $variant)
+                                @php
+                                    $sold = $variant->isSoldOut();
+                                    $left = $variant->stockLeft();
+                                    $optionId = "{$addonId}-radio-{$variant->id}";
+                                @endphp
+
+                                <label for="{{ $optionId }}" @class([
+                                    'flex items-center gap-2 rounded-lg border px-3 py-2 transition',
+                                    'border-gray-200 cursor-pointer hover:border-blue-300 hover:bg-blue-50' => ! $sold,
+                                    'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed' => $sold,
+                                ])>
+                                    <input type="radio" id="{{ $optionId }}" name="{{ $addonName }}"
+                                           value="{{ $variant->id }}"
+                                           @checked((int) $chosen === $variant->id)
+                                           @disabled($sold)
+                                           @required($addon->is_required)
+                                           data-addon-choice
+                                           data-price="{{ number_format($variant->unitPrice(), 2, '.', '') }}"
+                                           data-label="{{ $addon->name }} ({{ $variant->label }})"
+                                           class="h-4 w-4 shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500">
+                                    <span class="min-w-0 flex-1 text-sm">{{ $variant->label }}</span>
+                                    @if (! $variant->isFree())
+                                        <span class="text-xs font-semibold whitespace-nowrap">+RM {{ number_format($variant->unitPrice(), 2) }}</span>
+                                    @endif
+                                    @if ($sold)
+                                        <span class="text-[11px] font-semibold text-red-600">Sold out</span>
+                                    @elseif ($left !== null && $left <= 10)
+                                        <span class="text-[11px] text-amber-700">{{ $left }} left</span>
+                                    @endif
+                                </label>
+                            @endforeach
+                        </div>
+
+                        @error("participants.{$index}.addons.{$addon->id}")
+                            <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                        @enderror
+                    @else
+                        @php $quantities = is_array($submitted) ? $submitted : []; @endphp
+
+                        @if ($addon->hasVariants())
+                            <div class="divide-y divide-gray-100">
+                                @foreach ($addon->variants as $variant)
+                                    @php
+                                        $sold = $variant->isSoldOut();
+                                        $left = $variant->stockLeft();
+                                        $limit = collect([$left, $cap])->filter(fn ($v) => $v !== null)->min();
+                                        $optionId = "{$addonId}-qty-{$variant->id}";
+                                    @endphp
+
+                                    <div class="grid grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-3 py-2">
+                                        <label for="{{ $optionId }}" class="min-w-0 text-sm text-gray-700">
+                                            {{ $variant->label }}
+                                            @if ($sold)
+                                                <span class="ml-1 text-xs font-semibold text-red-600">Sold out</span>
+                                            @elseif ($left !== null && $left <= 10)
+                                                <span class="ml-1 text-xs text-amber-700">{{ $left }} left</span>
+                                            @endif
+                                        </label>
+                                        <input type="number" id="{{ $optionId }}"
+                                               name="{{ $addonName }}[{{ $variant->id }}]"
+                                               value="{{ $quantities[$variant->id] ?? 0 }}"
+                                               min="0" @if ($limit !== null) max="{{ $limit }}" @endif
+                                               @disabled($sold) inputmode="numeric"
+                                               data-addon-qty
+                                               data-price="{{ number_format($variant->unitPrice(), 2, '.', '') }}"
+                                               data-label="{{ $addon->name }} ({{ $variant->label }})"
+                                               class="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 disabled:bg-gray-100 disabled:text-gray-400">
+                                    </div>
+                                    @error("participants.{$index}.addons.{$addon->id}.{$variant->id}")
+                                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                                    @enderror
+                                @endforeach
+                            </div>
+                        @else
+                            <div class="grid grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-3">
+                                <label for="{{ $addonId }}-base" class="text-sm text-gray-700">How many?</label>
+                                <input type="number" id="{{ $addonId }}-base"
+                                       name="{{ $addonName }}[base]"
+                                       value="{{ $quantities['base'] ?? 0 }}" min="0"
+                                       @if ($cap !== null) max="{{ $cap }}" @endif inputmode="numeric"
+                                       data-addon-qty
+                                       data-price="{{ number_format($addon->unitPrice(), 2, '.', '') }}"
+                                       data-label="{{ $addon->name }}"
+                                       class="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40">
+                            </div>
+                            @error("participants.{$index}.addons.{$addon->id}.base")
+                                <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                            @enderror
+                        @endif
+
+                        @error("participants.{$index}.addons.{$addon->id}")
+                            <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                        @enderror
+                    @endif
+                </fieldset>
             @endforeach
         </div>
     @endif

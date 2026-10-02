@@ -100,7 +100,11 @@
                 </svg>
                 <span>
                     <span class="sr-only">Registration: </span>
-                    {{ $event->isManagerMode() ? 'Team entry, registered by a manager' : 'Individual entry' }}
+                    {{ match ($event->registration_mode) {
+                        \App\Models\Event::MODE_MANAGER => 'Team entry, registered by a manager',
+                        \App\Models\Event::MODE_GROUPING => 'Group entry, registered together',
+                        default => 'Individual entry',
+                    } }}
                 </span>
             </li>
         </ul>

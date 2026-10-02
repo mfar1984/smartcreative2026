@@ -23,6 +23,9 @@
 
         $fromFee = (float) ($from?->registrationAmount() ?? 0);
         $targetFee = (float) ($target?->registrationAmount() ?? 0);
+        $isGrouping = ($target?->isGroupingMode() ?? false)
+            || $registration->mode === \App\Models\Event::MODE_GROUPING;
+        $memberNoun = $isGrouping ? 'participants' : 'players';
 
         // The questions the target asks, split so the compulsory ones can be said to
         // be compulsory rather than left to be inferred from an asterisk.
@@ -57,11 +60,18 @@
                 <div>
                     <p class="text-xs text-gray-500">On the entry</p>
                     <p class="text-sm font-semibold text-gray-900">
-                        {{ $registration->participants->count() }}
-                        {{ $registration->participants->count() === 1 ? 'person' : 'people' }},
-                        {{ $playing }} playing
+                        @if ($registration->mode === \App\Models\Event::MODE_GROUPING)
+                            {{ $registration->participants->count() }}
+                            {{ $registration->participants->count() === 1 ? 'participant' : 'participants' }}
+                        @else
+                            {{ $registration->participants->count() }}
+                            {{ $registration->participants->count() === 1 ? 'person' : 'people' }},
+                            {{ $playing }} playing
+                        @endif
                     </p>
-                    <p class="text-xs text-gray-400 mt-0.5">A manager who does not play holds no playing place.</p>
+                    @unless ($registration->mode === \App\Models\Event::MODE_GROUPING)
+                        <p class="text-xs text-gray-400 mt-0.5">A manager who does not play holds no playing place.</p>
+                    @endunless
                 </div>
                 <div>
                     <p class="text-xs text-gray-500">Fee now</p>
@@ -77,7 +87,11 @@
             @if ($targets->isEmpty())
                 <p class="px-5 py-6 text-sm text-gray-500">
                     There is no other open event that takes
-                    {{ $registration->mode === \App\Models\Event::MODE_MANAGER ? 'squad' : 'individual' }}
+                    {{ match ($registration->mode) {
+                        \App\Models\Event::MODE_MANAGER => 'squad',
+                        \App\Models\Event::MODE_GROUPING => 'group',
+                        default => 'individual',
+                    } }}
                     entries, so there is nowhere for this one to go.
                 </p>
             @else
@@ -95,9 +109,9 @@
                                     {{ $option->title }}
                                     &mdash;
                                     @if ($option->max_players)
-                                        {{ $option->min_players ?? 1 }}&ndash;{{ $option->max_players }} players
+                                        {{ $option->min_players ?? 1 }}&ndash;{{ $option->max_players }} {{ $option->isGroupingMode() ? 'participants' : 'players' }}
                                     @else
-                                        from {{ $option->min_players ?? 1 }} players
+                                        from {{ $option->min_players ?? 1 }} {{ $option->isGroupingMode() ? 'participants' : 'players' }}
                                     @endif
                                     &middot; {{ (float) $option->registrationAmount() > 0 ? 'RM ' . number_format((float) $option->registrationAmount(), 2) : 'Free' }}
                                 </option>
@@ -163,12 +177,12 @@
                         <p class="text-sm text-gray-700">
                             {{ $target->title }} takes
                             @if ($maxPlayers)
-                                at least <span class="font-semibold">{{ $minPlayers }}</span> players
+                                at least <span class="font-semibold">{{ $minPlayers }}</span> {{ $memberNoun }}
                                 and at most <span class="font-semibold">{{ $maxPlayers }}</span>.
                             @else
-                                at least <span class="font-semibold">{{ $minPlayers }}</span> players, with no upper limit.
+                                at least <span class="font-semibold">{{ $minPlayers }}</span> {{ $memberNoun }}, with no upper limit.
                             @endif
-                            This entry has <span class="font-semibold">{{ $playing }}</span>.
+                            This entry has <span class="font-semibold">{{ $boundedCount }}</span>.
                         </p>
 
                         @if ($mustDrop > 0)
@@ -176,7 +190,7 @@
                                 {{ $mustDrop }} too many. Tick at least {{ $mustDrop }}
                                 {{ $mustDrop === 1 ? 'person' : 'people' }} to leave behind.
                                 @if ($minPlayers < $maxPlayers)
-                                    You may leave behind up to {{ $playing - $minPlayers }} if you want a smaller squad.
+                                    You may leave behind up to {{ $boundedCount - $minPlayers }} if you want a smaller {{ $isGrouping ? 'group' : 'squad' }}.
                                 @endif
                             </p>
                         @elseif ($mustAdd > 0)
@@ -271,11 +285,11 @@
                                     to reach {{ $target->title }}'s minimum. Leave the rest blank if they are not needed.
                                 @else
                                     {{ $target->title }} has room for {{ $addSlots }} more
-                                    {{ $addSlots === 1 ? 'player' : 'players' }}. Leave these blank if nobody is joining.
+                                    {{ $addSlots === 1 ? rtrim($memberNoun, 's') : $memberNoun }}. Leave these blank if nobody is joining.
                                 @endif
                             </p>
                             <p class="text-xs text-gray-500 mt-1.5">
-                                Anybody added here joins as a player. Name, identity card, telephone and
+                                Anybody added here joins as a {{ $isGrouping ? 'participant' : 'player' }}. Name, identity card, telephone and
                                 email are needed; the rest can be filled in later on their own record.
                             </p>
                         </div>
@@ -283,7 +297,7 @@
                         @for ($i = 0; $i < $addSlots; $i++)
                             <div class="px-5 py-4 {{ $i === 0 ? '' : 'border-t border-gray-100' }}">
                                 <p class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-3">
-                                    Player {{ $i + 1 }}
+                                    {{ $isGrouping ? 'Participant' : 'Player' }} {{ $i + 1 }}
                                     @if ($i < $mustAdd)
                                         <span class="text-red-600" aria-hidden="true">*</span>
                                         <span class="font-normal normal-case tracking-normal text-gray-400">required</span>

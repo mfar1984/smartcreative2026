@@ -67,7 +67,11 @@
 
                 <div class="min-w-0">
                     <p class="text-xs font-bold uppercase tracking-widest text-blue-300 mb-1.5">
-                        {{ $registration->mode === \App\Models\Event::MODE_MANAGER ? 'Team' : 'Entrant' }}
+                        {{ match ($registration->mode) {
+                            \App\Models\Event::MODE_MANAGER => 'Team',
+                            \App\Models\Event::MODE_GROUPING => 'Group',
+                            default => 'Entrant',
+                        } }}
                     </p>
 
                     <h1 class="text-2xl md:text-3xl font-bold leading-tight">{{ $name }}</h1>

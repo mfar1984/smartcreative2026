@@ -264,16 +264,19 @@ class TransferRegistrationRequest extends FormRequest
             $validator->errors()->add('event_id', sprintf(
                 '%s takes %s entries and this one is %s. The two shapes are not interchangeable.',
                 $target->title,
-                $target->isManagerMode() ? 'squad' : 'individual',
-                $registration->mode === Event::MODE_MANAGER ? 'a squad' : 'individual',
+                $target->registrationShapeLabel(),
+                match ($registration->mode) {
+                    Event::MODE_MANAGER => 'a squad',
+                    Event::MODE_GROUPING => 'a group',
+                    default => 'an individual',
+                },
             ));
 
             return;
         }
 
-        // An individual entry is one named person. There is nobody to leave behind
-        // and no second place to fill.
-        if (! $target->isManagerMode() && ($this->dropped()->isNotEmpty() || $this->added() !== [])) {
+        // Only multi-person entries can add or leave people behind during a move.
+        if (! $target->allowsMultipleParticipants() && ($this->dropped()->isNotEmpty() || $this->added() !== [])) {
             $validator->errors()->add(
                 'event_id',
                 'This event takes one person per entry, so nobody can be added or left behind.',
@@ -318,34 +321,39 @@ class TransferRegistrationRequest extends FormRequest
     {
         $target = $this->target();
 
-        if ($target === null || ! $target->isManagerMode()) {
+        if ($target === null || ! $target->allowsMultipleParticipants()) {
             return;
         }
 
         [$min, $max] = $target->playerBounds();
-        $players = $this->playersAfterChanges();
+        $people = $target->isGroupingMode()
+            ? $this->staying()->count() + count($this->added())
+            : $this->playersAfterChanges();
+        $noun = $target->isGroupingMode() ? 'participants' : 'players';
 
-        if ($players < $min) {
-            $short = $min - $players;
+        if ($people < $min) {
+            $short = $min - $people;
 
             $validator->errors()->add('add', sprintf(
-                '%s needs at least %d players and this entry would have %d. Add %d more %s.',
+                '%s needs at least %d %s and this entry would have %d. Add %d more %s.',
                 $target->title,
                 $min,
-                $players,
+                $noun,
+                $people,
                 $short,
                 $short === 1 ? 'person' : 'people',
             ));
         }
 
-        if ($max !== null && $players > $max) {
-            $over = $players - $max;
+        if ($max !== null && $people > $max) {
+            $over = $people - $max;
 
             $validator->errors()->add('drop', sprintf(
-                '%s takes at most %d players and this entry would have %d. Choose %d more to leave behind.',
+                '%s takes at most %d %s and this entry would have %d. Choose %d more to leave behind.',
                 $target->title,
                 $max,
-                $players,
+                $noun,
+                $people,
                 $over,
             ));
         }
@@ -575,11 +583,11 @@ class TransferRegistrationRequest extends FormRequest
         ]));
     }
 
-    /**
-     * Roles for people being brought in. Always a player, never a manager.
-     */
+    /** Role for a person brought into the target entry. */
     public function addedRole(): string
     {
-        return ParticipantOptions::ROLE_PLAYER;
+        return $this->target()?->isGroupingMode()
+            ? ParticipantOptions::ROLE_PARTICIPANT
+            : ParticipantOptions::ROLE_PLAYER;
     }
 }

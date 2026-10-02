@@ -553,26 +553,27 @@ class AttendanceController extends Controller
      */
     private function playerShortfall(EventRegistration $registration): ?string
     {
-        $minimum = $registration->event?->min_players;
+        $event = $registration->event;
+        $minimum = $event?->min_players;
 
         if ($minimum === null || $minimum < 1) {
             return null;
         }
 
-        // Counted with playing(), so a manager who also plays keeps the squad above
-        // its minimum rather than the count reading one short.
-        $remaining = $registration->participants()
-            ->playing()
-            ->count();
+        $remaining = $event?->isGroupingMode()
+            ? $registration->participants()->count()
+            : $registration->participants()->playing()->count();
+        $noun = $event?->isGroupingMode() ? 'participant(s)' : 'player(s)';
 
         if ($remaining >= $minimum) {
             return null;
         }
 
         return sprintf(
-            'Note: %s now has %d player(s), below this event\'s minimum of %d.',
+            'Note: %s now has %d %s, below this event\'s minimum of %d.',
             $registration->displayName(),
             $remaining,
+            $noun,
             $minimum,
         );
     }

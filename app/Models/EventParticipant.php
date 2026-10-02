@@ -166,6 +166,13 @@ class EventParticipant extends Model
             return 'The manager registered and paid for this entry, so they cannot be removed here.';
         }
 
+        if ($this->role === ParticipantOptions::ROLE_PARTICIPANT
+            && $this->registration?->mode === Event::MODE_GROUPING) {
+            return $this->entrySize() <= 1
+                ? 'The last person on an entry cannot be removed. Delete the whole registration instead.'
+                : null;
+        }
+
         if ($this->role !== ParticipantOptions::ROLE_PLAYER) {
             return 'This entry is for one named person, so removing them would leave nothing behind.';
         }

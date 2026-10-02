@@ -66,7 +66,7 @@ class AddonOrder
              | it is either a stale form or a tampered one; either way ignoring it
              | is right, because honouring it would double the order.
              */
-            if ($addon->isPerParticipant()) {
+            if ($addon->isAssignedPerParticipant($event)) {
                 continue;
             }
 
@@ -81,7 +81,9 @@ class AddonOrder
                 continue;
             }
 
-            [$addonLines, $addonErrors] = self::buildAddon($addon, $quantities);
+            [$addonLines, $addonErrors] = $addon->isRadioSelection()
+                ? self::buildRadioAddon($addon, $quantities)
+                : self::buildAddon($addon, $quantities);
 
             $lines = array_merge($lines, $addonLines);
             $errors = array_merge($errors, $addonErrors);
@@ -109,7 +111,9 @@ class AddonOrder
      */
     private static function buildPerParticipant(Event $event, array $participants): array
     {
-        $perPerson = $event->addons->filter(fn (EventAddon $addon) => $addon->isPerParticipant());
+        $perPerson = $event->addons->filter(
+            fn (EventAddon $addon) => $addon->isAssignedPerParticipant($event)
+        );
 
         if ($perPerson->isEmpty()) {
             return [[], []];
@@ -128,56 +132,129 @@ class AddonOrder
 
             foreach (array_values($participants) as $index => $person) {
                 $path = "participants.{$index}.addons.{$addon->id}";
-                $choice = $person['addons'][$addon->id] ?? null;
+                $selection = $person['addons'][$addon->id] ?? null;
+                $personTaken = 0;
 
-                // Nothing chosen. Refused only when the add-on is compulsory, which
-                // checkRequired() cannot say for this shape because it counts the
-                // order as a whole rather than person by person.
-                if (blank($choice)) {
+                if ($addon->isRadioSelection()) {
+                    // Radio sends one variant id. Accept the keyed shape too so a
+                    // stale form cannot turn a valid single choice into a quantity.
+                    $choice = is_array($selection) ? ($selection['choice'] ?? null) : $selection;
+
+                    if (blank($choice)) {
+                        if ($addon->is_required) {
+                            $errors[$path] = sprintf('Choose an option for "%s".', $addon->name);
+                        }
+
+                        continue;
+                    }
+
+                    $variant = $variants->get((int) $choice);
+
+                    if ($variant === null) {
+                        $errors[$path] = sprintf('That option for "%s" is no longer available.', $addon->name);
+
+                        continue;
+                    }
+
+                    $available = $variant->stockLeft();
+                    $wantedSoFar = 1 + self::countVariant($lines, $variant->id);
+
+                    if ($available !== null && $wantedSoFar > $available) {
+                        $errors[$path] = $available === 0
+                            ? sprintf('%s is sold out.', $variant->label)
+                            : sprintf('Only %d of %s left, and more than that were chosen.', $available, $variant->label);
+
+                        continue;
+                    }
+
+                    $line = self::line($addon, $variant, $variant->unitPrice(), 1);
+                    $line['participant_index'] = $index;
+                    $lines[] = $line;
+                    $taken++;
+
+                    continue;
+                }
+
+                // Quantity mode keeps the existing [variantId => quantity] shape,
+                // but it lives inside this person's block for grouping entries.
+                if (! is_array($selection)) {
                     if ($addon->is_required) {
-                        $errors[$path] = sprintf('Choose an option for "%s".', $addon->name);
+                        $errors[$path] = sprintf('Enter a quantity for "%s".', $addon->name);
                     }
 
                     continue;
                 }
 
-                $variant = $variants->get((int) $choice);
+                foreach ($selection as $key => $rawQuantity) {
+                    $quantityPath = "{$path}.{$key}";
+                    $quantity = self::quantity($rawQuantity);
 
-                if ($variant === null) {
-                    $errors[$path] = sprintf('That option for "%s" is no longer available.', $addon->name);
+                    if ($quantity === null) {
+                        $errors[$quantityPath] = 'Enter a whole number of units.';
 
-                    continue;
+                        continue;
+                    }
+
+                    if ($quantity === 0) {
+                        continue;
+                    }
+
+                    if ($quantity > self::MAX_LINE_QUANTITY) {
+                        $errors[$quantityPath] = sprintf('At most %d units per line.', self::MAX_LINE_QUANTITY);
+
+                        continue;
+                    }
+
+                    if ($key === 'base') {
+                        if ($addon->hasVariants()) {
+                            $errors[$quantityPath] = sprintf('Choose an option for "%s".', $addon->name);
+
+                            continue;
+                        }
+
+                        $line = self::line($addon, null, $addon->unitPrice(), $quantity);
+                        $line['participant_index'] = $index;
+                        $lines[] = $line;
+                        $personTaken += $quantity;
+                        $taken += $quantity;
+
+                        continue;
+                    }
+
+                    $variant = $variants->get((int) $key);
+
+                    if ($variant === null) {
+                        $errors[$quantityPath] = sprintf('That option for "%s" is no longer available.', $addon->name);
+
+                        continue;
+                    }
+
+                    $available = $variant->stockLeft();
+                    $wantedSoFar = $quantity + self::countVariant($lines, $variant->id);
+
+                    if ($available !== null && $wantedSoFar > $available) {
+                        $errors[$quantityPath] = $available === 0
+                            ? sprintf('%s is sold out.', $variant->label)
+                            : sprintf('Only %d of %s left, and more than that were chosen.', $available, $variant->label);
+
+                        continue;
+                    }
+
+                    $line = self::line($addon, $variant, $variant->unitPrice(), $quantity);
+                    $line['participant_index'] = $index;
+                    $lines[] = $line;
+                    $personTaken += $quantity;
+                    $taken += $quantity;
                 }
 
-                /*
-                 | Stock is counted across everybody on this entry, not per person,
-                 | so seven people cannot each take the last large.
-                 */
-                $available = $variant->stockLeft();
-                $wantedSoFar = 1 + self::countVariant($lines, $variant->id);
-
-                if ($available !== null && $wantedSoFar > $available) {
-                    $errors[$path] = $available === 0
-                        ? sprintf('%s is sold out.', $variant->label)
-                        : sprintf('Only %d of %s left, and more than that were chosen.', $available, $variant->label);
-
-                    continue;
+                if ($addon->is_required && $personTaken === 0) {
+                    $errors[$path] = sprintf('Enter a quantity for "%s".', $addon->name);
                 }
-
-                $line = self::line($addon, $variant, $variant->unitPrice(), 1);
-                $line['participant_index'] = $index;
-
-                $lines[] = $line;
-                $taken++;
             }
 
-            /*
-             | The add-on's own price is charged once for the entry, exactly as it is
-             | on the bulk path. Marking an add-on per person changes who each size
-             | belongs to, not what the entry costs, so an organiser can switch an
-             | existing shirt over without anybody's total moving.
-             */
-            if ($taken > 0 && $addon->unitPrice() > 0) {
+            // With variants, the add-on's own price remains one charge for the
+            // registration. Quantity/radio only changes the recorded choices.
+            if ($taken > 0 && $addon->hasVariants() && $addon->unitPrice() > 0) {
                 $lines[] = self::line($addon, null, $addon->unitPrice(), 1);
             }
 
@@ -212,6 +289,51 @@ class AddonOrder
         }
 
         return $total;
+    }
+
+    /**
+     * One registration-level radio choice. Quantity is always one.
+     *
+     * @return array{0: array<int, array<string, mixed>>, 1: array<string, string>}
+     */
+    private static function buildRadioAddon(EventAddon $addon, mixed $selection): array
+    {
+        if (! is_array($selection)) {
+            return [[], []];
+        }
+
+        $rawChoice = $selection['choice'] ?? null;
+
+        if (blank($rawChoice)) {
+            return [[], []];
+        }
+
+        $path = "addons.{$addon->id}.choice";
+        $choice = self::quantity($rawChoice);
+
+        if ($choice === null || $choice <= 0) {
+            return [[], [$path => sprintf('Choose an option for "%s".', $addon->name)]];
+        }
+
+        $variant = $addon->variants->firstWhere('id', $choice);
+
+        if ($variant === null) {
+            return [[], [$path => sprintf('That option for "%s" is no longer available.', $addon->name)]];
+        }
+
+        $available = $variant->stockLeft();
+
+        if ($available !== null && $available < 1) {
+            return [[], [$path => sprintf('%s is sold out.', $variant->label)]];
+        }
+
+        $lines = [self::line($addon, $variant, $variant->unitPrice(), 1)];
+
+        if ($addon->unitPrice() > 0) {
+            array_unshift($lines, self::line($addon, null, $addon->unitPrice(), 1));
+        }
+
+        return [$lines, []];
     }
 
     /**
@@ -346,7 +468,7 @@ class AddonOrder
              | here would add a second message about the order as a whole that the
              | visitor cannot act on.
              */
-            if ($addon->isPerParticipant()) {
+            if ($addon->isAssignedPerParticipant($event)) {
                 continue;
             }
 

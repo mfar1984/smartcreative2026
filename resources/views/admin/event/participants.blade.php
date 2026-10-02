@@ -45,6 +45,7 @@
         $reopenPaymentFor = old('record_payment_for');
 
         $intro = match ($activeTab) {
+            'group' => ['title' => 'Grouping Entries', 'description' => 'One registration containing several ordinary participants, each with their own details and item choices.', 'icon' => 'users', 'accent' => 'blue'],
             'team' => ['title' => 'Team Entries', 'description' => 'Registrations where a manager entered a squad. One entry, one payment, however many players.', 'icon' => 'identification', 'accent' => 'purple'],
             'paid' => ['title' => 'Paid', 'description' => 'Registrations settled in full, whether by the gateway or recorded by hand.', 'icon' => 'credit-card', 'accent' => 'green'],
             'unpaid' => ['title' => 'Unpaid', 'description' => 'Everything not yet settled in full: awaiting payment, part paid, failed, or never started.', 'icon' => 'lock', 'accent' => 'amber'],
@@ -105,7 +106,7 @@
                     </span>
                     <label for="q" class="sr-only">Search participants</label>
                     <input type="search" id="q" name="q" value="{{ $search }}"
-                           placeholder="Search name, IC, email, reference or team..."
+                           placeholder="Search name, IC, email, reference, team or group..."
                            class="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
                 </div>
 

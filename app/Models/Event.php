@@ -39,10 +39,12 @@ class Event extends Model
 
     public const MODE_INDIVIDUAL = 'individual';
     public const MODE_MANAGER = 'manager';
+    public const MODE_GROUPING = 'grouping';
 
     public const MODES = [
         self::MODE_INDIVIDUAL => 'Individual — one person, one registration',
         self::MODE_MANAGER => 'Manager — a manager registers a squad of players',
+        self::MODE_GROUPING => 'Grouping — one person registers a group of participants',
     ];
 
     protected $fillable = [
@@ -221,6 +223,30 @@ class Event extends Model
         return $this->registration_mode === self::MODE_MANAGER;
     }
 
+    public function isGroupingMode(): bool
+    {
+        return $this->registration_mode === self::MODE_GROUPING;
+    }
+
+    public function allowsMultipleParticipants(): bool
+    {
+        return $this->isManagerMode() || $this->isGroupingMode();
+    }
+
+    public function usesGroupName(): bool
+    {
+        return $this->allowsMultipleParticipants();
+    }
+
+    public function registrationShapeLabel(): string
+    {
+        return match ($this->registration_mode) {
+            self::MODE_MANAGER => 'squad',
+            self::MODE_GROUPING => 'group',
+            default => 'individual',
+        };
+    }
+
     public function isCancelled(): bool
     {
         return $this->status === self::STATUS_CANCELLED;
@@ -253,7 +279,11 @@ class Event extends Model
      */
     public function feeBasisLabel(): string
     {
-        return $this->isManagerMode() ? 'per team registration' : 'per registration';
+        return match ($this->registration_mode) {
+            self::MODE_MANAGER => 'per team registration',
+            self::MODE_GROUPING => 'per group registration',
+            default => 'per registration',
+        };
     }
 
     /* ---------------------------------------------------------------------
@@ -497,7 +527,11 @@ class Event extends Model
      */
     public function logoLabel(): string
     {
-        return $this->isManagerMode() ? 'Team Logo' : 'Logo';
+        return match ($this->registration_mode) {
+            self::MODE_MANAGER => 'Team Logo',
+            self::MODE_GROUPING => 'Group Logo',
+            default => 'Logo',
+        };
     }
 
     /* ---------------------------------------------------------------------

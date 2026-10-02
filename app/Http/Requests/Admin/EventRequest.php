@@ -145,6 +145,7 @@ class EventRequest extends FormRequest
             'addons.*.max_quantity' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'addons.*.is_required' => ['boolean'],
             'addons.*.per_participant' => ['boolean'],
+            'addons.*.selection_type' => ['required', Rule::in(array_keys(EventAddon::SELECTION_TYPES))],
             'addons.*.is_checked_by_default' => ['boolean'],
             'addons.*.uncheck_reminder' => ['nullable', 'string', 'max:500'],
             'addons.*.is_active' => ['boolean'],
@@ -312,6 +313,11 @@ class EventRequest extends FormRequest
                 'max_quantity' => blank($row['max_quantity'] ?? null) ? null : (int) $row['max_quantity'],
                 'is_required' => $required,
                 'per_participant' => (bool) ($row['per_participant'] ?? false),
+                'selection_type' => in_array(
+                    $row['selection_type'] ?? null,
+                    array_keys(EventAddon::SELECTION_TYPES),
+                    true,
+                ) ? $row['selection_type'] : EventAddon::SELECTION_QUANTITY,
                 'is_checked_by_default' => $ticked,
                 'uncheck_reminder' => $ticked ? $reminder : null,
                 'is_active' => (bool) ($row['is_active'] ?? false),
@@ -390,15 +396,17 @@ class EventRequest extends FormRequest
             function (Validator $validator) {
                 $mode = $this->input('registration_mode');
 
-                // Player bounds belong to squad registration only.
-                if ($mode !== Event::MODE_MANAGER) {
+                // Minimum/maximum member bounds belong to multi-person registrations.
+                if (! in_array($mode, [Event::MODE_MANAGER, Event::MODE_GROUPING], true)) {
                     return;
                 }
 
                 if (blank($this->input('min_players'))) {
                     $validator->errors()->add(
                         'min_players',
-                        'Set the minimum number of players for a manager registration.'
+                        $mode === Event::MODE_MANAGER
+                            ? 'Set the minimum number of players for a manager registration.'
+                            : 'Set the minimum number of participants for a grouping registration.'
                     );
                 }
             },
@@ -447,6 +455,14 @@ class EventRequest extends FormRequest
 
         foreach ($rows as $i => $row) {
             $this->checkDuplicateLabels($validator, $i, $row);
+
+            if (($row['selection_type'] ?? EventAddon::SELECTION_QUANTITY) === EventAddon::SELECTION_RADIO
+                && empty($row['variants'])) {
+                $validator->errors()->add(
+                    "addons.{$i}.selection_type",
+                    'Radio button items need at least one option.'
+                );
+            }
 
             $id = $row['id'] ?? null;
 
@@ -654,9 +670,8 @@ class EventRequest extends FormRequest
             'addons',
         ]);
 
-        // Player bounds are meaningless outside manager mode, so they are
-        // cleared rather than left behind as stale numbers.
-        if ($data['registration_mode'] !== Event::MODE_MANAGER) {
+        // Member bounds are meaningful only when one submission may name several people.
+        if (! in_array($data['registration_mode'], [Event::MODE_MANAGER, Event::MODE_GROUPING], true)) {
             $data['min_players'] = null;
             $data['max_players'] = null;
         }

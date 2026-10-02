@@ -237,9 +237,17 @@
             } elseif ($event->isManagerMode()) {
                 // One manager, then the minimum number of players.
                 $initialRows = array_merge([[]], array_fill(0, $minPlayers, []));
+            } elseif ($event->isGroupingMode()) {
+                // Every row is a participant; the first is also the group contact.
+                $initialRows = array_fill(0, $minPlayers, []);
             } else {
                 $initialRows = [[]];
             }
+
+            $participantAddons = $event->addons
+                ->filter(fn ($addon) => $addon->isAssignedPerParticipant($event) && $addon->isPurchasable())
+                ->values()
+                ->all();
         @endphp
 
         <div id="registration-modal-{{ $event->slug }}"
@@ -387,6 +395,10 @@
                                     One manager registers the whole squad. Enter the manager first, then
                                     {{ $minPlayers }}@if ($maxPlayers) to {{ $maxPlayers }}@else or more @endif players.
                                     Every person needs their own details.
+                                @elseif ($event->isGroupingMode())
+                                    One person registers the group. Enter {{ $minPlayers }}@if ($maxPlayers) to {{ $maxPlayers }}@else or more @endif participants.
+                                    The first person is also the group contact, and every participant chooses
+                                    the quantity or radio options configured for each item.
                                 @else
                                     One person per registration. Anyone else taking part should submit
                                     their own form.
@@ -394,11 +406,12 @@
                             </p>
                         </div>
 
-                        {{-- Team name, squad registrations only --}}
-                        @if ($event->isManagerMode())
+                        {{-- Team/group name, multi-person registrations only --}}
+                        @if ($event->usesGroupName())
                             <div class="mb-5">
                                 <label for="team_name_{{ $event->slug }}" class="block text-sm font-semibold text-gray-700 mb-1.5">
-                                    Team / Organisation Name <span class="text-red-600" aria-hidden="true">*</span>
+                                    {{ $event->isManagerMode() ? 'Team / Organisation Name' : 'Group / Organisation Name' }}
+                                    <span class="text-red-600" aria-hidden="true">*</span>
                                 </label>
                                 <input type="text" id="team_name_{{ $event->slug }}" name="team_name" required maxlength="150"
                                        value="{{ $isOpenModal ? old('team_name') : '' }}"
@@ -436,8 +449,8 @@
 
                                         <p class="text-xs text-gray-500 mt-1.5">
                                             JPG, PNG, WebP or SVG up to 2 MB.
-                                            @if ($event->isManagerMode())
-                                                One image for the whole squad.
+                                            @if ($event->usesGroupName())
+                                                One image for the whole {{ $event->isManagerMode() ? 'squad' : 'group' }}.
                                             @endif
                                         </p>
 
@@ -457,12 +470,8 @@
                             </div>
                         @endif
 
-                        {{-- One switch for the whole squad, because a manager filling
-                             in six people should not have to answer the same
-                             question six times. It only sets the individual boxes,
-                             which remain the thing that is submitted: that way one
-                             person can still be left out. --}}
-                        @if ($event->isManagerMode())
+                        {{-- One switch for every person in a multi-person entry. --}}
+                        @if ($event->allowsMultipleParticipants())
                             <div class="flex items-start gap-2.5 rounded-lg border border-gray-200 bg-gray-50 p-3.5 mb-4">
                                 <input type="checkbox" id="consent-all-{{ $event->id }}" data-consent-all
                                        class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
@@ -503,7 +512,13 @@
 
                                     $rowTitle = $event->isManagerMode()
                                         ? ($isFirstRow ? 'You' : 'Player')
-                                        : 'Your Details';
+                                        : ($event->isGroupingMode()
+                                            ? ($index === 0 ? 'Group Contact / Participant 1' : 'Participant')
+                                            : 'Your Details');
+
+                                    $rowRemovable = $event->isManagerMode()
+                                        ? (! $isFirstRow && $index > $minPlayers)
+                                        : ($event->isGroupingMode() && $index >= $minPlayers);
                                 @endphp
 
                                 <x-registration-participant
@@ -517,18 +532,17 @@
                                     :also-plays="$rowPlays"
                                     :positions="$isFirstRow ? App\Support\ParticipantOptions::positionLabels() : []"
                                     :position="$rowPosition ?? 'manager_only'"
-                                    :removable="$event->isManagerMode() && ! $isFirstRow && $index > $minPlayers"
+                                    :removable="$rowRemovable"
                                     :title="$rowTitle"
                                     :questions="$event->questions->all()"
-                                    :per-person-addons="$event->addons->filter(fn ($a) => $a->isPerParticipant() && $a->isPurchasable())->values()->all()"
+                                    :per-person-addons="$participantAddons"
                                     :ign-fields="$event->ignFormFields()"
                                     :requires-ic="$event->requiresIcAttachment()" />
                             @endforeach
                         </div>
 
-                        {{-- Template cloned by the Add button. Squad mode only, so
-                             an added person is always a player. --}}
-                        @if ($event->isManagerMode())
+                        {{-- Template cloned by the Add button for manager/grouping entries. --}}
+                        @if ($event->allowsMultipleParticipants())
                             <template data-participant-template>
                                 <x-registration-participant
                                     index="__INDEX__"
@@ -536,27 +550,27 @@
                                     :races="$races"
                                     :states="$states"
                                     :countries="$countries"
-                                    role="player"
+                                    :role="$event->isManagerMode() ? 'player' : 'participant'"
                                     :removable="true"
-                                    title="Player"
+                                    :title="$event->isManagerMode() ? 'Player' : 'Participant'"
                                     {{-- The clone template carries the questions too, so a
                                          player added by the button is asked the same things
                                          as one that was on the page from the start. --}}
                                     :questions="$event->questions->all()"
-                                    :per-person-addons="$event->addons->filter(fn ($a) => $a->isPerParticipant() && $a->isPurchasable())->values()->all()"
+                                    :per-person-addons="$participantAddons"
                                     :ign-fields="$event->ignFormFields()"
                                     :requires-ic="$event->requiresIcAttachment()" />
                             </template>
                         @endif
 
-                        @if ($event->isManagerMode())
+                        @if ($event->allowsMultipleParticipants())
                             <div class="flex flex-wrap items-center justify-between gap-3 mt-4">
                                 <button type="button" data-add-participant
                                         class="inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 transition">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                                     </svg>
-                                    Add Player
+                                    {{ $event->isManagerMode() ? 'Add Player' : 'Add Participant' }}
                                 </button>
 
                                 <p class="text-xs text-gray-500" data-participant-summary></p>
@@ -612,6 +626,8 @@
                                 <p class="text-xs text-gray-500 mt-2">
                                     @if ($event->isManagerMode() && ! $event->isFree())
                                         One registration charge for the whole team, whatever its size.
+                                    @elseif ($event->isGroupingMode() && ! $event->isFree())
+                                        One registration charge for the whole group, whatever its size.
                                     @endif
                                     You will be taken to the payment page after submitting.
                                 </p>
@@ -732,6 +748,8 @@
             const consentAll = form.querySelector('[data-consent-all]');
 
             const isManagerMode = form.dataset.mode === 'manager';
+            const isGroupingMode = form.dataset.mode === 'grouping';
+            const isMultiPersonMode = isManagerMode || isGroupingMode;
             const minPlayers = parseInt(form.dataset.minPlayers || '1', 10);
             const maxPlayers = form.dataset.maxPlayers === '' ? null : parseInt(form.dataset.maxPlayers, 10);
 
@@ -807,6 +825,12 @@
                         return;
                     }
 
+                    if (isGroupingMode) {
+                        badge.textContent = String(position + 1);
+
+                        return;
+                    }
+
                     if (!isManagerMode) {
                         badge.textContent = '1';
 
@@ -830,20 +854,23 @@
                     );
                 });
 
-                // Counted the way the server counts: everyone holding a playing
-                // place, which includes the manager when they said they play.
-                const players = isManagerMode
+                // Manager mode counts playing places. Grouping counts every
+                // participant row, and individual mode always has one row.
+                const entered = isManagerMode
                     ? (all.length - 1) + (firstPlays ? 1 : 0)
                     : all.length;
 
                 if (summary) {
-                    let text = players + (players === 1 ? ' player' : ' players') + ' entered';
+                    const noun = isGroupingMode
+                        ? (entered === 1 ? ' participant' : ' participants')
+                        : (entered === 1 ? ' player' : ' players');
+                    let text = entered + noun + ' entered';
 
                     text += firstPlays && isManagerMode && chosenPosition().role === 'manager'
                         ? ', counting you.'
                         : '.';
 
-                    if (players < minPlayers) {
+                    if (entered < minPlayers) {
                         text += ' At least ' + minPlayers + ' required.';
                     } else if (maxPlayers !== null) {
                         text += ' Up to ' + maxPlayers + ' allowed.';
@@ -853,13 +880,12 @@
                 }
 
                 if (addButton && maxPlayers !== null) {
-                    addButton.disabled = players >= maxPlayers;
+                    addButton.disabled = entered >= maxPlayers;
                     addButton.classList.toggle('opacity-50', addButton.disabled);
                     addButton.classList.toggle('cursor-not-allowed', addButton.disabled);
                 }
 
-                // The amount due is fixed per registration, so adding or
-                // removing a player deliberately does not change it.
+                form.dispatchEvent(new CustomEvent('participants:changed'));
             }
 
             /*
@@ -1019,7 +1045,9 @@
             const lines = summary.querySelector('[data-fee-lines]');
             const totalCell = summary.querySelector('[data-fee-total]');
             const submitLabel = form.querySelector('[data-submit-label]');
-            const inputs = Array.from(form.querySelectorAll('[data-addon-qty]'));
+            function addonInputs() {
+                return Array.from(form.querySelectorAll('[data-addon-qty], [data-addon-choice]'));
+            }
 
             // Money is added up in cents. Summing floats would drift, and this
             // figure sits next to the one the server charges.
@@ -1030,6 +1058,10 @@
             }
 
             function quantityOf(input) {
+                if (input.matches('[data-addon-choice]')) {
+                    return input.checked && input.value !== '' ? 1 : 0;
+                }
+
                 const value = parseInt(input.value, 10);
 
                 return Number.isFinite(value) && value > 0 ? value : 0;
@@ -1039,26 +1071,43 @@
             // together, so it cannot be expressed with a max attribute on each
             // input and is checked here as well as on the server.
             function refreshCaps() {
-                form.querySelectorAll('[data-addon-cap]').forEach(function (card) {
-                    const cap = parseInt(card.dataset.addonCap, 10);
-                    const warning = card.querySelector('[data-addon-cap-warning]');
+                const grouped = new Map();
 
-                    if (!Number.isFinite(cap) || !warning) {
+                form.querySelectorAll('[data-addon-cap][data-addon-id]').forEach(function (card) {
+                    const id = card.dataset.addonId;
+
+                    if (!grouped.has(id)) {
+                        grouped.set(id, []);
+                    }
+
+                    grouped.get(id).push(card);
+                });
+
+                grouped.forEach(function (cards) {
+                    const cap = parseInt(cards[0].dataset.addonCap, 10);
+
+                    if (!Number.isFinite(cap)) {
                         return;
                     }
 
-                    let chosen = 0;
+                    const chosen = cards.reduce(function (total, card) {
+                        return total + Array.from(card.querySelectorAll('[data-addon-qty], [data-addon-choice]'))
+                            .reduce(function (sum, input) { return sum + quantityOf(input); }, 0);
+                    }, 0);
 
-                    card.querySelectorAll('[data-addon-qty]').forEach(function (input) {
-                        chosen += quantityOf(input);
+                    cards.forEach(function (card) {
+                        const warning = card.querySelector('[data-addon-cap-warning]');
+
+                        if (!warning) {
+                            return;
+                        }
+
+                        const over = chosen > cap;
+                        warning.textContent = over
+                            ? 'That is ' + chosen + ' units. Only ' + cap + ' are allowed per registration.'
+                            : '';
+                        warning.classList.toggle('hidden', !over);
                     });
-
-                    const over = chosen > cap;
-
-                    warning.textContent = over
-                        ? 'That is ' + chosen + ' units. Only ' + cap + ' are allowed per registration.'
-                        : '';
-                    warning.classList.toggle('hidden', !over);
                 });
             }
 
@@ -1072,19 +1121,32 @@
                 let addonCents = 0;
 
                 /*
-                 | The add-on's own price is charged once, however many units are
-                 | taken from it, so it is added per card rather than per box. The
-                 | boxes carry only the surcharge for their size.
+                 | The add-on's own price is charged once per registration, even
+                 | when the same item control is repeated in every participant card.
                  */
-                form.querySelectorAll('[data-addon-once]').forEach(function (card) {
-                    const once = Math.round(parseFloat(card.dataset.addonOnce || '0') * 100);
+                const addonCards = new Map();
+
+                form.querySelectorAll('[data-addon-once][data-addon-id]').forEach(function (card) {
+                    const id = card.dataset.addonId;
+
+                    if (!addonCards.has(id)) {
+                        addonCards.set(id, []);
+                    }
+
+                    addonCards.get(id).push(card);
+                });
+
+                addonCards.forEach(function (cards) {
+                    const once = Math.round(parseFloat(cards[0].dataset.addonOnce || '0') * 100);
 
                     if (once === 0) {
                         return;
                     }
 
-                    const taken = Array.from(card.querySelectorAll('[data-addon-qty]'))
-                        .some(function (box) { return quantityOf(box) > 0; });
+                    const taken = cards.some(function (card) {
+                        return Array.from(card.querySelectorAll('[data-addon-qty], [data-addon-choice]'))
+                            .some(function (input) { return quantityOf(input) > 0; });
+                    });
 
                     if (!taken) {
                         return;
@@ -1097,7 +1159,7 @@
 
                     const label = document.createElement('td');
                     label.className = 'py-1 text-gray-700';
-                    label.textContent = card.dataset.addonName || 'Extra';
+                    label.textContent = cards[0].dataset.addonName || 'Extra';
 
                     const amount = document.createElement('td');
                     amount.className = 'py-1 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap w-28';
@@ -1108,7 +1170,7 @@
                     lines.appendChild(row);
                 });
 
-                inputs.forEach(function (input) {
+                addonInputs().forEach(function (input) {
                     const quantity = quantityOf(input);
 
                     if (quantity === 0) {
@@ -1159,11 +1221,16 @@
                 refreshCaps();
             }
 
-            inputs.forEach(function (input) {
-                // change catches the spinner and paste; input catches typing.
-                input.addEventListener('input', refreshTotal);
-                input.addEventListener('change', refreshTotal);
-            });
+            function itemChanged(event) {
+                if (event.target.matches('[data-addon-qty], [data-addon-choice]')) {
+                    refreshTotal();
+                }
+            }
+
+            // Delegation includes controls inside participant blocks cloned later.
+            form.addEventListener('input', itemChanged);
+            form.addEventListener('change', itemChanged);
+            form.addEventListener('participants:changed', refreshTotal);
 
             /*
              | Add-ons offered already ticked.
@@ -1185,7 +1252,7 @@
                 }
 
                 const reminder = card.querySelector('[data-addon-reminder]');
-                const boxes = Array.from(card.querySelectorAll('[data-addon-qty]'));
+                const boxes = Array.from(card.querySelectorAll('[data-addon-qty], [data-addon-choice]'));
 
                 toggle.addEventListener('change', function () {
                     if (toggle.checked) {
@@ -1195,16 +1262,29 @@
 
                         if (!already) {
                             const first = boxes.find(function (box) {
-                                return !box.disabled;
+                                return !box.disabled
+                                    && (!box.matches('[data-addon-choice]') || box.value !== '');
                             });
 
                             if (first) {
-                                first.value = '1';
+                                if (first.matches('[data-addon-choice]')) {
+                                    first.checked = true;
+                                } else {
+                                    first.value = '1';
+                                }
                             }
                         }
                     } else {
+                        const none = boxes.find(function (box) {
+                            return box.matches('[data-addon-choice]') && box.value === '';
+                        });
+
                         boxes.forEach(function (box) {
-                            box.value = '0';
+                            if (box.matches('[data-addon-choice]')) {
+                                box.checked = box === none;
+                            } else {
+                                box.value = '0';
+                            }
                         });
                     }
 

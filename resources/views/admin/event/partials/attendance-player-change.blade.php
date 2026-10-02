@@ -38,7 +38,7 @@
                 <tr>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Event</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Change</th>
-                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Team</th>
+                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Entry</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Player Out</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Player In</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Reason</th>

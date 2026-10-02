@@ -52,6 +52,7 @@ class EventAddonWriter
             'max_quantity' => $row['max_quantity'] ?? null,
             'is_required' => (bool) ($row['is_required'] ?? false),
             'per_participant' => (bool) ($row['per_participant'] ?? false),
+            'selection_type' => $row['selection_type'] ?? EventAddon::SELECTION_QUANTITY,
 
             // Already reconciled against is_required by the form request, so this
             // writes what was decided rather than deciding again.

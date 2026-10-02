@@ -9,6 +9,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EventAddon extends Model
 {
+    public const SELECTION_QUANTITY = 'quantity';
+    public const SELECTION_RADIO = 'radio';
+
+    public const SELECTION_TYPES = [
+        self::SELECTION_QUANTITY => 'Quantity — enter how many of each option',
+        self::SELECTION_RADIO => 'Radio button — choose one option only',
+    ];
+
     protected $fillable = [
         'event_id',
         'name',
@@ -16,6 +24,7 @@ class EventAddon extends Model
         'price',
         'is_required',
         'per_participant',
+        'selection_type',
         'is_checked_by_default',
         'uncheck_reminder',
         'max_quantity',
@@ -58,6 +67,31 @@ class EventAddon extends Model
     public function isPerParticipant(): bool
     {
         return $this->per_participant && $this->hasVariants();
+    }
+
+    /**
+     * Grouping registrations always collect an item choice for each person.
+     * Other modes retain the existing per_participant switch.
+     */
+    public function isAssignedPerParticipant(Event $event): bool
+    {
+        return $event->isGroupingMode() || $this->isPerParticipant();
+    }
+
+    public function isRadioSelection(): bool
+    {
+        return $this->selection_type === self::SELECTION_RADIO;
+    }
+
+    public function isQuantitySelection(): bool
+    {
+        return ! $this->isRadioSelection();
+    }
+
+    public function selectionTypeLabel(): string
+    {
+        return self::SELECTION_TYPES[$this->selection_type]
+            ?? self::SELECTION_TYPES[self::SELECTION_QUANTITY];
     }
 
     public function isCheckedByDefault(): bool

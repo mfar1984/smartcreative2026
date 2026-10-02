@@ -16,6 +16,7 @@
     $isActive = array_key_exists('is_active', $row) ? (bool) $row['is_active'] : true;
     $isRequired = (bool) ($row['is_required'] ?? false);
     $isPerParticipant = (bool) ($row['per_participant'] ?? false);
+    $selectionType = (string) ($row['selection_type'] ?? \App\Models\EventAddon::SELECTION_QUANTITY);
     $isTicked = (bool) ($row['is_checked_by_default'] ?? false);
     $reminder = (string) ($row['uncheck_reminder'] ?? '');
 
@@ -88,15 +89,34 @@
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-                <label class="block text-xs font-semibold text-gray-700 mb-1">Max Units Per Registration</label>
-                <input type="number" name="{{ $name }}[max_quantity]" min="1" max="1000"
-                       value="{{ $row['max_quantity'] ?? '' }}"
-                       placeholder="No limit"
-                       class="{{ $miniInput }}">
-                <p class="text-[11px] text-gray-500 mt-1">
-                    Counts every option together. Blank means stock is the only limit.
-                </p>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Input Type</label>
+                    <select name="{{ $name }}[selection_type]"
+                            data-addon-selection-type
+                            class="{{ $miniInput }} bg-white">
+                        @foreach (\App\Models\EventAddon::SELECTION_TYPES as $value => $label)
+                            <option value="{{ $value }}" @selected($selectionType === $value)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                    <p class="text-[11px] text-gray-500 mt-1">
+                        Quantity keeps the existing number boxes. Radio button allows one option only.
+                    </p>
+                    @error("addons.{$index}.selection_type")
+                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                    @enderror
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Max Units Per Registration</label>
+                    <input type="number" name="{{ $name }}[max_quantity]" min="1" max="1000"
+                           value="{{ $row['max_quantity'] ?? '' }}"
+                           placeholder="No limit"
+                           class="{{ $miniInput }}">
+                    <p class="text-[11px] text-gray-500 mt-1">
+                        Counts every option together. Blank means stock is the only limit.
+                    </p>
+                </div>
             </div>
 
             <div class="flex flex-col justify-center gap-2.5 sm:pt-4">
@@ -130,31 +150,24 @@
                           data-addon-ticked-label>Ticked by default, can be unticked</span>
                 </label>
 
-                {{-- One choice per person instead of a quantity per option.
-
-                     Without this a squad orders three larges and two 2XLs and
-                     nothing says who wears what, so the shirts arrive as a pile of
-                     sizes with no names against them.
-
-                     Needs options to choose between: "one each" of a thing with no
-                     variants is only a quantity equal to the head count, which the
-                     ordinary path already does. --}}
+                {{-- Assignment scope is independent from input type. Quantity or
+                     radio can be collected once for the registration, or against
+                     every person. Grouping mode always assigns items per person. --}}
                 <input type="hidden" name="{{ $name }}[per_participant]" value="0">
                 <label class="inline-flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" name="{{ $name }}[per_participant]" value="1"
                            @checked($isPerParticipant)
                            class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                    <span class="text-xs font-semibold text-gray-700">Choose one per person, not a quantity</span>
+                    <span class="text-xs font-semibold text-gray-700">Ask each person separately</span>
                 </label>
             </div>
         </div>
 
         @if ($isPerParticipant)
             <p class="text-xs text-gray-500 mt-2">
-                Each person on the entry picks their own option, and it is recorded
-                against them. Only works once this add-on has options below. The price
-                is unchanged: still charged once for the entry, with any option
-                surcharges on top.
+                Each person receives this item input separately. The selected Input Type
+                decides whether they enter quantities or choose one radio option. Grouping
+                registration applies items per person automatically.
             </p>
         @endif
 

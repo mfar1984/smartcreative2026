@@ -161,7 +161,7 @@
 
                     @if (filled($registration->team_name))
                         <div class="px-6 py-3 border-b border-gray-100 text-sm text-gray-700">
-                            <span class="font-semibold text-gray-500">Team:</span> {{ $registration->team_name }}
+                            <span class="font-semibold text-gray-500">{{ $registration->mode === \App\Models\Event::MODE_GROUPING ? 'Group' : 'Team' }}:</span> {{ $registration->team_name }}
                             <span class="text-gray-400 mx-1.5">&middot;</span>
                             {{ $registration->participants->count() }}
                             {{ $registration->participants->count() === 1 ? 'person' : 'people' }}

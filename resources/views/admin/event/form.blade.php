@@ -11,7 +11,10 @@
         : route('admin.event.registration.update', $event);
 
     $input = 'w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
-    $isManagerMode = old('registration_mode', $event->registration_mode) === Event::MODE_MANAGER;
+    $selectedMode = old('registration_mode', $event->registration_mode);
+    $isManagerMode = $selectedMode === Event::MODE_MANAGER;
+    $isGroupingMode = $selectedMode === Event::MODE_GROUPING;
+    $isMultiPersonMode = $isManagerMode || $isGroupingMode;
 @endphp
 
 @section('title', $heading)
@@ -287,7 +290,10 @@
                         <span @class(['hidden' => ! $isManagerMode]) data-fee-basis="manager">
                             A manager pays this once for the whole squad, whether they enter 2 players or 20.
                         </span>
-                        <span @class(['hidden' => $isManagerMode]) data-fee-basis="individual">
+                        <span @class(['hidden' => ! $isGroupingMode]) data-fee-basis="grouping">
+                            The group pays this once for the whole registration, whatever its size.
+                        </span>
+                        <span @class(['hidden' => $isMultiPersonMode]) data-fee-basis="individual">
                             Each person registering pays this once.
                         </span>
                     </p>
@@ -321,7 +327,10 @@
                         <span @class(['hidden' => ! $isManagerMode]) data-seat-basis="manager">
                             Counted in <strong>teams</strong>. One squad takes one place, whether it enters 2 players or 20.
                         </span>
-                        <span @class(['hidden' => $isManagerMode]) data-seat-basis="individual">
+                        <span @class(['hidden' => ! $isGroupingMode]) data-seat-basis="grouping">
+                            Counted in <strong>people</strong>. Every participant in the group takes one place.
+                        </span>
+                        <span @class(['hidden' => $isMultiPersonMode]) data-seat-basis="individual">
                             Counted in <strong>people</strong>. Each person named takes one place.
                         </span>
                     </p>
@@ -359,14 +368,14 @@
                     </select>
                 </x-admin.field-row>
 
-                <div id="player-bounds" @class(['divide-y divide-gray-100', 'hidden' => ! $isManagerMode])>
-                    <x-admin.field-row label="Minimum Players" help="Fewest players a manager must enter." for="min_players" error="min_players">
+                <div id="player-bounds" @class(['divide-y divide-gray-100', 'hidden' => ! $isMultiPersonMode])>
+                    <x-admin.field-row label="Minimum People" help="Fewest players or participants allowed in one entry." for="min_players" error="min_players">
                         <input type="number" id="min_players" name="min_players" min="1" max="1000"
                                value="{{ old('min_players', $event->min_players ?? 1) }}"
                                class="{{ $input }}">
                     </x-admin.field-row>
 
-                    <x-admin.field-row label="Maximum Players" help="Leave blank for no limit." for="max_players" error="max_players">
+                    <x-admin.field-row label="Maximum People" help="Most players or participants allowed in one entry. Leave blank for no limit." for="max_players" error="max_players">
                         <input type="number" id="max_players" name="max_players" min="1" max="1000"
                                value="{{ old('max_players', $event->max_players) }}"
                                placeholder="No limit"
@@ -626,7 +635,12 @@
                                 Squad mode: the first person is recorded as the <strong>Manager</strong>
                                 and everyone they add is recorded as a <strong>Player</strong>.
                             </span>
-                            <span @class(['hidden' => $isManagerMode]) data-role-note="individual">
+                            <span @class(['hidden' => ! $isGroupingMode]) data-role-note="grouping">
+                                Grouping mode: one contact registers several people. Everyone is
+                                recorded as a <strong>Participant</strong>, and each person receives
+                                the configured quantity or radio item inputs.
+                            </span>
+                            <span @class(['hidden' => $isMultiPersonMode]) data-role-note="individual">
                                 Individual mode: the person is recorded as a
                                 <strong>Participant</strong>. No manager or player choice is shown,
                                 so the form suits a course or conference as well as a match.
@@ -688,27 +702,32 @@
         const modeSelect = document.getElementById('registration_mode');
         const bounds = document.getElementById('player-bounds');
 
-        // Player limits only apply to squad registration, so the pair of fields
-        // is hidden for individual events.
+        // Member limits apply to manager and grouping registrations.
         const managerMode = @json(\App\Models\Event::MODE_MANAGER);
+        const groupingMode = @json(\App\Models\Event::MODE_GROUPING);
 
         if (modeSelect) {
             modeSelect.addEventListener('change', function () {
                 const isManager = modeSelect.value === managerMode;
+                const isGrouping = modeSelect.value === groupingMode;
+                const isMultiPerson = isManager || isGrouping;
 
-                bounds?.classList.toggle('hidden', !isManager);
+                bounds?.classList.toggle('hidden', !isMultiPerson);
 
                 // Keep the price wording honest about what the mode charges.
                 document.querySelector('[data-fee-basis="manager"]')?.classList.toggle('hidden', !isManager);
-                document.querySelector('[data-fee-basis="individual"]')?.classList.toggle('hidden', isManager);
+                document.querySelector('[data-fee-basis="grouping"]')?.classList.toggle('hidden', !isGrouping);
+                document.querySelector('[data-fee-basis="individual"]')?.classList.toggle('hidden', isMultiPerson);
 
                 // And keep the role explanation matching the mode too.
                 document.querySelector('[data-role-note="manager"]')?.classList.toggle('hidden', !isManager);
-                document.querySelector('[data-role-note="individual"]')?.classList.toggle('hidden', isManager);
+                document.querySelector('[data-role-note="grouping"]')?.classList.toggle('hidden', !isGrouping);
+                document.querySelector('[data-role-note="individual"]')?.classList.toggle('hidden', isMultiPerson);
 
-                // Total Seats changes unit with the mode: 32 squads, or 32 people.
+                // Total Seats uses teams only for manager mode; the other modes count people.
                 document.querySelector('[data-seat-basis="manager"]')?.classList.toggle('hidden', !isManager);
-                document.querySelector('[data-seat-basis="individual"]')?.classList.toggle('hidden', isManager);
+                document.querySelector('[data-seat-basis="grouping"]')?.classList.toggle('hidden', !isGrouping);
+                document.querySelector('[data-seat-basis="individual"]')?.classList.toggle('hidden', isMultiPerson);
             });
         }
 
