@@ -72,6 +72,7 @@ class EventRequest extends FormRequest
 
             'status' => ['required', Rule::in(array_keys(Event::STATUSES))],
             'registration_mode' => ['required', Rule::in(array_keys(Event::MODES))],
+            'requires_group_name' => ['boolean'],
 
             'min_players' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'max_players' => ['nullable', 'integer', 'min:1', 'max:1000', 'gte:min_players'],
@@ -243,6 +244,19 @@ class EventRequest extends FormRequest
         $flags['requires_phone'] = $this->boolean('requires_phone');
         $flags['requires_unique_contact'] = $this->boolean('requires_unique_contact');
         $flags['requires_ic_attachment'] = $this->boolean('requires_ic_attachment');
+
+        /*
+        | The only flag here whose column default is 1, so an absent key may not be
+        | read as false.
+        |
+        | The form always submits it, hidden 0 and all, so this cannot bite today. It
+        | is written this way for the payload that does not: a partial update reusing
+        | this request would otherwise switch the group name off on every grouping
+        | event it touched, which is the opposite of what the column says by default.
+        */
+        if ($this->has('requires_group_name')) {
+            $flags['requires_group_name'] = $this->boolean('requires_group_name');
+        }
 
         $this->merge($flags + [
             'title' => is_string($this->title) ? trim($this->title) : $this->title,
@@ -674,6 +688,11 @@ class EventRequest extends FormRequest
         if (! in_array($data['registration_mode'], [Event::MODE_MANAGER, Event::MODE_GROUPING], true)) {
             $data['min_players'] = null;
             $data['max_players'] = null;
+        }
+
+        // The hidden row still submits, and only grouping may switch it off.
+        if ($data['registration_mode'] !== Event::MODE_GROUPING) {
+            $data['requires_group_name'] = true;
         }
 
         return $data;

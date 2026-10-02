@@ -368,6 +368,32 @@
                     </select>
                 </x-admin.field-row>
 
+                {{--
+                    Whether the group itself gets a name.
+
+                    Grouping only, and on by default so no existing event changes. A squad's
+                    team name is its identity on every bracket and public team page, so
+                    manager mode is not offered the choice.
+                --}}
+                <div id="group-name-rule" @class(['hidden' => ! $isGroupingMode])>
+                    <x-admin.field-row label="Group Name" help="Only asked for a grouping registration." error="requires_group_name">
+                        {{-- An unticked box sends nothing, so a 0 is queued first
+                             and the checkbox overrides it. --}}
+                        <input type="hidden" name="requires_group_name" value="0">
+
+                        <label for="requires_group_name" class="inline-flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="requires_group_name" name="requires_group_name" value="1"
+                                   @checked((bool) old('requires_group_name', $event->exists ? $event->requires_group_name : true))
+                                   class="h-4 w-4 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                            <span class="text-sm font-medium text-gray-800">Ask for a group / organisation name</span>
+                        </label>
+
+                        <p class="text-xs text-gray-500 mt-1 max-w-64">
+                            Untick and the public form skips it, and the first person is just Participant 1.
+                        </p>
+                    </x-admin.field-row>
+                </div>
+
                 <div id="player-bounds" @class(['divide-y divide-gray-100', 'hidden' => ! $isMultiPersonMode])>
                     <x-admin.field-row label="Minimum People" help="Fewest players or participants allowed in one entry." for="min_players" error="min_players">
                         <input type="number" id="min_players" name="min_players" min="1" max="1000"
@@ -713,6 +739,9 @@
                 const isMultiPerson = isManager || isGrouping;
 
                 bounds?.classList.toggle('hidden', !isMultiPerson);
+
+                // Only a grouping registration may be asked to skip the group name.
+                document.getElementById('group-name-rule')?.classList.toggle('hidden', !isGrouping);
 
                 // Keep the price wording honest about what the mode charges.
                 document.querySelector('[data-fee-basis="manager"]')?.classList.toggle('hidden', !isManager);

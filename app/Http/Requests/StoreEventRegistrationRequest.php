@@ -334,6 +334,22 @@ class StoreEventRegistrationRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        $event = $this->event();
+
+        /*
+        | An event that does not ask for a group name must not be given one.
+        |
+        | The form never draws the field when the setting is off, so anything arriving
+        | under that name was put there by hand. Cleared rather than rejected, because it
+        | is not the registrant's mistake and there is nothing for them to correct.
+        |
+        | Gated on the mode so an individual entry, which has never carried a name, is not
+        | touched at all.
+        */
+        if ($event->allowsMultipleParticipants() && ! $event->usesGroupName()) {
+            $this->merge(['team_name' => null]);
+        }
+
         $participants = $this->input('participants', []);
 
         if (! is_array($participants)) {

@@ -53,9 +53,15 @@ class UpdateRegistrationEntryRequest extends FormRequest
              | Compulsory on a squad entry for the same reason the public form
              | insists: it is the name everything from the draw to the counter
              | calls this entry by. An individual entry has no team.
+             |
+             | Unless the event stopped asking for one, in which case the public form
+             | accepted the entry without a name and this screen cannot start demanding
+             | it. The stored mode is tested first because it is what the screen displays;
+             | an entry whose event has gone falls back to insisting, as it always did.
              */
             'team_name' => [
                 in_array($registration->mode, [Event::MODE_MANAGER, Event::MODE_GROUPING], true)
+                && ($event?->usesGroupName() ?? true)
                     ? 'required'
                     : 'nullable',
                 'string',

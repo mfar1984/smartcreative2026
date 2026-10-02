@@ -334,9 +334,13 @@
                     <x-admin.field-row label="Registration Mode">
                         <p class="md:pt-2.5 text-sm text-gray-900">
                             {{ $event->modeLabel() }}
-                            @if ($event->isManagerMode())
+                            {{-- Both multi-person modes carry member bounds, so both
+                                 print them. The noun follows the mode: a grouping
+                                 event has no manager to count players for. --}}
+                            @if ($event->allowsMultipleParticipants())
                                 <span class="block text-xs text-gray-500">
-                                    {{ $event->min_players ?? 1 }} to {{ $event->max_players ?? 'unlimited' }} players per manager
+                                    {{ $event->min_players ?? 1 }} to {{ $event->max_players ?? 'unlimited' }}
+                                    {{ $event->isManagerMode() ? 'players per manager' : 'participants per group' }}
                                 </span>
                             @endif
                         </p>

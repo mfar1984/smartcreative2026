@@ -214,6 +214,10 @@
         @if ($canUpdatePerson)
             @php
                 $entryReopened = $errors->hasAny(['team_name', 'logo', 'remove_logo', 'notes']);
+
+                // Follows the event, which may have stopped asking for a group name.
+                $groupNameRequired = in_array($registration->mode, [\App\Models\Event::MODE_MANAGER, \App\Models\Event::MODE_GROUPING], true)
+                    && ($event?->usesGroupName() ?? true);
             @endphp
 
             <div id="entry-modal"
@@ -252,7 +256,7 @@
                             <div>
                                 <label for="team_name" class="{{ $personLabel }}">
                                     {{ $registration->mode === \App\Models\Event::MODE_GROUPING ? 'Group or organisation name' : 'Team or organisation name' }}
-                                    @if (in_array($registration->mode, [\App\Models\Event::MODE_MANAGER, \App\Models\Event::MODE_GROUPING], true))
+                                    @if ($groupNameRequired)
                                         <span class="text-red-600" aria-hidden="true">*</span>
                                     @endif
                                 </label>

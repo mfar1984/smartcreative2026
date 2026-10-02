@@ -76,6 +76,7 @@ class Event extends Model
         'requires_ic_attachment',
         'status',
         'registration_mode',
+        'requires_group_name',
         'min_players',
         'max_players',
         'registration_opens_at',
@@ -110,6 +111,7 @@ class Event extends Model
             'requires_email' => 'boolean',
             'requires_phone' => 'boolean',
             'requires_ic_attachment' => 'boolean',
+            'requires_group_name' => 'boolean',
         ];
     }
 
@@ -233,9 +235,31 @@ class Event extends Model
         return $this->isManagerMode() || $this->isGroupingMode();
     }
 
+    /**
+     * Whether the entry itself is given a name, over and above the people on it.
+     *
+     * An individual registration never had one, so the setting cannot give it one: the
+     * flag only ever takes the question away, never adds it.
+     */
     public function usesGroupName(): bool
     {
-        return $this->allowsMultipleParticipants();
+        if (! $this->allowsMultipleParticipants()) {
+            return false;
+        }
+
+        /*
+         | Only grouping may switch the name off. A squad's team name is its identity on
+         | every bracket, standing and public team page, so manager mode keeps asking for
+         | it.
+         |
+         | An unset attribute reads as on, matching the column default, so an Event built
+         | in memory without the key behaves exactly as every stored row does.
+         */
+        if (! $this->isGroupingMode()) {
+            return true;
+        }
+
+        return $this->requires_group_name === null || (bool) $this->requires_group_name;
     }
 
     public function registrationShapeLabel(): string

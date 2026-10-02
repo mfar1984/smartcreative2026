@@ -76,7 +76,15 @@
             <tr>
                 <td style="padding:8px 0;color:#6b7280;vertical-align:top;">Entry</td>
                 <td style="padding:8px 0;color:#111827;font-weight:bold;">
-                    {{ $registration?->team_name ?: 'Individual entry' }}
+                    {{-- displayName() rather than the team name: a grouping entry whose
+                         event does not ask for a group name has none, and calling that an
+                         individual entry would mislead whoever reads this. The wording is
+                         kept only for a genuinely individual registration. --}}
+                    @if ($registration === null || $registration->mode === App\Models\Event::MODE_INDIVIDUAL)
+                        Individual entry
+                    @else
+                        {{ $registration->displayName() }}
+                    @endif
                     @if ($registration?->reference)
                         &middot; {{ $registration->reference }}
                     @endif

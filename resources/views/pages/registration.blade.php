@@ -397,7 +397,11 @@
                                     Every person needs their own details.
                                 @elseif ($event->isGroupingMode())
                                     One person registers the group. Enter {{ $minPlayers }}@if ($maxPlayers) to {{ $maxPlayers }}@else or more @endif participants.
-                                    The first person is also the group contact, and every participant chooses
+                                    @if ($event->usesGroupName())
+                                        The first person is also the group contact, and every participant chooses
+                                    @else
+                                        Every participant chooses
+                                    @endif
                                     the quantity or radio options configured for each item.
                                 @else
                                     One person per registration. Anyone else taking part should submit
@@ -449,7 +453,9 @@
 
                                         <p class="text-xs text-gray-500 mt-1.5">
                                             JPG, PNG, WebP or SVG up to 2 MB.
-                                            @if ($event->usesGroupName())
+                                            {{-- About the logo being one per entry, not about the group
+                                                 name, so it follows the mode rather than that setting. --}}
+                                            @if ($event->allowsMultipleParticipants())
                                                 One image for the whole {{ $event->isManagerMode() ? 'squad' : 'group' }}.
                                             @endif
                                         </p>
@@ -513,7 +519,14 @@
                                     $rowTitle = $event->isManagerMode()
                                         ? ($isFirstRow ? 'You' : 'Player')
                                         : ($event->isGroupingMode()
-                                            ? ($index === 0 ? 'Group Contact / Participant 1' : 'Participant')
+                                            // Without a group name the first person is
+                                            // nothing special, so the card reads exactly
+                                            // as its siblings do and the numbered badge
+                                            // beside it is the only thing that tells the
+                                            // rows apart.
+                                            ? ($index === 0 && $event->usesGroupName()
+                                                ? 'Group Contact / Participant 1'
+                                                : 'Participant')
                                             : 'Your Details');
 
                                     $rowRemovable = $event->isManagerMode()

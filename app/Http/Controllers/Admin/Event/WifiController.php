@@ -145,13 +145,21 @@ class WifiController extends Controller
             ->where('event_id', $event->id)
             ->live()
             ->forAttending()
-            ->with(['participant', 'registration'])
+            // registration.participants because displayName() falls through to the
+            // first person named on the entry, and loading that per slip would be an
+            // N+1 on a sheet that can run to hundreds.
+            ->with(['participant', 'registration.participants'])
             ->get()
             ->sortBy([
                 fn (WifiCredential $c) => $c->registration?->team_name ?? '',
                 fn (WifiCredential $c) => $c->participant?->full_name ?? '',
             ])
-            ->groupBy(fn (WifiCredential $c) => $c->registration?->team_name ?: 'Unassigned');
+            // displayName() rather than the team name, because a grouping event that
+            // does not ask for one has no team name to group on and every slip would
+            // collapse under a single "Unassigned" heading, which is the one thing
+            // this sheet exists to avoid. 'Unassigned' is left for a credential whose
+            // registration has genuinely gone.
+            ->groupBy(fn (WifiCredential $c) => $c->registration?->displayName() ?: 'Unassigned');
 
         AdminLogger::activity(
             'event.wifi.slips',
