@@ -459,7 +459,7 @@
                                         <x-admin.badge :tone="$payTones[$registration->payment_status] ?? 'gray'">{{ $registration->paymentStatusLabel() }}</x-admin.badge>
                                     </td>
                                     <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                        {{ $registration->created_at?->format('d M Y, g:i a') }}
+                                        {{ \App\Support\LocalTime::format($registration->created_at) }}
                                     </td>
                                 </tr>
                             @endforeach

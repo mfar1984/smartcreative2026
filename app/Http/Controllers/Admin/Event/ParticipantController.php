@@ -394,20 +394,21 @@ class ParticipantController extends Controller
         // the gateway. Refunding and cancelling is the honest path; deleting
         // would leave the books disagreeing with the gateway's dashboard.
         /*
-         | Judged on whether money moved, not on the payment_status flag.
+         | Judged on whether money actually arrived, not on what was invoiced and
+         | not on the payment_status flag.
          |
-         | A free entry is marked paid the instant it is submitted, because nothing
-         | is owed. Reading that flag as "settled financial record" meant a free
-         | entry could never be deleted, on the grounds that the books would
-         | disagree with the gateway. There are no books and no gateway on an entry
-         | that cost nothing.
+         | An entry can name RM 40.00 and hold none of it: the sum is what is owed,
+         | and a purchase id is only a checkout somebody opened. Reading either as a
+         | financial record left an unpaid entry undeletable and told the office that
+         | money had been taken for it. What blocks a delete is a sum received, a
+         | receipt in the ledger, or an amount already refunded.
          */
-        if ($registration->hasMoneyOnRecord()) {
+        if ($registration->hasMoneyReceived()) {
             return back()->withInput()->withErrors([
                 'registration' => sprintf(
                     '%s cannot be deleted because %s has been taken for it. Refund it at the gateway first, or leave it for the record.',
                     $registration->reference,
-                    $registration->amountLabel(),
+                    $registration->amountPaidLabel(),
                 ),
             ]);
         }

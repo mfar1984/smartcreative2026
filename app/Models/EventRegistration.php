@@ -420,6 +420,33 @@ class EventRegistration extends Model
             || $this->payments()->exists();
     }
 
+    /**
+     * Whether money has actually arrived, on the reasoning set out above: `amount`
+     * is what is owed and `payment_reference` is one checkout attempt, so neither
+     * is evidence that anything was taken. An invoice nobody has paid names a sum
+     * and holds none of it, and a checkout that was opened and abandoned leaves a
+     * purchase id behind either way.
+     *
+     * Three things each are evidence: a sum recorded as received, a receipt in the
+     * ledger, or an amount already sent back, which could only have gone back if it
+     * arrived first.
+     *
+     * The ledger is asked as well as the column because migration
+     * 2026_09_05_100000 describes `amount_paid` as a denormalised convenience that
+     * must always be able to prove itself. A receipt on record with a stale column
+     * beside it is still money taken.
+     *
+     * hasMoneyOnRecord() is deliberately left as it is: the transfer guard reads it,
+     * and whether an invoiced entry may be moved between events is a separate
+     * question from whether it may be deleted.
+     */
+    public function hasMoneyReceived(): bool
+    {
+        return (float) $this->amount_paid > 0
+            || (float) $this->refunded_amount > 0
+            || $this->payments()->exists();
+    }
+
     public function paymentStatusLabel(): string
     {
         return self::PAYMENT_STATUSES[$this->payment_status] ?? $this->payment_status;

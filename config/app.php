@@ -69,6 +69,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Display Timezone
+    |--------------------------------------------------------------------------
+    |
+    | Storage and every piece of date arithmetic stay in UTC, which is what the
+    | timezone above settles. This key is read only at the moment a timestamp is
+    | shown to somebody, by App\Support\LocalTime, so an office in Malaysia reads
+    | its own clock while the database keeps one unambiguous zone.
+    |
+    | Changing the timezone above instead would reinterpret every stored row, so
+    | it is deliberately left hardcoded and this key moved instead.
+    |
+    */
+
+    'display_timezone' => env('APP_DISPLAY_TIMEZONE', 'Asia/Kuala_Lumpur'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     |

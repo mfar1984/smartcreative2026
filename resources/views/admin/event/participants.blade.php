@@ -212,7 +212,7 @@
                                 </td>
 
                                 <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                    {{ $registration->created_at?->format('d M Y, g:i a') }}
+                                    {{ \App\Support\LocalTime::format($registration->created_at) }}
                                 </td>
 
                                 <td class="px-5 py-3 whitespace-nowrap">
@@ -300,11 +300,11 @@
                                         @endif
 
                                         {{-- Money taken is a financial record. Judged on whether any
-                                             moved rather than on the paid flag, which a free entry
-                                             carries from the moment it is submitted. The controller
-                                             refuses it too; hiding the button avoids offering an
+                                             actually arrived rather than on what was invoiced, so an
+                                             unpaid entry may still be removed. The controller refuses
+                                             it on the same test; hiding the button avoids offering an
                                              action that cannot succeed. --}}
-                                        @if ($canDelete && ! $registration->hasMoneyOnRecord())
+                                        @if ($canDelete && ! $registration->hasMoneyReceived())
                                             <form action="{{ route('admin.event.participants.destroy', $registration) }}" method="POST"
                                                   onsubmit="return confirm('Delete {{ addslashes($registration->reference) }} for {{ addslashes($registration->displayName()) }}?\n\nThis removes {{ $registration->participants->count() }} {{ $registration->participants->count() === 1 ? 'person' : 'people' }} and cannot be undone. The seats go back to the event.');">
                                                 @csrf

@@ -103,10 +103,6 @@
             @endif
         </x-slot:actions>
 
-        {{-- Correcting and removing a person both come back here, so this is where
-             the outcome has to be readable. Same partial the rest of the admin uses. --}}
-        @include('admin.partials.flash')
-
         {{-- ---------------- Registration ---------------- --}}
         <x-admin.section-intro
             title="Registration"
@@ -185,7 +181,7 @@
                     <tr>
                         <th scope="row" class="{{ $label }} text-left">Submitted</th>
                         <td class="{{ $value }}">
-                            {{ $registration->created_at?->format('d M Y, g:i a') ?? '—' }}
+                            {{ \App\Support\LocalTime::format($registration->created_at) }}
                             @if (filled($registration->ip_address))
                                 <span class="text-gray-400">from {{ $registration->ip_address }}</span>
                             @endif
