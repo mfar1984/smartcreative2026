@@ -8,6 +8,7 @@ use App\Http\Requests\Admin\UpdateMaintenanceRequest;
 use App\Models\Setting;
 use App\Services\AdminLogger;
 use App\Support\BrandingSettings;
+use App\Support\GeneralSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -47,20 +48,6 @@ class GeneralConfigController extends Controller
         'sidebar_logo' => 'sidebar_logo_path',
         'login_logo' => 'login_logo_path',
         'favicon' => 'favicon_path',
-    ];
-
-    /**
-     * Values used when a setting has never been saved.
-     */
-    private const GENERAL_DEFAULTS = [
-        'site_name' => 'Smart Digital Creative Management & Resources',
-        'tagline' => 'Innovate, Create & Manage',
-        'contact_email' => 'event@smartcreative.my',
-        'contact_phone' => '019-866 6898',
-        'whatsapp' => '019-866 6898',
-        'registration_no' => '202303326459 / 003562257-U',
-        'address' => "Suite: 33-01, 33rd Floor\nMenara Keck Seng\n203 Jalan Bukit Bintang\n55100 Kuala Lumpur, Malaysia",
-        'timezone' => 'Asia/Kuala_Lumpur',
     ];
 
     private const MAINTENANCE_DEFAULTS = [
@@ -121,9 +108,11 @@ class GeneralConfigController extends Controller
             Setting::write('general.' . $key, $path, 'general');
         }
 
-        // The support class caches per request, and the redirect renders the sidebar
-        // again, so a stale path here would show the old logo until the next click.
+        // Both support classes cache per request, and the redirect renders the
+        // sidebar and the form again, so a stale value here would show the old logo
+        // or the old address until the next click.
         BrandingSettings::flush();
+        GeneralSettings::flush();
 
         AdminLogger::activity('settings.general.update', 'Updated general configuration.');
         AdminLogger::audit(
@@ -269,14 +258,9 @@ class GeneralConfigController extends Controller
      */
     private function generalValues(): array
     {
-        $stored = Setting::readGroup('general');
-        $values = [];
-
-        foreach (self::GENERAL_DEFAULTS as $key => $default) {
-            $values[$key] = $stored['general.' . $key] ?? $default;
-        }
-
-        return $values;
+        // The defaults live with the accessor that the public site reads, so the
+        // form cannot show one fallback while the footer renders another.
+        return GeneralSettings::formValues();
     }
 
     /**

@@ -8,8 +8,8 @@
     A nested layout rather than a component, because the project renders public pages
     through @extends and a component cannot take part in that inheritance.
 
-    Company details are written out once here. They also appear in the footer; if the
-    registration number or the address ever changes, both places need editing.
+    Company details come from Settings > General Config, the same source the footer
+    reads, so the registration number and the address are changed in one place.
 
     Expects from the controller: $pageTitle, $pageSubtitle, $effectiveFrom
     Content views fill: @section('document')
@@ -47,25 +47,24 @@
                             right described above.
                         </p>
 
-                        <p class="font-semibold text-gray-900">Smart Digital Creative Management &amp; Resources</p>
-                        <p class="text-sm text-gray-500 mb-3">Registration: 202303326459 / 003562257-U</p>
+                        <p class="font-semibold text-gray-900">{{ App\Support\GeneralSettings::siteName() }}</p>
+                        <p class="text-sm text-gray-500 mb-3">Registration: {{ App\Support\GeneralSettings::registrationNo() }}</p>
 
                         <p class="mb-3">
-                            Suite 33-01, 33rd Floor,<br>
-                            Menara Keck Seng,<br>
-                            203 Jalan Bukit Bintang,<br>
-                            55100 Kuala Lumpur, Malaysia
+                            @foreach (App\Support\GeneralSettings::addressLines() as $line)
+                                {{ $line }}@if (! $loop->last)<br>@endif
+                            @endforeach
                         </p>
 
                         <p>
                             Email:
-                            <a href="mailto:event@smartcreative.my" class="text-blue-600 hover:text-blue-800 font-semibold">
-                                event@smartcreative.my
+                            <a href="mailto:{{ App\Support\GeneralSettings::contactEmail() }}" class="text-blue-600 hover:text-blue-800 font-semibold">
+                                {{ App\Support\GeneralSettings::contactEmail() }}
                             </a>
                             <br>
                             Phone:
-                            <a href="tel:+60198666898" class="text-blue-600 hover:text-blue-800 font-semibold">
-                                019-866 6898
+                            <a href="{{ App\Support\GeneralSettings::contactPhoneLink() }}" class="text-blue-600 hover:text-blue-800 font-semibold">
+                                {{ App\Support\GeneralSettings::contactPhone() }}
                             </a>
                         </p>
                     </div>

@@ -7,7 +7,7 @@ use App\Http\Requests\StorePlayerMessageRequest;
 use App\Mail\PlayerEnquiryReceived;
 use App\Models\EventParticipant;
 use App\Models\PlayerMessage;
-use App\Models\Setting;
+use App\Support\GeneralSettings;
 use App\Support\PlayerProfile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -31,13 +31,13 @@ class PlayerMessageController extends Controller
      * Where enquiries go, as set in General Setup.
      *
      * Read rather than hard-coded, because an organiser who changes the address on the
-     * settings screen expects messages to follow it. The fallback matches the default
-     * on that screen so a site that never saved its settings still delivers.
+     * settings screen expects messages to follow it. The fallback now lives in
+     * GeneralSettings with the rest of them, so this cannot drift from the default the
+     * settings screen itself shows.
      */
     private function recipient(): string
     {
-        return Setting::read('general.contact_email', 'event@smartcreative.my')
-            ?: 'event@smartcreative.my';
+        return GeneralSettings::contactEmail();
     }
 
     public function store(StorePlayerMessageRequest $request, EventParticipant $participant)

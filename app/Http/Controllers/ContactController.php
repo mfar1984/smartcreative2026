@@ -6,17 +6,13 @@ use App\Http\Requests\StoreContactMessageRequest;
 use App\Mail\ContactEnquiryReceived;
 use App\Services\Messaging\StaffAlerts;
 use App\Models\ContactMessage;
+use App\Support\GeneralSettings;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
 
 class ContactController extends Controller
 {
-    /**
-     * Where website enquiries are sent.
-     */
-    private const ENQUIRY_RECIPIENT = 'event@smartcreative.my';
-
     public function index()
     {
         return view('pages.contact', [
@@ -45,7 +41,9 @@ class ContactController extends Controller
         ]);
 
         try {
-            Mail::to(self::ENQUIRY_RECIPIENT)->send(new ContactEnquiryReceived($contactMessage));
+            // Where enquiries go is the Contact Email on the General Config screen,
+            // which is what that field's own help text promises.
+            Mail::to(GeneralSettings::contactEmail())->send(new ContactEnquiryReceived($contactMessage));
         } catch (Throwable $exception) {
             Log::error('Contact enquiry notification could not be sent.', [
                 'contact_message_id' => $contactMessage->id,
@@ -65,14 +63,18 @@ class ContactController extends Controller
     /**
      * Phone number in two forms: the display value and the E.164 value used
      * for tel: and wa.me links (Malaysia country code 60, leading 0 dropped).
+     *
+     * Both forms come from the General Config screen now. The conversion between
+     * them lives in GeneralSettings, so editing the number on screen updates the
+     * link as well as the text rather than leaving the two disagreeing.
      */
     private function getContactMethods(): array
     {
         return [
             [
                 'label' => 'Call Us',
-                'value' => '019-866 6898',
-                'url' => 'tel:+60198666898',
+                'value' => GeneralSettings::contactPhone(),
+                'url' => GeneralSettings::contactPhoneLink(),
                 'external' => false,
                 'note' => 'Available during business hours',
                 'accent' => 'blue',
@@ -80,8 +82,8 @@ class ContactController extends Controller
             ],
             [
                 'label' => 'Email Us',
-                'value' => 'event@smartcreative.my',
-                'url' => 'mailto:event@smartcreative.my',
+                'value' => GeneralSettings::contactEmail(),
+                'url' => 'mailto:' . GeneralSettings::contactEmail(),
                 'external' => false,
                 'note' => 'We reply within one business day',
                 'accent' => 'purple',
@@ -89,8 +91,8 @@ class ContactController extends Controller
             ],
             [
                 'label' => 'WhatsApp',
-                'value' => '019-866 6898',
-                'url' => 'https://wa.me/60198666898',
+                'value' => GeneralSettings::whatsapp(),
+                'url' => GeneralSettings::whatsappLink(),
                 'external' => true,
                 'note' => 'Quickest way to reach us',
                 'accent' => 'green',
@@ -103,14 +105,15 @@ class ContactController extends Controller
     {
         return [
             'heading' => 'Main Office',
-            'name' => 'Smart Digital Creative Management & Resources',
-            'registration' => '202303326459 / 003562257-U',
-            'address' => [
-                'Suite: 33-01, 33rd Floor',
-                'Menara Keck Seng',
-                '203 Jalan Bukit Bintang',
-                '55100 Kuala Lumpur, Malaysia',
-            ],
+            'name' => GeneralSettings::siteName(),
+            'registration' => GeneralSettings::registrationNo(),
+            'address' => GeneralSettings::addressLines(),
+
+            /*
+             | Left as a literal on purpose. There is no setting behind it, and
+             | deriving a maps query from the saved address would move where the
+             | button points for the address already saved.
+             */
             'directions_url' => 'https://www.google.com/maps?q=Menara+Keck+Seng+Kuala+Lumpur',
         ];
     }

@@ -116,7 +116,7 @@
 
     <p class="mb-4">
         Email
-        <a href="mailto:event@smartcreative.my" class="text-blue-600 hover:text-blue-800 font-semibold">event@smartcreative.my</a>
+        <a href="mailto:{{ App\Support\GeneralSettings::contactEmail() }}" class="text-blue-600 hover:text-blue-800 font-semibold">{{ App\Support\GeneralSettings::contactEmail() }}</a>
         with:
     </p>
 

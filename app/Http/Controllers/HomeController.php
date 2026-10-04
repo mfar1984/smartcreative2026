@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\Support\GeneralSettings;
 
 class HomeController extends Controller
 {
     public function index()
     {
         $data = [
-            'heroTitle' => 'Smart Digital Creative Management & Resources',
+            'heroTitle' => GeneralSettings::siteName(),
             'heroSubtitle' => 'Your Partner in Digital Excellence',
             'companyInfo' => $this->getCompanyInfo(),
             'contactInfo' => $this->getContactInfo(),
@@ -21,9 +21,11 @@ class HomeController extends Controller
     private function getCompanyInfo(): array
     {
         return [
-            'name' => 'Smart Digital Creative Management & Resources',
-            'registration' => '202303326459 / 003562257-U',
-            'address' => 'Suite: 33-01, 33rd Floor, Menara Keck Seng, 203 Jalan Bukit Bintang, 55100 Kuala Lumpur, Malaysia',
+            'name' => GeneralSettings::siteName(),
+            'registration' => GeneralSettings::registrationNo(),
+            'address' => implode(', ', GeneralSettings::addressLines()),
+
+            // Not a General Config setting, so it stays a literal here.
             'domain' => 'https://smartcreative.my/',
         ];
     }
@@ -31,8 +33,8 @@ class HomeController extends Controller
     private function getContactInfo(): array
     {
         return [
-            'email' => 'event@smartcreative.my',
-            'phone' => '019-866 6898',
+            'email' => GeneralSettings::contactEmail(),
+            'phone' => GeneralSettings::contactPhone(),
         ];
     }
 }

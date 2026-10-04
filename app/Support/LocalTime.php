@@ -39,12 +39,15 @@ class LocalTime
     /**
      * The zone a timestamp is shown in.
      *
-     * Read from config rather than from the settings table: this runs once per
-     * rendered row, and a database read per row would be paid on every list.
+     * The Timezone field on the General Config screen, which is what that field
+     * promises and what it previously did not do. Safe to call per rendered row:
+     * GeneralSettings reads the whole group once per request and memoises the
+     * resolved zone, so this is not a database read per row. Falls through to
+     * config when nothing is saved, which is where it used to read from.
      */
     public static function zone(): string
     {
-        return (string) config('app.display_timezone', 'Asia/Kuala_Lumpur');
+        return GeneralSettings::timezone();
     }
 
     /**
