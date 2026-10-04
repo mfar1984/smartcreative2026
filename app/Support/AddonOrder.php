@@ -130,6 +130,22 @@ class AddonOrder
             $variants = $addon->variants->keyBy('id');
             $taken = 0;
 
+            /*
+             | The add-on's own price, folded into every unit somebody takes.
+             |
+             | Zero in the ordinary case, where that price is charged once for the
+             | registration by the single line added after this loop. When the event
+             | charges per participant it moves onto each person's own line instead, so
+             | three people with a RM40 shirt each owe RM40 and the order carries one
+             | line per person rather than one line between them.
+             |
+             | Only with variants. Without them the quantity path already charges the
+             | add-on price per unit, so there is nothing to move.
+             */
+            $perUnitBase = $addon->hasVariants() && $event->chargesAddonsPerParticipant()
+                ? $addon->unitPrice()
+                : 0.0;
+
             foreach (array_values($participants) as $index => $person) {
                 $path = "participants.{$index}.addons.{$addon->id}";
                 $selection = $person['addons'][$addon->id] ?? null;
@@ -167,7 +183,7 @@ class AddonOrder
                         continue;
                     }
 
-                    $line = self::line($addon, $variant, $variant->unitPrice(), 1);
+                    $line = self::line($addon, $variant, $perUnitBase + $variant->unitPrice(), 1);
                     $line['participant_index'] = $index;
                     $lines[] = $line;
                     $taken++;
@@ -240,7 +256,7 @@ class AddonOrder
                         continue;
                     }
 
-                    $line = self::line($addon, $variant, $variant->unitPrice(), $quantity);
+                    $line = self::line($addon, $variant, $perUnitBase + $variant->unitPrice(), $quantity);
                     $line['participant_index'] = $index;
                     $lines[] = $line;
                     $personTaken += $quantity;
@@ -252,9 +268,16 @@ class AddonOrder
                 }
             }
 
-            // With variants, the add-on's own price remains one charge for the
-            // registration. Quantity/radio only changes the recorded choices.
-            if ($taken > 0 && $addon->hasVariants() && $addon->unitPrice() > 0) {
+            /*
+             | With variants, the add-on's own price remains one charge for the
+             | registration. Quantity/radio only changes the recorded choices.
+             |
+             | Unless the event charges per participant, in which case that price is
+             | already on each person's own line above and adding it here as well would
+             | charge for one shirt nobody takes delivery of.
+             */
+            if ($taken > 0 && $addon->hasVariants() && $addon->unitPrice() > 0
+                && ! $event->chargesAddonsPerParticipant()) {
                 $lines[] = self::line($addon, null, $addon->unitPrice(), 1);
             }
 

@@ -549,6 +549,7 @@
                                     :title="$rowTitle"
                                     :questions="$event->questions->all()"
                                     :per-person-addons="$participantAddons"
+                                    :charges-addons-per-participant="$event->chargesAddonsPerParticipant()"
                                     :ign-fields="$event->ignFormFields()"
                                     :requires-ic="$event->requiresIcAttachment()" />
                             @endforeach
@@ -571,6 +572,7 @@
                                          as one that was on the page from the start. --}}
                                     :questions="$event->questions->all()"
                                     :per-person-addons="$participantAddons"
+                                    :charges-addons-per-participant="$event->chargesAddonsPerParticipant()"
                                     :ign-fields="$event->ignFormFields()"
                                     :requires-ic="$event->requiresIcAttachment()" />
                             </template>

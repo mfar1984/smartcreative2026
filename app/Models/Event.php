@@ -77,6 +77,7 @@ class Event extends Model
         'status',
         'registration_mode',
         'requires_group_name',
+        'charges_addons_per_participant',
         'min_players',
         'max_players',
         'registration_opens_at',
@@ -112,6 +113,7 @@ class Event extends Model
             'requires_phone' => 'boolean',
             'requires_ic_attachment' => 'boolean',
             'requires_group_name' => 'boolean',
+            'charges_addons_per_participant' => 'boolean',
         ];
     }
 
@@ -296,6 +298,26 @@ class Event extends Model
     public function registrationAmount(): float
     {
         return $this->isFree() ? 0.0 : (float) $this->fee;
+    }
+
+    /**
+     * Whether each participant pays for their own add-ons.
+     *
+     * Off by default, because an add-on's own price has always been one charge for the
+     * whole registration: "Event Tee RM50" meant being given shirts at all, and the sizes
+     * only carried money when a size cost more. That reading is right for a group buying
+     * one thing between them and wrong for merchandise, where ten people choosing a RM40
+     * shirt owe RM400.
+     *
+     * Grouping only, which is where every offered item is collected one person at a time.
+     * The fee itself is not affected and never becomes per head: see registrationAmount().
+     *
+     * Read through here rather than off the column, so a value left behind on an event
+     * whose mode later changed cannot quietly start charging.
+     */
+    public function chargesAddonsPerParticipant(): bool
+    {
+        return $this->isGroupingMode() && (bool) $this->charges_addons_per_participant;
     }
 
     /**

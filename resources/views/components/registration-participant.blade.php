@@ -20,6 +20,8 @@
     @param array      $positions  position key => label; empty means no selector
     @param string     $position   the selected position key
     @param bool       $alsoPlays  whether this person holds a playing place too
+    @param bool       $chargesAddonsPerParticipant  whether each person pays for their own
+                      add-ons, which moves the add-on's own price onto every option here
 --}}
 @props([
     'index',
@@ -38,6 +40,7 @@
     'alsoPlays' => false,
     'questions' => [],
     'perPersonAddons' => [],
+    'chargesAddonsPerParticipant' => false,
 ])
 
 @php
@@ -357,13 +360,36 @@
                     $addonId = "pa-{$addon->id}-{$index}";
                     $submitted = $value('addons')[$addon->id] ?? null;
                     $cap = $addon->perOrderCap();
+
+                    /*
+                     | The add-on's own price, and where it is charged.
+                     |
+                     | Ordinarily it is one charge for the whole registration, which is
+                     | what data-addon-once says and what the running total adds a single
+                     | time however many cards repeat this item.
+                     |
+                     | When each person pays for their own, it moves onto every option in
+                     | this card instead, so the figure on screen is built the same way
+                     | the server builds the order line: the add-on plus whatever that
+                     | size adds. The two must agree, because one of them is the money.
+                     |
+                     | Only with variants. Without them the quantity box already carries
+                     | the add-on price, so there is nothing to move.
+                     */
+                    $perUnitBase = $addon->hasVariants() && $chargesAddonsPerParticipant
+                        ? $addon->unitPrice()
+                        : 0.0;
+
+                    $chargedOnce = $addon->hasVariants() && ! $chargesAddonsPerParticipant
+                        ? $addon->unitPrice()
+                        : 0;
                 @endphp
 
                 <fieldset class="rounded-lg border border-gray-200 bg-white p-3"
                           data-person-addon
                           data-addon-id="{{ $addon->id }}"
                           data-addon-name="{{ $addon->name }}"
-                          data-addon-once="{{ number_format($addon->hasVariants() ? $addon->unitPrice() : 0, 2, '.', '') }}"
+                          data-addon-once="{{ number_format($chargedOnce, 2, '.', '') }}"
                           @if ($cap !== null) data-addon-cap="{{ $cap }}" @endif>
                     <legend class="px-1 text-xs font-semibold text-gray-800">
                         {{ $addon->name }}
@@ -413,7 +439,7 @@
                                            @disabled($sold)
                                            @required($addon->is_required)
                                            data-addon-choice
-                                           data-price="{{ number_format($variant->unitPrice(), 2, '.', '') }}"
+                                           data-price="{{ number_format($perUnitBase + $variant->unitPrice(), 2, '.', '') }}"
                                            data-label="{{ $addon->name }} ({{ $variant->label }})"
                                            class="h-4 w-4 shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500">
                                     <span class="min-w-0 flex-1 text-sm">{{ $variant->label }}</span>
@@ -460,7 +486,7 @@
                                                min="0" @if ($limit !== null) max="{{ $limit }}" @endif
                                                @disabled($sold) inputmode="numeric"
                                                data-addon-qty
-                                               data-price="{{ number_format($variant->unitPrice(), 2, '.', '') }}"
+                                               data-price="{{ number_format($perUnitBase + $variant->unitPrice(), 2, '.', '') }}"
                                                data-label="{{ $addon->name }} ({{ $variant->label }})"
                                                class="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 disabled:bg-gray-100 disabled:text-gray-400">
                                     </div>

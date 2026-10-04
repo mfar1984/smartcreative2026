@@ -315,6 +315,43 @@
                     </div>
                 </x-admin.field-row>
 
+                {{--
+                    Who the paid add-ons are charged to.
+
+                    A pricing decision, so it sits with the price rather than with the
+                    registration rules. Off by default: an add-on's own price has been one
+                    charge for the whole registration for as long as add-ons have existed,
+                    and every event already priced on that reading must stay as it is.
+
+                    Grouping only, because that is the mode where every offered item is
+                    collected one person at a time.
+                --}}
+                <div id="addon-charge-basis" @class(['hidden' => ! $isGroupingMode])>
+                    <x-admin.field-row
+                        label="Paid Add-On Charges"
+                        help="Grouping only. Ten participants choosing a RM 40.00 shirt pay RM 400.00, not RM 40.00."
+                        error="charges_addons_per_participant">
+
+                        {{-- An unticked box sends nothing, so a 0 is queued first
+                             and the checkbox overrides it. --}}
+                        <input type="hidden" name="charges_addons_per_participant" value="0">
+
+                        <label for="charges_addons_per_participant" class="inline-flex items-start gap-2 cursor-pointer">
+                            <input type="checkbox" id="charges_addons_per_participant"
+                                   name="charges_addons_per_participant" value="1"
+                                   @checked((bool) old('charges_addons_per_participant', $event->charges_addons_per_participant))
+                                   class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                            <span class="text-sm font-medium text-gray-800">Each participant is charged for their own add-ons</span>
+                        </label>
+
+                        <p class="text-xs text-gray-500 mt-1">
+                            Leave this off and the add-on price is charged once for the whole group,
+                            which is how every existing event is priced. The event price above stays
+                            one flat charge either way.
+                        </p>
+                    </x-admin.field-row>
+                </div>
+
                 <x-admin.field-row label="Total Seats" help="Use 0 for unlimited capacity." for="seats_total" :required="true" error="seats_total">
                     <input type="number" id="seats_total" name="seats_total" required min="0" max="100000"
                            value="{{ old('seats_total', $event->seats_total ?? 0) }}"
@@ -742,6 +779,9 @@
 
                 // Only a grouping registration may be asked to skip the group name.
                 document.getElementById('group-name-rule')?.classList.toggle('hidden', !isGrouping);
+
+                // Per participant add-on charging is a grouping decision too.
+                document.getElementById('addon-charge-basis')?.classList.toggle('hidden', !isGrouping);
 
                 // Keep the price wording honest about what the mode charges.
                 document.querySelector('[data-fee-basis="manager"]')?.classList.toggle('hidden', !isManager);

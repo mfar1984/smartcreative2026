@@ -73,6 +73,7 @@ class EventRequest extends FormRequest
             'status' => ['required', Rule::in(array_keys(Event::STATUSES))],
             'registration_mode' => ['required', Rule::in(array_keys(Event::MODES))],
             'requires_group_name' => ['boolean'],
+            'charges_addons_per_participant' => ['boolean'],
 
             'min_players' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'max_players' => ['nullable', 'integer', 'min:1', 'max:1000', 'gte:min_players'],
@@ -256,6 +257,21 @@ class EventRequest extends FormRequest
         */
         if ($this->has('requires_group_name')) {
             $flags['requires_group_name'] = $this->boolean('requires_group_name');
+        }
+
+        /*
+        | Who the paid add-ons are charged to, guarded the same way and for the
+        | opposite reason: this one is money. An absent key leaves whatever is stored
+        | alone rather than reading as false, so a payload that never drew the box
+        | cannot quietly undo a pricing decision on an event taking entries. The
+        | column default is 0, so a create with no key still means "charged once".
+        |
+        | Not forced off for other modes. Event::chargesAddonsPerParticipant() already
+        | refuses to act outside grouping, and clearing the column on a mode change
+        | would lose the setting for an event switched back again.
+        */
+        if ($this->has('charges_addons_per_participant')) {
+            $flags['charges_addons_per_participant'] = $this->boolean('charges_addons_per_participant');
         }
 
         $this->merge($flags + [
