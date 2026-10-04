@@ -998,6 +998,86 @@
                                     </div>
                                 </div>
 
+                                {{--
+                                    What this event collects one choice of per person: a
+                                    shirt size, or anything else it has been set up to
+                                    ask each head for.
+
+                                    Nothing here is named after shirts, and there is no
+                                    field list in this file. The rows come from the same
+                                    one definition the public confirmation page reads, so
+                                    an event that starts collecting a second choice
+                                    appears in both places at once, and an event that
+                                    collects none draws nothing at all.
+
+                                    Whatever is already on record comes back selected, so
+                                    this both takes a size at the counter and corrects a
+                                    wrong one. Leaving a field alone writes nothing.
+                                --}}
+                                @php $personChoices = $choiceRows[$participant->id] ?? []; @endphp
+
+                                @if (count($personChoices) > 0)
+                                    <div class="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                            Chosen for this person
+                                        </p>
+
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+                                            @foreach ($personChoices as $row)
+                                                @php
+                                                    $choiceAddon = $row['addon'];
+                                                    $choiceField = sprintf('sizes[%d][%d]', $participant->id, $choiceAddon->id);
+                                                    $choiceKey = sprintf('sizes.%d.%d', $participant->id, $choiceAddon->id);
+                                                    $choiceId = sprintf('choice_%d_%d', $participant->id, $choiceAddon->id);
+
+                                                    // Cast to string on both sides: the
+                                                    // recorded value is an id and a
+                                                    // rejected submission comes back as
+                                                    // typed, which is text.
+                                                    $chosen = (string) ($valueOf($choiceKey, $row['chosen']) ?? '');
+                                                @endphp
+
+                                                <div>
+                                                    <label for="{{ $choiceId }}" class="{{ $personLabel }}">
+                                                        {{ $choiceAddon->name }}
+                                                        @if ($row['chosen'] === null)
+                                                            <span class="font-normal text-amber-700">not recorded yet</span>
+                                                        @endif
+                                                    </label>
+
+                                                    <select id="{{ $choiceId }}" name="{{ $choiceField }}" class="{{ $personInput }}">
+                                                        <option value="">Not recorded</option>
+                                                        @foreach ($choiceAddon->variants as $variant)
+                                                            @php
+                                                                // A sold out option stays
+                                                                // readable when it is the
+                                                                // one on record, or the
+                                                                // field could not say what
+                                                                // this person has.
+                                                                $isChosen = $chosen === (string) $variant->id;
+                                                                $sold = $variant->isSoldOut() && ! $isChosen;
+                                                                $left = $variant->stockLeft();
+                                                            @endphp
+
+                                                            <option value="{{ $variant->id }}" @selected($isChosen) @disabled($sold)>{{ $variant->label }}@unless ($variant->isFree()) (+RM {{ number_format($variant->unitPrice(), 2) }})@endunless @if ($sold) — sold out @elseif ($left !== null) — {{ $left }} left @endif</option>
+                                                        @endforeach
+                                                    </select>
+
+                                                    @if ($isPersonReopened)
+                                                        @error($choiceKey) <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror
+                                                    @endif
+                                                </div>
+                                            @endforeach
+                                        </div>
+
+                                        <p class="text-xs text-gray-500 mt-3">
+                                            Recording a choice charges nothing and moves no payment. An option
+                                            that carries its own price is refused here, because changing what
+                                            this entry owes belongs on the payment screens.
+                                        </p>
+                                    </div>
+                                @endif
+
                                 {{-- Said plainly, because somebody looking for it here is
                                      the most likely person to need it and the least
                                      likely to guess where it lives. --}}

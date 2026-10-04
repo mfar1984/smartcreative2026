@@ -147,6 +147,7 @@ class EventRequest extends FormRequest
             'addons.*.max_quantity' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'addons.*.is_required' => ['boolean'],
             'addons.*.per_participant' => ['boolean'],
+            'addons.*.is_handed_over' => ['boolean'],
             'addons.*.selection_type' => ['required', Rule::in(array_keys(EventAddon::SELECTION_TYPES))],
             'addons.*.is_checked_by_default' => ['boolean'],
             'addons.*.uncheck_reminder' => ['nullable', 'string', 'max:500'],
@@ -335,7 +336,7 @@ class EventRequest extends FormRequest
                 ? trim((string) $row['uncheck_reminder'])
                 : null;
 
-            $clean[] = [
+            $cleanRow = [
                 'id' => $id,
                 'name' => $name,
                 'description' => filled($row['description'] ?? null) ? trim((string) $row['description']) : null,
@@ -353,6 +354,22 @@ class EventRequest extends FormRequest
                 'is_active' => (bool) ($row['is_active'] ?? false),
                 'variants' => $variants,
             ];
+
+            /*
+            | Handed over at the event, guarded the way the event level flags are:
+            | an absent key leaves whatever is stored alone rather than reading as
+            | false. The form always submits it, hidden 0 and all, so this cannot
+            | bite today; it is written for the payload that does not draw the box,
+            | which would otherwise quietly drop a shirt off the collection list.
+            |
+            | The column default is 0, so a create with no key still means "nothing
+            | to hand over".
+            */
+            if (array_key_exists('is_handed_over', $row)) {
+                $cleanRow['is_handed_over'] = (bool) $row['is_handed_over'];
+            }
+
+            $clean[] = $cleanRow;
         }
 
         return $clean;

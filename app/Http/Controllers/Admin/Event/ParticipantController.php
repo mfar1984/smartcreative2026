@@ -21,6 +21,7 @@ use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\RegistrationPaymentUpdater;
 use App\Services\Payment\RegistrationTally;
+use App\Services\Registration\ParticipantSizeWriter;
 use App\Services\Registration\RegistrationTotalsRecalculator;
 use App\Services\Registration\TotalCorrection;
 use App\Services\SizeConfirmationSender;
@@ -190,13 +191,31 @@ class ParticipantController extends Controller
      */
     public function show(Request $request, EventRegistration $registration)
     {
-        $registration->load(['event', 'participants.answers', 'addonLines', 'notifications.triggeredBy', 'payments.recordedBy']);
+        // event.addons.variants is loaded for the correction dialog, which offers the
+        // choices this event collects one per person. Which fields those are is a
+        // property of the event rather than of the entry, so the catalogue has to be
+        // here for the dialog to be able to draw itself.
+        $registration->load(['event.addons.variants', 'participants.answers', 'addonLines', 'notifications.triggeredBy', 'payments.recordedBy']);
 
         $reachedGateway = $this->refreshPayment($registration);
 
         return view('admin.event.participant-show', [
             'registration' => $registration,
             'event' => $registration->event,
+
+            /*
+             | Everybody on the entry against every choice this event collects one per
+             | person, with whatever is already recorded against each.
+             |
+             | Read from ParticipantSizes — the same one definition the public
+             | confirmation page, the writer and the list column read — and grouped by
+             | person so each correction dialog can draw its own rows. The dialog
+             | deliberately has no field list of its own: an event that starts
+             | collecting a second choice must appear in both places or neither.
+             */
+            'choiceRows' => collect(ParticipantSizes::sheetFor($registration))
+                ->groupBy(fn (array $row) => $row['participant']->id)
+                ->all(),
 
             // Which templates can be sent again by hand. Only the email ones:
             // there is no SMS transport wired up yet, so offering it would be a
@@ -1541,10 +1560,59 @@ class ParticipantController extends Controller
      * Every field is compared before and after and only the differences are
      * recorded, so an audit row is a list of what actually changed rather than a
      * copy of the whole person.
+     *
+     * It also carries whatever this event collects one choice of per person, such as
+     * a shirt size. That lives on the entry's own item lines rather than on the
+     * person, so it is written by the service the registrant's own confirmation link
+     * writes through — one implementation, one promise that no money moves — and it
+     * is written FIRST: a refusal from it has to leave the whole dialog unsaved
+     * rather than half applied.
      */
-    public function updateParticipant(UpdateParticipantRequest $request, EventRegistration $registration, EventParticipant $participant)
-    {
+    public function updateParticipant(
+        UpdateParticipantRequest $request,
+        EventRegistration $registration,
+        EventParticipant $participant,
+        ParticipantSizeWriter $choices,
+    ) {
         $participant->loadMissing(['registration.event']);
+
+        /*
+         | Narrowed to the person whose dialog this is, in the shape the writer reads:
+         | [participantId][addonId] => optionId. The writer resolves every id against
+         | this entry's own people and its event's own catalogue, so the payload can
+         | only ever say which option is wanted and never its price, but there is no
+         | reason for one person's dialog to be able to answer for the rest of the
+         | squad either.
+         */
+        $given = $request->input('sizes.' . $participant->id);
+
+        $outcome = $choices->apply(
+            $registration,
+            is_array($given) ? [$participant->id => $given] : [],
+            $request->user(),
+        );
+
+        /*
+         | Nothing was written. The dialog is sent back with its messages and the
+         | typed values still in it, the same way a rejected card number arrives, so
+         | the refusal is read beside the field that caused it.
+         */
+        if ($outcome['refused'] !== []) {
+            return redirect()
+                ->to(route('admin.event.participants.show', $registration) . '#person-' . $participant->id)
+                ->withErrors($outcome['refused'])
+                ->withInput();
+        }
+
+        if ($outcome['recorded'] > 0) {
+            AdminLogger::activity('participants.person-option', sprintf(
+                'Recorded %d %s for %s on %s.',
+                $outcome['recorded'],
+                $outcome['recorded'] === 1 ? 'item choice' : 'item choices',
+                $participant->full_name,
+                $registration->reference,
+            ));
+        }
 
         $fields = array_keys($request->validated());
 
@@ -1552,12 +1620,27 @@ class ParticipantController extends Controller
 
         $participant->fill($request->validated());
 
+        /*
+         | What the choice above did, said separately from the field count. A size
+         | taken at the counter is not one of this person's own columns, and reporting
+         | it as "1 field changed" would be the screen misdescribing what it wrote.
+         */
+        $choiceNote = $outcome['recorded'] > 0
+            ? sprintf(
+                ' %d %s recorded, and nothing was charged for it.',
+                $outcome['recorded'],
+                $outcome['recorded'] === 1 ? 'item choice' : 'item choices',
+            )
+            : '';
+
         // Nothing was typed differently, so there is nothing to write and nothing
         // worth putting in the log either.
         if (! $participant->isDirty()) {
             return redirect()
                 ->route('admin.event.participants.show', $registration)
-                ->with('status', sprintf('Nothing was changed for %s.', $participant->full_name));
+                ->with('status', $choiceNote !== ''
+                    ? trim(sprintf('%s updated.%s', $participant->full_name, $choiceNote))
+                    : sprintf('Nothing was changed for %s.', $participant->full_name));
         }
 
         $changed = array_keys($participant->getDirty());
@@ -1583,10 +1666,11 @@ class ParticipantController extends Controller
         return redirect()
             ->route('admin.event.participants.show', $registration)
             ->with('status', sprintf(
-                '%s updated. %d %s changed.',
+                '%s updated. %d %s changed.%s',
                 $participant->full_name,
                 count($changed),
                 count($changed) === 1 ? 'field' : 'fields',
+                $choiceNote,
             ));
     }
 

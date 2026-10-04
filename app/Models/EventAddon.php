@@ -24,6 +24,7 @@ class EventAddon extends Model
         'price',
         'is_required',
         'per_participant',
+        'is_handed_over',
         'selection_type',
         'is_checked_by_default',
         'uncheck_reminder',
@@ -38,6 +39,7 @@ class EventAddon extends Model
             'price' => 'decimal:2',
             'is_required' => 'boolean',
             'per_participant' => 'boolean',
+            'is_handed_over' => 'boolean',
             'is_checked_by_default' => 'boolean',
             'is_active' => 'boolean',
             'max_quantity' => 'integer',
@@ -109,6 +111,29 @@ class EventAddon extends Model
         return $this->isCheckedByDefault() && filled($this->uncheck_reminder)
             ? (string) $this->uncheck_reminder
             : null;
+    }
+
+    /* ---------------------------------------------------------------------
+     | Handing it over
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Whether this is a physical item somebody takes away at the event.
+     *
+     * The one question a collection screen asks. A shirt answers true and belongs
+     * on the list of things to hand over and sign for; a banquet seat, an
+     * insurance line or a parking pass answers false and has nothing to collect.
+     *
+     * Deliberately not tied to is_active. Withdrawing an add-on stops new sales,
+     * it does not unsell the shirts already paid for, and those still have to be
+     * handed to the people who bought them.
+     *
+     * Where and when is not asked here: the add-on belongs to an event, and the
+     * event already carries the date, time, location and address.
+     */
+    public function isHandedOver(): bool
+    {
+        return (bool) $this->is_handed_over;
     }
 
     /* ---------------------------------------------------------------------

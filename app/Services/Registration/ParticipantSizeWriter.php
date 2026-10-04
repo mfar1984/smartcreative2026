@@ -7,7 +7,10 @@ use App\Models\EventAddonVariant;
 use App\Models\EventParticipant;
 use App\Models\EventRegistration;
 use App\Models\EventRegistrationAddon;
+use App\Models\User;
+use App\Services\AdminLogger;
 use App\Support\ParticipantSizes;
+use App\Support\PaymentFigures;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -47,9 +50,37 @@ use Illuminate\Support\Facades\DB;
  * Every id is resolved from the registration and the event's own catalogue inside the
  * transaction. The submitted payload only ever says which variant is wanted, so it
  * cannot name another entry's person, another event's item, or its own price.
+ *
+ * WHO IS RECORDING IT
+ *
+ * Two callers: the registrant, through the signed link in their email, and a member of
+ * staff correcting or taking the answer at the counter on event day. The second passes
+ * the acting user, which does two things and nothing else — it names them in the trail,
+ * and it turns on the refusal below. Everything about what gets written, and the
+ * promise that no money moves, is identical either way.
+ *
+ * WHY STAFF ARE REFUSED AN OPTION THAT IS PRICED DIFFERENTLY
+ *
+ * An option may carry its own price, for the 5XL that genuinely costs more. A
+ * registrant choosing one is making a purchase decision about their own entry. A member
+ * of staff is not: they are correcting a record on somebody else's behalf, and letting
+ * that press change what a registrant owes is the one thing this whole area has spent
+ * its rounds closing. So when the option chosen does not cost the same as the one on
+ * record, nothing is written and the refusal says to take the difference through the
+ * payment route instead.
  */
 class ParticipantSizeWriter
 {
+    /**
+     * How the trail names each of the two hands that can record a choice.
+     *
+     * Two event names rather than one, because "who recorded this" is the question a
+     * dispute over a handed-out shirt actually turns on, and reading it off a null
+     * user id would make an unauthenticated write indistinguishable from a bug.
+     */
+    public const TRAIL_BY_STAFF = 'option.recorded-by-staff';
+    public const TRAIL_BY_REGISTRANT = 'option.recorded-by-registrant';
+
     /**
      * Apply the submitted choices to one registration.
      *
@@ -58,10 +89,13 @@ class ParticipantSizeWriter
      * items actually on its event, and reads the submitted value for each. An id that
      * belongs to neither is therefore not ignored so much as never looked at.
      *
+     * $recordedBy is the member of staff doing it, or null when it is the registrant
+     * through their own signed link.
+     *
      * @param  array<mixed>  $submitted
      * @return array{recorded: int, unchanged: int, refused: array<string, string>}
      */
-    public function apply(EventRegistration $registration, array $submitted): array
+    public function apply(EventRegistration $registration, array $submitted, ?User $recordedBy = null): array
     {
         $registration->loadMissing(['event', 'participants', 'addonLines']);
 
@@ -71,7 +105,7 @@ class ParticipantSizeWriter
             return ['recorded' => 0, 'unchanged' => 0, 'refused' => []];
         }
 
-        $outcome = DB::transaction(function () use ($registration, $addons, $submitted) {
+        $outcome = DB::transaction(function () use ($registration, $addons, $submitted, $recordedBy) {
             $recorded = 0;
             $unchanged = 0;
             $refused = [];
@@ -134,10 +168,36 @@ class ParticipantSizeWriter
                     $line = $this->lineFor($lines, $participant, $addon);
                     $current = $line?->event_addon_variant_id;
 
+                    // Read before anything is written, because the trail below records
+                    // what was replaced and the line itself is about to stop saying.
+                    $replacedLabel = $line?->variant_label;
+
                     // Already on record. Nothing is written and no count moves, which
                     // is what makes a second submission of the same page a no-op.
                     if ($current !== null && (int) $current === $variant->id) {
                         $unchanged++;
+
+                        continue;
+                    }
+
+                    /*
+                     | Staff only, and deliberately a refusal rather than a re-pricing.
+                     | Nothing below writes to event_registrations, so letting this
+                     | through would record a 5XL against an entry still charged for an
+                     | M — a figure nobody could reconcile later. See the note at the
+                     | top of this class.
+                     */
+                    $replacing = $current !== null ? $variants->get((int) $current) : null;
+
+                    if ($recordedBy !== null && ! $this->costsTheSame($variant, $replacing)) {
+                        $refused[$path] = sprintf(
+                            '%s on "%s" is priced at %s and what is on record is priced at %s, so recording it here would change what %s owes. Nothing was saved. Take the difference through the payment screens and then set it.',
+                            $variant->label,
+                            $addon->name,
+                            PaymentFigures::money($variant->unitPrice()),
+                            PaymentFigures::money($replacing?->unitPrice() ?? 0.0),
+                            $registration->reference,
+                        );
 
                         continue;
                     }
@@ -211,6 +271,15 @@ class ParticipantSizeWriter
                             ->decrement('stock_taken');
                     }
 
+                    $this->trail(
+                        $line,
+                        $recordedBy,
+                        $participant,
+                        $addon,
+                        $current !== null ? (int) $current : null,
+                        $replacedLabel,
+                    );
+
                     $recorded++;
                 }
             }
@@ -223,6 +292,60 @@ class ParticipantSizeWriter
         $registration->unsetRelation('addonLines');
 
         return $outcome;
+    }
+
+    /**
+     * Whether swapping one option for the other leaves the amount due untouched.
+     *
+     * An option's price is what that option adds per unit, so a missing one and a
+     * zero mean the same thing, and so does having nothing on record at all: an
+     * entry with no option named is being charged no surcharge. Compared with a
+     * tolerance rather than ==, because these are decimal columns read back as
+     * strings and cast to float.
+     */
+    private function costsTheSame(EventAddonVariant $chosen, ?EventAddonVariant $replacing): bool
+    {
+        return abs($chosen->unitPrice() - ($replacing?->unitPrice() ?? 0.0)) < 0.01;
+    }
+
+    /**
+     * Record who set this, in the audit trail the rest of the admin writes to.
+     *
+     * Written for both hands rather than only for staff. "No row" is not an answer
+     * to "who recorded this": the whole point of the trail is that a disputed shirt
+     * can be traced to a named member of staff or to the registrant's own link, and
+     * one of the two leaving no trace at all would make that unanswerable.
+     *
+     * The actor columns come from the session the same way every other audit row's
+     * do, which is nobody on the public path; the event name is what carries the
+     * distinction, and the acting user is named in the values as well so the row
+     * still says who even when read on its own.
+     */
+    private function trail(
+        EventRegistrationAddon $line,
+        ?User $recordedBy,
+        EventParticipant $participant,
+        EventAddon $addon,
+        ?int $replacedId,
+        ?string $replacedLabel,
+    ): void {
+        AdminLogger::audit(
+            $line,
+            $recordedBy !== null ? self::TRAIL_BY_STAFF : self::TRAIL_BY_REGISTRANT,
+            [
+                'event_addon_variant_id' => $replacedId,
+                'variant_label' => $replacedLabel,
+            ],
+            [
+                'event_addon_variant_id' => $line->event_addon_variant_id,
+                'variant_label' => $line->variant_label,
+                'event_addon_id' => $addon->id,
+                'item' => $addon->name,
+                'event_participant_id' => $participant->id,
+                'participant' => $participant->full_name,
+                'recorded_by' => $recordedBy?->logLabel() ?? 'the registrant, through their own confirmation link',
+            ],
+        );
     }
 
     /**

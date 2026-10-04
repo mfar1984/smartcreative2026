@@ -29,6 +29,7 @@
                 'max_quantity' => $addon->max_quantity,
                 'is_required' => $addon->is_required ? '1' : '0',
                 'per_participant' => $addon->per_participant ? '1' : '0',
+                'is_handed_over' => $addon->isHandedOver() ? '1' : '0',
                 'selection_type' => $addon->selection_type ?? \App\Models\EventAddon::SELECTION_QUANTITY,
                 'is_checked_by_default' => $addon->is_checked_by_default ? '1' : '0',
                 'uncheck_reminder' => $addon->uncheck_reminder,

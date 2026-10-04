@@ -16,6 +16,7 @@
     $isActive = array_key_exists('is_active', $row) ? (bool) $row['is_active'] : true;
     $isRequired = (bool) ($row['is_required'] ?? false);
     $isPerParticipant = (bool) ($row['per_participant'] ?? false);
+    $isHandedOver = (bool) ($row['is_handed_over'] ?? false);
     $selectionType = (string) ($row['selection_type'] ?? \App\Models\EventAddon::SELECTION_QUANTITY);
     $isTicked = (bool) ($row['is_checked_by_default'] ?? false);
     $reminder = (string) ($row['uncheck_reminder'] ?? '');
@@ -160,6 +161,23 @@
                            class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                     <span class="text-xs font-semibold text-gray-700">Ask each person separately</span>
                 </label>
+
+                {{-- Whether anything physically leaves a table on the day. A shirt
+                     does; a banquet seat or an insurance line does not, and an
+                     event can sell both. No place or date is asked for: the
+                     add-on already belongs to this event, which carries them. --}}
+                <div>
+                    <input type="hidden" name="{{ $name }}[is_handed_over]" value="0">
+                    <label class="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" name="{{ $name }}[is_handed_over]" value="1"
+                               @checked($isHandedOver)
+                               class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                        <span class="text-xs font-semibold text-gray-700">Handed over at the event</span>
+                    </label>
+                    <p class="text-[11px] text-gray-500 mt-1">
+                        Appears on the collection list and tracks who has taken theirs. The place and date come from the event itself.
+                    </p>
+                </div>
             </div>
         </div>
 

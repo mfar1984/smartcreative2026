@@ -65,6 +65,17 @@ class EventAddonWriter
             'sort_order' => $position,
         ];
 
+        /*
+         | Only written when the form said something about it. EventRequest drops
+         | the key from a payload that never drew the box, and an add-on already
+         | marked as handed over must not fall off the collection list because a
+         | partial save said nothing either way. A create with no key takes the
+         | column default, which is false.
+         */
+        if (array_key_exists('is_handed_over', $row)) {
+            $attributes['is_handed_over'] = (bool) $row['is_handed_over'];
+        }
+
         if (! empty($row['id'])) {
             // Scoped through the relation so an id belonging to another event
             // cannot be written even if validation were bypassed.
