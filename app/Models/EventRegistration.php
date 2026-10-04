@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use App\Support\EventTemplates;
 use App\Support\ParticipantOptions;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
@@ -171,6 +173,21 @@ class EventRegistration extends Model
     public function notifications(): HasMany
     {
         return $this->hasMany(EventNotification::class, 'event_registration_id')->latest('id');
+    }
+
+    /**
+     * Every payment link ever raised for this entry, newest first.
+     *
+     * The message log is the only record of a chase-up, and deliberately the only
+     * one: a `payment_link_sent_at` column beside it would be a second source of
+     * truth, and this project already has the lesson that two of those drift — the
+     * badge said Partly Paid while the ledger said settled in full about the same
+     * entry. Everything the list shows about who has been contacted, and the
+     * cooldown that stops a second press, is read from here.
+     */
+    public function paymentReminders(): HasMany
+    {
+        return $this->notifications()->where('template_key', EventTemplates::PAYMENT_REMINDER);
     }
 
     /* ---------------------------------------------------------------------
@@ -453,6 +470,80 @@ class EventRegistration extends Model
             && $this->status !== self::STATUS_CANCELLED
             && $this->payment_status !== self::PAYMENT_REFUNDED
             && $this->outstandingAmount() > 0.005;
+    }
+
+    /* ---------------------------------------------------------------------
+     | Chasing the balance
+     |
+     | All of it read from the message log rather than from a column on this row.
+     | See paymentReminders() for why.
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Hours a registrant is left alone after a payment link goes out.
+     *
+     * Six, the same window the shop uses on an order, because it is the same act
+     * and an operator working both screens should not have to remember two numbers.
+     * Long enough that somebody reading their email over lunch is not chased twice,
+     * short enough that a wrong address can be corrected and retried the same day.
+     */
+    public const PAYMENT_LINK_COOLDOWN_HOURS = 6;
+
+    /**
+     * The most recent payment link raised for this entry, whatever became of it.
+     *
+     * The email copy by preference: it is the one that carries the link, because a
+     * signed URL is too long for a text message. Falls back to whatever else is
+     * there so an entry chased only by SMS does not read as never contacted.
+     *
+     * Reads the loaded relation when the list has eager loaded it, so twenty rows
+     * cost one query rather than twenty.
+     */
+    public function lastPaymentReminder(): ?EventNotification
+    {
+        $reminders = $this->relationLoaded('paymentReminders')
+            ? $this->paymentReminders
+            : $this->paymentReminders()->get();
+
+        return $reminders->firstWhere('channel', EventTemplates::CHANNEL_EMAIL)
+            ?? $reminders->first();
+    }
+
+    /**
+     * When the last payment link the queue accepted was raised.
+     *
+     * Null when none ever was, which includes an entry whose only attempts failed
+     * or were skipped for want of an address. Those have told nobody anything, so
+     * they must not hold the next press back.
+     */
+    public function paymentLinkSentAt(): ?Carbon
+    {
+        $reminder = $this->lastPaymentReminder();
+
+        return $reminder !== null && $reminder->reachedTheQueue()
+            ? $reminder->raisedAt()
+            : null;
+    }
+
+    /** Whether a payment link went out recently enough that another would be spam. */
+    public function paymentLinkRemindedRecently(): bool
+    {
+        $sentAt = $this->paymentLinkSentAt();
+
+        return $sentAt !== null && $sentAt->greaterThan(self::paymentLinkCooldownCutoff());
+    }
+
+    /** When the next one may go, or null when one may go now. */
+    public function paymentLinkCooldownEndsAt(): ?Carbon
+    {
+        return $this->paymentLinkRemindedRecently()
+            ? $this->paymentLinkSentAt()->copy()->addHours(self::PAYMENT_LINK_COOLDOWN_HOURS)
+            : null;
+    }
+
+    public static function paymentLinkCooldownCutoff(): Carbon
+    {
+        return now()->subHours(self::PAYMENT_LINK_COOLDOWN_HOURS);
     }
 
     public function statusLabel(): string

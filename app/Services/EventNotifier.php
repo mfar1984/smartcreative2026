@@ -83,8 +83,8 @@ class EventNotifier
     {
         $registration->loadMissing(['event', 'participants']);
 
-        return $this->queueForManager($registration, 'payment.reminder', $userId)
-            + $this->textForManager($registration, 'payment.reminder', $userId);
+        return $this->queueForManager($registration, EventTemplates::PAYMENT_REMINDER, $userId)
+            + $this->textForManager($registration, EventTemplates::PAYMENT_REMINDER, $userId);
     }
 
     /**

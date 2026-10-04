@@ -26,6 +26,17 @@ class EventTemplates
     ];
 
     /**
+     * The one template that carries a payment link for what is still owed.
+     *
+     * Named here because three places have to agree on it: the notifier that sends
+     * it, the registration that reads its own message log to answer "has anybody
+     * chased this entry", and the list that draws that answer. A literal in each of
+     * them is three chances for the screen to report on a different message from
+     * the one that went out.
+     */
+    public const PAYMENT_REMINDER = 'payment.reminder';
+
+    /**
      * Channels that speak to participants, and so share one set of moments.
      *
      * Telegram is not among them. It posts into one staff group, which makes its

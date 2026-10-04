@@ -24,6 +24,7 @@ use App\Services\Registration\RegistrationTotalsRecalculator;
 use App\Services\Registration\TotalCorrection;
 use App\Support\EventTemplates;
 use App\Support\GatewayPaymentRecord;
+use App\Support\LocalTime;
 use App\Support\ParticipantOptions;
 use App\Support\PaymentFigures;
 use App\Support\PaymentSettings;
@@ -79,7 +80,12 @@ class ParticipantController extends Controller
         $registrations = $this->scoped($tab)
             // checkouts is loaded for the tally dialog, which lists the purchases on
             // record. Without it the list would query once per row.
-            ->with(['event', 'participants', 'addonLines', 'checkouts'])
+            //
+            // paymentReminders is loaded for the Reminder column, which answers "has
+            // anybody actually told this registrant". Same reasoning: one query for
+            // the page instead of one per row, and it is read from the message log
+            // rather than from a column on the registration.
+            ->with(['event', 'participants', 'addonLines', 'checkouts', 'paymentReminders'])
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
                 $inner->where('reference', 'like', "%{$search}%")
                     ->orWhere('team_name', 'like', "%{$search}%")
@@ -420,6 +426,32 @@ class ParticipantController extends Controller
             ));
         }
 
+        /*
+         | A second press inside the window sends nothing.
+         |
+         | The same guard the shop keeps on an order, and for the same reason: this is
+         | a button on a table row, a double click is one slip of the hand, and the
+         | person on the other end gets both of them. Read from the message log, so
+         | the cooldown and the state drawn on the list are the same fact.
+         |
+         | Only a link the queue accepted holds anybody back. An attempt that failed,
+         | or was skipped for want of an address, told nobody anything and must stay
+         | pressable the moment the address is corrected.
+         |
+         | Loaded once, because the three questions below are asked of the same rows.
+         */
+        $registration->loadMissing('paymentReminders');
+
+        if ($registration->paymentLinkRemindedRecently()) {
+            return back()->with('warning', sprintf(
+                'A payment link already went out for %s %s, to %s. Another can be sent after %s, so nothing was sent now.',
+                $registration->reference,
+                $registration->paymentLinkSentAt()->diffForHumans(),
+                $registration->lastPaymentReminder()?->recipient ?: 'the registrant',
+                LocalTime::format($registration->paymentLinkCooldownEndsAt()),
+            ));
+        }
+
         $queued = $notifier->paymentReminder($registration, $request->user()?->id);
 
         if ($queued === 0) {
@@ -434,10 +466,18 @@ class ParticipantController extends Controller
             sprintf('Sent a payment reminder for %s.', $registration->reference),
         );
 
+        /*
+         | The address is named in the message rather than left to be guessed. "Queued"
+         | is the honest word for it: the cron worker is what sends it, and the Reminder
+         | column on the list is where that turns into Sent.
+         */
+        $address = $registration->load('paymentReminders')->lastPaymentReminder()?->recipient;
+
         return back()->with('status', sprintf(
-            'Payment reminder queued for %s (%s outstanding).',
+            'Payment link queued for %s (%s outstanding)%s. The Reminder column says when it actually leaves.',
             $this->registrant($registration)?->full_name ?? $registration->reference,
             $registration->outstandingAmountLabel(),
+            filled($address) ? ', to ' . $address : '',
         ));
     }
 

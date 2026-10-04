@@ -271,8 +271,17 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware(['permission:payments.tally', 'throttle:20,1'])
                 ->name('participants.tally');
 
+            /*
+             | Chasing an unpaid entry: the payment link for whatever is still owed.
+             | The same capability as resending, so the same permission.
+             |
+             | Throttled the way the shop's payment link is. The controller already
+             | leaves one registrant alone for six hours after a link goes out, which
+             | is the per-person guard; this is the per-operator one, so a stuck finger
+             | on a confirm dialog cannot walk down the list emailing everybody twice.
+             */
             Route::post('participants/{registration}/remind', [ParticipantController::class, 'remind'])
-                ->middleware('permission:participants.notify')
+                ->middleware(['permission:participants.notify', 'throttle:20,1'])
                 ->name('participants.remind');
 
             /*

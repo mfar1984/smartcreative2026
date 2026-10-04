@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\EventTemplates;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 
 class EventNotification extends Model
 {
@@ -100,5 +101,35 @@ class EventNotification extends Model
     public function wasSent(): bool
     {
         return $this->status === self::STATUS_SENT;
+    }
+
+    public function hasFailed(): bool
+    {
+        return $this->status === self::STATUS_FAILED;
+    }
+
+    /**
+     * Whether the queue took this message.
+     *
+     * The distinction the cooldown rests on. 'queued' and 'sent' both mean a copy is
+     * on its way or gone, so pressing again would repeat it. A 'failed' or 'skipped'
+     * row means nobody was told, and that has to stay pressable: the whole reason the
+     * state is on the list is so somebody can act on it.
+     */
+    public function reachedTheQueue(): bool
+    {
+        return in_array($this->status, [self::STATUS_QUEUED, self::STATUS_SENT], true);
+    }
+
+    /**
+     * When this message left, or when it was handed over if it has not left yet.
+     *
+     * `sent_at` is written by the worker, `queued_at` when the row is recorded, and
+     * `created_at` always. Read in that order so a row still waiting on the cron
+     * worker can still say when it was asked for.
+     */
+    public function raisedAt(): ?Carbon
+    {
+        return $this->sent_at ?? $this->queued_at ?? $this->created_at;
     }
 }

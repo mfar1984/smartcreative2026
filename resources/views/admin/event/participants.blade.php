@@ -190,6 +190,13 @@
                                  that is RM 240.00 short is the whole of the conversation
                                  with the registrant. --}}
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Shortfall</th>
+                            {{-- Whether anybody has actually been told. Beside Shortfall
+                                 because the two are read together: how much is missing,
+                                 and whether the registrant knows. Without it a row that
+                                 was never contacted looks exactly like one that was
+                                 emailed twice, and the only way to tell them apart was
+                                 opening every entry in turn. --}}
+                            <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Reminder</th>
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Submitted</th>
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Actions</th>
                         </tr>
@@ -272,6 +279,63 @@
                                     @endif
                                 </td>
 
+                                {{-- Has anybody actually been told, and did the message
+                                     get out.
+
+                                     Read from the message log on the entry, the same rows
+                                     the detail page lists, rather than from a stamp on the
+                                     registration: one fact, one place. "Queued" is not a
+                                     polite way of saying sent — it means the row is written
+                                     and the cron worker has not run yet — and a failure is
+                                     drawn loudly because that registrant looks contacted
+                                     and has heard nothing. --}}
+                                <td class="px-5 py-3 whitespace-nowrap">
+                                    @php
+                                        $reminder = $registration->lastPaymentReminder();
+                                        $reminderAt = \App\Support\LocalTime::format($reminder?->raisedAt());
+                                        $reminderTo = filled($reminder?->recipient) ? $reminder->recipient : 'nobody';
+                                    @endphp
+
+                                    @if ($reminder === null && ! $registration->owesBalance())
+                                        {{-- Nothing to chase, so nothing to say. A column
+                                             shouting at settled entries is one nobody reads. --}}
+                                        <span class="text-xs text-gray-300" aria-hidden="true">&mdash;</span>
+                                    @elseif ($reminder === null)
+                                        <x-admin.badge tone="amber" dot
+                                                       title="No payment link has ever gone out for {{ $registration->reference }}. Nobody has been told about the {{ $registration->outstandingAmountLabel() }} outstanding.">
+                                            Never sent
+                                        </x-admin.badge>
+                                    @elseif ($reminder->hasFailed())
+                                        <x-admin.badge tone="red" dot
+                                                       title="The payment link to {{ $reminderTo }} failed on {{ $reminderAt }}. {{ $reminder->reason }}">
+                                            Send failed
+                                        </x-admin.badge>
+                                        <span class="block text-xs text-red-600 mt-0.5">
+                                            Not contacted &middot; {{ $reminderAt }}
+                                        </span>
+                                    @elseif ($reminder->status === \App\Models\EventNotification::STATUS_SKIPPED)
+                                        <x-admin.badge tone="red" dot
+                                                       title="No payment link went out for {{ $registration->reference }} on {{ $reminderAt }}. {{ $reminder->reason }}">
+                                            Not sent
+                                        </x-admin.badge>
+                                        <span class="block text-xs text-red-600 mt-0.5">
+                                            Not contacted &middot; {{ $reminderAt }}
+                                        </span>
+                                    @elseif ($reminder->wasSent())
+                                        <x-admin.badge tone="green"
+                                                       title="Payment link sent to {{ $reminderTo }} on {{ $reminderAt }}.">
+                                            Sent
+                                        </x-admin.badge>
+                                        <span class="block text-xs text-gray-500 mt-0.5">{{ $reminderAt }}</span>
+                                    @else
+                                        <x-admin.badge tone="gray" dot
+                                                       title="Payment link queued to {{ $reminderTo }} on {{ $reminderAt }}. It leaves when the mail worker next runs, so it has not reached anybody yet.">
+                                            Queued
+                                        </x-admin.badge>
+                                        <span class="block text-xs text-gray-500 mt-0.5">{{ $reminderAt }}</span>
+                                    @endif
+                                </td>
+
                                 <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
                                     {{ \App\Support\LocalTime::format($registration->created_at) }}
                                 </td>
@@ -324,15 +388,21 @@
                                         @endif
 
                                         {{-- Only offered while there is something to chase. A reminder
-                                             for a settled or free entry would be nonsense. --}}
+                                             for a settled or free entry would be nonsense.
+
+                                             owesBalance() is the whole test, which is why every state
+                                             the owner named is covered by it: Unpaid, Awaiting Payment,
+                                             Failed and Partly Paid all owe money, and only a cancelled
+                                             entry, a refunded one, a free one or one settled to the cent
+                                             is left out. The route asks the same question again. --}}
                                         @if ($canNotify && $registration->owesBalance())
                                             <form action="{{ route('admin.event.participants.remind', $registration) }}" method="POST"
-                                                  onsubmit="return confirm('Email a payment reminder for {{ addslashes($registration->displayName()) }} ({{ $registration->outstandingAmountLabel() }} outstanding)?');">
+                                                  onsubmit="return confirm('Email a payment link for {{ addslashes($registration->displayName()) }} ({{ $registration->outstandingAmountLabel() }} outstanding)?\n\nThe link asks for the outstanding balance only. Nothing is marked paid until the money arrives.');">
                                                 @csrf
                                                 <button type="submit"
                                                         class="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition"
-                                                        title="Send a payment reminder for {{ $registration->reference }}"
-                                                        aria-label="Send a payment reminder for {{ $registration->reference }}">
+                                                        title="Send a payment link for {{ $registration->reference }} ({{ $registration->outstandingAmountLabel() }} outstanding)"
+                                                        aria-label="Send a payment link for {{ $registration->reference }}">
                                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
                                                     </svg>
@@ -385,7 +455,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="11" class="px-5 py-12 text-center text-sm text-gray-500">
+                                <td colspan="12" class="px-5 py-12 text-center text-sm text-gray-500">
                                     @if ($isFiltered)
                                         No participants match the current filters.
                                     @else
