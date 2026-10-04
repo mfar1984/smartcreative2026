@@ -77,7 +77,7 @@ class ParticipantController extends Controller
         $search = trim((string) $request->query('q'));
         $eventId = trim((string) $request->query('event'));
 
-        $registrations = $this->scoped($tab)
+        $registrations = $this->filtered($request, $tab)
             // checkouts is loaded for the tally dialog, which lists the purchases on
             // record. Without it the list would query once per row.
             //
@@ -86,23 +86,11 @@ class ParticipantController extends Controller
             // the page instead of one per row, and it is read from the message log
             // rather than from a column on the registration.
             ->with(['event', 'participants', 'addonLines', 'checkouts', 'paymentReminders'])
-            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
-                $inner->where('reference', 'like', "%{$search}%")
-                    ->orWhere('team_name', 'like', "%{$search}%")
-                    ->orWhere('payment_reference', 'like', "%{$search}%")
-                    // Searching a person's name has to reach through to the
-                    // people on the registration, not just its own columns.
-                    ->orWhereHas('participants', fn (Builder $people) => $people
-                        ->where('full_name', 'like', "%{$search}%")
-                        ->orWhere('ic_number', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%"));
-            }))
-            ->when($eventId !== '', fn (Builder $query) => $query->where('event_id', $eventId))
             ->latest()
             ->paginate(self::PER_PAGE)
             ->withQueryString();
 
-        $counts = $this->counts();
+        $counts = $this->counts($request);
 
         return view('admin.event.participants', [
             'tabs' => collect(self::TABS)
@@ -154,18 +142,24 @@ class ParticipantController extends Controller
             'eventId' => $eventId,
             'isFiltered' => $search !== '' || $eventId !== '',
             /*
-             | Read through PaymentFigures rather than summed here.
+             | Read through PaymentFigures, over the list's own filtered query.
              |
-             | These two were counted inline, which meant they answered slightly
-             | different questions from the same figures on the Payments screens:
-             | free entries were included, refunds were not subtracted, and now that
-             | part-paid entries exist the difference would have grown into showing
-             | money as both collected and outstanding at once.
+             | These two were counted inline once, which meant they answered slightly
+             | different questions from the same figures on the Payments screens. They
+             | then answered the right question over the wrong rows: every event's,
+             | while the screen was filtered to one. The owner chose HARI SUKAN NEGARA
+             | and was shown RM 2,840.00 collected for an event that had taken
+             | RM 1,640.00; the other RM 1,200.00 was a different event's money.
+             |
+             | So the scope comes from filtered() — the same method the rows above are
+             | built from — and the arithmetic stays in PaymentFigures. One query,
+             | whatever the scope holds.
+             |
+             | Deliberately not narrowed to the active tab. The pair reports the money
+             | the filters describe, and switching between Paid and Unpaid must not
+             | look like the takings changed. The caption under them names the scope.
              */
-            'totals' => [
-                'collected' => PaymentFigures::collected(),
-                'outstanding' => PaymentFigures::outstanding(),
-            ],
+            'totals' => PaymentFigures::totalsFor($this->filtered($request, null)),
         ]);
     }
 
@@ -1758,16 +1752,53 @@ class ParticipantController extends Controller
     }
 
     /**
+     * The list's query: one tab, narrowed by whatever filters are in force.
+     *
+     * THE one place the filters on this screen are expressed. The rows, the five tab
+     * counts and the two money badges are all built from this, because they were not:
+     * the rows honoured the event filter and the counts and badges swept every event,
+     * so a screen filtered to one event reported another event's takings beside it.
+     * Two queries describing the same intent is how they drifted, and this project
+     * already has that lesson from a badge and a ledger disagreeing on screen.
+     *
+     * A null tab means every tab, which is what the money figures are built over.
+     */
+    private function filtered(Request $request, ?string $tab): Builder
+    {
+        $search = trim((string) $request->query('q'));
+        $eventId = trim((string) $request->query('event'));
+
+        return ($tab === null ? EventRegistration::query() : $this->scoped($tab))
+            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
+                $inner->where('reference', 'like', "%{$search}%")
+                    ->orWhere('team_name', 'like', "%{$search}%")
+                    ->orWhere('payment_reference', 'like', "%{$search}%")
+                    // Searching a person's name has to reach through to the
+                    // people on the registration, not just its own columns.
+                    ->orWhereHas('participants', fn (Builder $people) => $people
+                        ->where('full_name', 'like', "%{$search}%")
+                        ->orWhere('ic_number', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%"));
+            }))
+            ->when($eventId !== '', fn (Builder $query) => $query->where('event_id', $eventId));
+    }
+
+    /**
      * Row count per tab, shown as a badge on the tab bar.
+     *
+     * Under the filters in force, so the badge promises what the tab will actually
+     * show: Paid read 74 while the screen was filtered to an event holding 30 of
+     * them, and Team read 44 on an event with none. Five aggregate counts, not five
+     * lists — nothing is hydrated to be counted.
      *
      * @return array<string, int>
      */
-    private function counts(): array
+    private function counts(Request $request): array
     {
         $counts = [];
 
         foreach (array_keys(self::TABS) as $tab) {
-            $counts[$tab] = $this->scoped($tab)->count();
+            $counts[$tab] = $this->filtered($request, $tab)->count();
         }
 
         return $counts;

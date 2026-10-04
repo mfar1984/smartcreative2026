@@ -44,6 +44,31 @@
          */
         $reopenPaymentFor = old('record_payment_for');
 
+        /*
+         | Carried onto every tab link, because each tab's badge now counts the rows
+         | that tab holds under these filters. A link that dropped the event would
+         | land on a tab listing every event while its badge had promised one, which
+         | is the disagreement this screen started with.
+         */
+        $tabFilters = array_filter([
+            'q' => $search,
+            'event' => $eventId,
+        ], fn ($value) => $value !== '');
+
+        /*
+         | What the two money figures cover, spelled out under them. The owner read
+         | RM 2,840.00 as this event's takings when it was every event's, and naming
+         | the scope is what stops that reading. Trimmed because an event title runs
+         | wider than the badges; the filter above holds the full one.
+         */
+        $totalsScope = $eventId !== ''
+            ? str($events[$eventId] ?? 'Chosen event')->limit(40)->toString()
+            : 'All events';
+
+        if ($search !== '') {
+            $totalsScope .= ' · matching "' . $search . '"';
+        }
+
         $intro = match ($activeTab) {
             'group' => ['title' => 'Grouping Entries', 'description' => 'One registration containing several ordinary participants, each with their own details and item choices.', 'icon' => 'users', 'accent' => 'blue'],
             'team' => ['title' => 'Team Entries', 'description' => 'Registrations where a manager entered a squad. One entry, one payment, however many players.', 'icon' => 'identification', 'accent' => 'purple'],
@@ -58,6 +83,7 @@
         description="Everyone who has registered, with what they owe and what the gateway says about it."
         :tabs="$tabs"
         :active-tab="$activeTab"
+        :route-params="$tabFilters"
         route="admin.event.participants">
 
         {{-- This screen had no banner at all, so deleting or moving an entry said
@@ -75,21 +101,29 @@
                 :accent="$intro['accent']"
                 class="mb-0" />
 
-            {{-- Money across every registration, not just this tab, so the pair
-                 does not appear to contradict itself as tabs are switched. --}}
-            <div class="flex gap-3 shrink-0">
-                <div class="rounded-lg border border-green-200 bg-green-50 px-4 py-2.5">
-                    <span class="block text-xs font-semibold uppercase tracking-wide text-green-700">Collected</span>
-                    <span class="block text-base font-bold text-green-900 tabular-nums">
-                        RM {{ number_format((float) $totals['collected'], 2) }}
-                    </span>
+            {{-- Money for the rows the filters describe, across every tab.
+
+                 Across every tab on purpose, so the pair does not appear to
+                 contradict itself as tabs are switched. Following the event filter
+                 also on purpose: it used to sweep every event, so an event that had
+                 taken RM 1,640.00 was shown as RM 2,840.00 with another event's
+                 money folded in. The caption says which rows are counted. --}}
+            <div class="shrink-0">
+                <div class="flex gap-3">
+                    <div class="rounded-lg border border-green-200 bg-green-50 px-4 py-2.5">
+                        <span class="block text-xs font-semibold uppercase tracking-wide text-green-700">Collected</span>
+                        <span class="block text-base font-bold text-green-900 tabular-nums">
+                            RM {{ number_format((float) $totals['collected'], 2) }}
+                        </span>
+                    </div>
+                    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5">
+                        <span class="block text-xs font-semibold uppercase tracking-wide text-amber-700">Outstanding</span>
+                        <span class="block text-base font-bold text-amber-900 tabular-nums">
+                            RM {{ number_format((float) $totals['outstanding'], 2) }}
+                        </span>
+                    </div>
                 </div>
-                <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5">
-                    <span class="block text-xs font-semibold uppercase tracking-wide text-amber-700">Outstanding</span>
-                    <span class="block text-base font-bold text-amber-900 tabular-nums">
-                        RM {{ number_format((float) $totals['outstanding'], 2) }}
-                    </span>
-                </div>
+                <p class="text-xs text-gray-500 mt-1 text-right">{{ $totalsScope }}</p>
             </div>
         </div>
 

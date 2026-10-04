@@ -5,7 +5,6 @@ namespace App\Support;
 use App\Models\EventRegistration;
 use App\Models\EventRegistrationPayment;
 use Illuminate\Contracts\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\DB;
 
 /**
  * One place that decides what the money figures mean.
@@ -62,7 +61,38 @@ class PaymentFigures
      */
     public static function collected(?string $from = null, ?string $to = null): float
     {
+        return self::totalsFor(self::window(self::base(), $from, $to))['collected'];
+    }
+
+    /**
+     * The same two figures, over a scope somebody else has narrowed.
+     *
+     * Exists for the participants list, whose badges have to report the money for the
+     * rows on screen. The only way a badge and a list can agree is for both to be
+     * built from one query, so that screen hands its own filtered query in here
+     * rather than describing its filters a second time. It described them twice
+     * before, and reported every event's takings beside one event's rows.
+     *
+     * The two rules at the top of this class live here now, and collected() and
+     * outstanding() are thin calls on it, so there is one implementation of each and
+     * nothing left to drift.
+     *
+     * Free entries are left out here rather than by the caller, so a screen can hand
+     * in the query it already has and still get the figures this class means.
+     *
+     * One aggregate query however many rows the scope holds, and nothing hydrated.
+     *
+     * @return array{collected: float, outstanding: float}
+     */
+    public static function totalsFor(Builder $scope): array
+    {
         /*
+         | reorder() because this is an aggregate: the list query handed in here is
+         | sorted newest first, and MySQL refuses to sort an aggregate by a column it
+         | is not grouping on.
+         |
+         | Columns are named with their table because a caller may have joined one.
+         |
          | amount_paid, not amount, and no filter on the status.
          |
          | The charge and the receipt are different figures, and until part payments
@@ -71,10 +101,31 @@ class PaymentFigures
          | that query would report nothing at all for an entry that has genuinely
          | transferred RM 200 of RM 250. Summing what arrived needs no status filter,
          | because an entry that has paid nothing contributes nothing.
+         |
+         | Outstanding is the balance rather than the charge, for the same reason, and
+         | skips cancelled entries because nobody is going to pay them.
          */
-        $received = (float) self::window(self::base(), $from, $to)->sum('amount_paid');
+        $row = (clone $scope)
+            ->reorder()
+            ->where('event_registrations.amount', '>', 0)
+            ->selectRaw(
+                'COALESCE(SUM(event_registrations.amount_paid), 0) as received,'
+                . ' COALESCE(SUM(event_registrations.refunded_amount), 0) as refunded,'
+                . ' COALESCE(SUM(CASE WHEN event_registrations.payment_status IN (?, ?, ?, ?)'
+                . ' AND event_registrations.status != ?'
+                . ' THEN event_registrations.amount - event_registrations.amount_paid ELSE 0 END), 0) as owing',
+                [
+                    ...self::OWING,
+                    EventRegistration::STATUS_CANCELLED,
+                ],
+            )
+            ->first();
 
-        return round($received - self::refunded($from, $to), 2);
+        return [
+            // Refunds subtracted rather than the row dropped, as above.
+            'collected' => round((float) $row->received - (float) $row->refunded, 2),
+            'outstanding' => round((float) $row->owing, 2),
+        ];
     }
 
     /** What arrived before any refund, for reconciling against the gateway. */
@@ -92,10 +143,7 @@ class PaymentFigures
      */
     public static function outstanding(?string $from = null, ?string $to = null): float
     {
-        return round((float) self::window(self::base(), $from, $to)
-            ->whereIn('payment_status', self::OWING)
-            ->where('status', '!=', EventRegistration::STATUS_CANCELLED)
-            ->sum(DB::raw('amount - amount_paid')), 2);
+        return self::totalsFor(self::window(self::base(), $from, $to))['outstanding'];
     }
 
     /**
