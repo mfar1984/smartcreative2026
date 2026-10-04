@@ -68,6 +68,22 @@ class EventParticipant extends Model
     }
 
     /**
+     * The add-on lines bought in this person's name.
+     *
+     * Only lines that name them. A bulk line belongs to the whole entry and is not
+     * anybody's shirt, which is why the collection screen reads this rather than the
+     * registration's own lines: one person, one item, one row.
+     *
+     * Declared here so the collection screen can filter on it in SQL — "who still has
+     * no size", "who has already taken theirs" — instead of hydrating every entry to
+     * find out.
+     */
+    public function addonLines(): HasMany
+    {
+        return $this->hasMany(EventRegistrationAddon::class, 'event_participant_id');
+    }
+
+    /**
      * What this person answered to the event's own questions.
      *
      * Ordered by id, which is the order they were asked in, because the question

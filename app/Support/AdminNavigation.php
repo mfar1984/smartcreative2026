@@ -70,6 +70,19 @@ class AdminNavigation
                                 'active' => 'admin.event.attendance',
                                 'permission' => 'attendance.view',
                             ],
+                            /*
+                            | Directly under Attendance, because it is the other half
+                            | of the same desk: check them in, then hand them their
+                            | shirt. Kept a separate screen because arriving and
+                            | collecting are separate facts, and one of them can
+                            | happen without the other.
+                            */
+                            [
+                                'label' => 'Collection',
+                                'route' => 'admin.event.collection',
+                                'active' => 'admin.event.collection',
+                                'permission' => 'attendance.view',
+                            ],
                             [
                                 'label' => 'Analytic Reporting',
                                 'route' => 'admin.event.reporting',

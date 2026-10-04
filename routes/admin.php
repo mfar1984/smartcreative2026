@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\Auth\LoginController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\Event\AnalyticReportingController;
 use App\Http\Controllers\Admin\Event\AttendanceController;
+use App\Http\Controllers\Admin\Event\CollectionController;
 use App\Http\Controllers\Admin\Campaign\AudienceController;
 use App\Http\Controllers\Admin\Campaign\CampaignController;
 use App\Http\Controllers\Admin\Campaign\CampaignReportController;
@@ -396,6 +397,54 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('attendance', [AttendanceController::class, 'index'])
                 ->middleware('permission:attendance.view')
                 ->name('attendance');
+
+            /*
+            | Collection. The other counter: handing the shirts out.
+            |
+            | A sibling of Attendance rather than a tab on it, because arriving and
+            | collecting are two separate facts about the same afternoon — somebody can
+            | walk in and leave without their shirt, or send a brother for it having
+            | never turned up. Nothing here reads or writes event_attendances.
+            |
+            | Behind attendance.view and attendance.update: the same desk, the same
+            | staff and the same shift, and both permissions already exist and are
+            | already granted, so no role needs re-seeding.
+            |
+            | "export" is declared before anything taking a {registration}, the same
+            | way the Participants export is, and carries participants.export because
+            | it puts names and identity card numbers in a file that leaves the
+            | building.
+            */
+            Route::get('collection', [CollectionController::class, 'index'])
+                ->middleware('permission:attendance.view')
+                ->name('collection');
+
+            Route::get('collection/export', [CollectionController::class, 'export'])
+                ->middleware('permission:participants.export')
+                ->name('collection.export');
+
+            /*
+            | The code, and the handover it unlocks. POST only on both: a GET to either
+            | is refused with a 405 rather than quietly texting somebody or recording
+            | goods as gone, so a link, a scanner or a mail client following one can do
+            | nothing.
+            |
+            | Keyed by the registration because one code covers a batch: a
+            | representative taking all six of a grouping's shirts reads out one code,
+            | not six. It also means a code issued for one entry can complete nothing
+            | on another.
+            |
+            | Throttled. The code route spends money and reaches a handset; the
+            | handover route is pressed hard at a live counter, so its limit is the
+            | looser of the two.
+            */
+            Route::post('collection/{registration}/code', [CollectionController::class, 'sendCode'])
+                ->middleware(['permission:attendance.update', 'throttle:20,1'])
+                ->name('collection.code');
+
+            Route::post('collection/{registration}/hand-over', [CollectionController::class, 'handOver'])
+                ->middleware(['permission:attendance.update', 'throttle:60,1'])
+                ->name('collection.hand-over');
 
             Route::get('reporting', [AnalyticReportingController::class, 'index'])
                 ->middleware('permission:reports.view')

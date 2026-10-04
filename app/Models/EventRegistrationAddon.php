@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 
 /**
  * One line on a registration's add-on order.
@@ -65,6 +66,28 @@ class EventRegistrationAddon extends Model
     public function variant(): BelongsTo
     {
         return $this->belongsTo(EventAddonVariant::class, 'event_addon_variant_id');
+    }
+
+    /**
+     * The record of this one item being physically taken away, or null.
+     *
+     * The line is the thing collected, which is what makes a collection screen able
+     * to work one person at a time: a grouping of six holds six lines, so six
+     * handovers can name six different moments and, where it matters, the one
+     * representative who took all of them.
+     *
+     * MorphOne rather than HasMany, and the table carries a unique index on the
+     * collectable pair, so the same shirt cannot be recorded as collected twice.
+     */
+    public function handover(): MorphOne
+    {
+        return $this->morphOne(CollectionHandover::class, 'collectable');
+    }
+
+    /** Whether somebody has already taken this item away. */
+    public function isCollected(): bool
+    {
+        return $this->handover !== null;
     }
 
     /**

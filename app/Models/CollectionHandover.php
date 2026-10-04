@@ -40,6 +40,7 @@ class CollectionHandover extends Model
         'collection_verification_id',
         'verified_at',
         'override_reason',
+        'payment_override_reason',
         'confirmed_by',
         'confirmed_by_label',
         'collected_at',
@@ -96,6 +97,22 @@ class CollectionHandover extends Model
     public function wasOverridden(): bool
     {
         return filled($this->override_reason);
+    }
+
+    /**
+     * Whether the goods went out while money was still owed, and why.
+     *
+     * Its own column rather than folded into override_reason, because they answer
+     * different questions and get asked of the record by different people: one is
+     * "was this person who they said they were", the other is "why did we hand over
+     * something that had not been paid for". A single text box holding either would
+     * make both unqueryable.
+     *
+     * A shop handover never sets it. Nothing reads it there.
+     */
+    public function wasHandedOverUnpaid(): bool
+    {
+        return filled($this->payment_override_reason);
     }
 
     /**
