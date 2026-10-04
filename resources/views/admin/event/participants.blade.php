@@ -206,6 +206,72 @@
                 @endif
             </x-admin.filter-bar>
 
+            {{-- Who on this list still owes a shirt size, and the one action that
+                 applies to all of them at once.
+
+                 It sits here, directly under the filters and above the table, because
+                 what it sends is decided by those filters: the tab, the event and the
+                 search box travel with it in the URL below, and the count on the label
+                 is counted through the same filtered() the rows come from. Below the
+                 filters it reads as "and to these".
+
+                 Hidden entirely when nothing is outstanding, rather than disabled: a
+                 dead button on a screen full of amber rows invites a second press. --}}
+            @if ($sizesMissing['registrations'] > 0)
+                @php
+                    /*
+                     | One sentence, built once. Assembled here rather than woven through
+                     | the markup so the figure, the plural and the scope cannot be read
+                     | apart from each other, and so the line the operator reads is the
+                     | line a test can assert on.
+                     */
+                    $sizeNotice = sprintf(
+                        '%d %s on this list %s no shirt size recorded, %d %s to confirm.',
+                        $sizesMissing['registrations'],
+                        Str::plural('entry', $sizesMissing['registrations']),
+                        $sizesMissing['registrations'] === 1 ? 'has' : 'have',
+                        $sizesMissing['participants'],
+                        Str::plural('person', $sizesMissing['participants']),
+                    );
+                @endphp
+
+                <div class="flex flex-wrap items-center justify-between gap-3 px-6 py-2.5 bg-amber-50 border-b border-amber-200">
+                    <div class="min-w-0">
+                        <p class="text-xs font-semibold text-amber-900">{{ $sizeNotice }}</p>
+                        {{-- What those figures cover, named the same way the money
+                             badges name their scope. The button beside this writes to
+                             exactly this set. --}}
+                        <p class="text-xs text-amber-700 mt-0.5">{{ $tabs[$activeTab]['label'] }} &middot; {{ $totalsScope }}</p>
+                    </div>
+
+                    @if ($canNotify)
+                        {{-- The filters in force go in the query string of the action,
+                             because filtered() reads them from there — the same reader the
+                             table used. The server validates them, re-reads them through
+                             that one method, and decides eligibility from the rows. --}}
+                        <form action="{{ route('admin.event.participants.sizes.all', array_filter([
+                                  'tab' => $activeTab,
+                                  'q' => $search,
+                                  'event' => $eventId,
+                              ], fn ($value) => $value !== '')) }}"
+                              method="POST"
+                              onsubmit="return confirm('Email a size confirmation link to {{ $sizesMissing['registrations'] }} {{ $sizesMissing['registrations'] === 1 ? 'registrant' : 'registrants' }} on this list?\n\nOnly entries still missing a size are emailed. Anything already confirmed, cancelled, without an email address, or asked in the last {{ App\Models\EventRegistration::SIZE_LINK_COOLDOWN_HOURS }} hours is skipped.\n\nNo payment is asked for and no amount changes.');">
+                            @csrf
+
+                            <button type="submit"
+                                    class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                {{-- The same shirt as the per-row icon: the same act, done
+                                     to everybody at once. --}}
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 4l3 2 3-2 5 3-2 4-1-.5V20H7V10.5L6 11 4 7z"/>
+                                </svg>
+                                Ask all {{ $sizesMissing['registrations'] }} for sizes
+                            </button>
+                        </form>
+                    @endif
+                </div>
+            @endif
+
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="bg-gray-50 text-left">
@@ -231,6 +297,13 @@
                                  emailed twice, and the only way to tell them apart was
                                  opening every entry in turn. --}}
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Reminder</th>
+                            {{-- Who still has no shirt size, and whether they have been
+                                 asked. The same shape as the two columns before it, and
+                                 for the same reason: the organiser cannot order shirts
+                                 for people whose size was never collected, and from the
+                                 list an entry nobody has asked looked exactly like one
+                                 that answered weeks ago. --}}
+                            <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Size</th>
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Submitted</th>
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Actions</th>
                         </tr>
@@ -370,6 +443,65 @@
                                     @endif
                                 </td>
 
+                                {{-- How many people on this entry have no size on record,
+                                     and what became of the last time we asked.
+
+                                     Both read from the one definition: which items collect
+                                     a size is ParticipantSizes', and whether anybody was
+                                     asked is the message log, the same rows the Reminder
+                                     column beside it draws. A dash means this event
+                                     collects no sizes at all, so there is nothing to say
+                                     about it. --}}
+                                <td class="px-5 py-3 whitespace-nowrap">
+                                    @php
+                                        $collectsSizes = \App\Support\ParticipantSizes::collectsSizes($registration->event);
+                                        $missingSizes = $collectsSizes ? \App\Support\ParticipantSizes::missingCount($registration) : 0;
+                                        $sizeAsk = $registration->lastSizeConfirmation();
+                                        $sizeAskAt = \App\Support\LocalTime::format($sizeAsk?->raisedAt());
+                                        $sizeAskTo = filled($sizeAsk?->recipient) ? $sizeAsk->recipient : 'nobody';
+                                    @endphp
+
+                                    @if (! $collectsSizes)
+                                        <span class="text-xs text-gray-300" aria-hidden="true">&mdash;</span>
+                                    @else
+                                        @if ($missingSizes > 0)
+                                            <span class="block text-sm font-semibold text-amber-700"
+                                                  title="{{ $missingSizes }} {{ $missingSizes === 1 ? 'person' : 'people' }} on {{ $registration->reference }} {{ $missingSizes === 1 ? 'has' : 'have' }} no size recorded: {{ implode(', ', \App\Support\ParticipantSizes::missingNames($registration)) }}">
+                                                {{ $missingSizes }} missing
+                                            </span>
+                                        @else
+                                            <span class="block text-xs text-gray-400">All recorded</span>
+                                        @endif
+
+                                        @if ($sizeAsk === null && $missingSizes > 0)
+                                            <x-admin.badge tone="amber" dot class="mt-0.5"
+                                                           title="Nobody has been asked for a size on {{ $registration->reference }}.">
+                                                Never asked
+                                            </x-admin.badge>
+                                        @elseif ($sizeAsk?->hasFailed())
+                                            <x-admin.badge tone="red" dot class="mt-0.5"
+                                                           title="The size link to {{ $sizeAskTo }} failed on {{ $sizeAskAt }}. {{ $sizeAsk->reason }}">
+                                                Send failed
+                                            </x-admin.badge>
+                                        @elseif ($sizeAsk?->status === \App\Models\EventNotification::STATUS_SKIPPED)
+                                            <x-admin.badge tone="red" dot class="mt-0.5"
+                                                           title="No size link went out for {{ $registration->reference }} on {{ $sizeAskAt }}. {{ $sizeAsk->reason }}">
+                                                Not sent
+                                            </x-admin.badge>
+                                        @elseif ($sizeAsk?->wasSent())
+                                            <x-admin.badge tone="green" class="mt-0.5"
+                                                           title="Size link sent to {{ $sizeAskTo }} on {{ $sizeAskAt }}.">
+                                                Asked
+                                            </x-admin.badge>
+                                        @elseif ($sizeAsk !== null)
+                                            <x-admin.badge tone="gray" dot class="mt-0.5"
+                                                           title="Size link queued to {{ $sizeAskTo }} on {{ $sizeAskAt }}. It leaves when the mail worker next runs, so it has not reached anybody yet.">
+                                                Queued
+                                            </x-admin.badge>
+                                        @endif
+                                    @endif
+                                </td>
+
                                 <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
                                     {{ \App\Support\LocalTime::format($registration->created_at) }}
                                 </td>
@@ -444,6 +576,34 @@
                                             </form>
                                         @endif
 
+                                        {{-- Ask for the sizes this entry has never given.
+
+                                             Offered wherever one is outstanding, whatever the
+                                             payment says: a paid entry needs a size just as
+                                             much as an unpaid one, and more certainly, since
+                                             it is definitely getting a shirt. The confirm
+                                             dialog says there is no payment in it, because the
+                                             operator is about to email somebody who has also
+                                             been receiving payment reminders. --}}
+                                        @if ($canNotify && $missingSizes > 0)
+                                            <form action="{{ route('admin.event.participants.sizes', $registration) }}" method="POST"
+                                                  onsubmit="return confirm('Email a size confirmation link for {{ addslashes($registration->displayName()) }}?\n\n{{ $missingSizes }} {{ $missingSizes === 1 ? 'person has' : 'people have' }} no size on record. The link only asks for sizes: no payment is requested and nothing about the amount owed changes.');">
+                                                @csrf
+                                                <button type="submit"
+                                                        class="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition"
+                                                        title="Ask for the {{ $missingSizes }} missing {{ $missingSizes === 1 ? 'size' : 'sizes' }} on {{ $registration->reference }}. No payment is asked for."
+                                                        aria-label="Send a size confirmation link for {{ $registration->reference }}">
+                                                    {{-- A shirt, rather than the envelope the payment
+                                                         reminder uses: both are emails, and the icon is
+                                                         the only thing distinguishing which one a tired
+                                                         operator is about to press. --}}
+                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 4l3 2 3-2 5 3-2 4-1-.5V20H7V10.5L6 11 4 7z"/>
+                                                    </svg>
+                                                </button>
+                                            </form>
+                                        @endif
+
                                         {{-- Move an entry filed against the wrong event. A link to its
                                              own page, not a dialog: the two events rarely want the
                                              same shape of entry, so moving one can mean choosing who
@@ -489,7 +649,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="12" class="px-5 py-12 text-center text-sm text-gray-500">
+                                <td colspan="13" class="px-5 py-12 text-center text-sm text-gray-500">
                                     @if ($isFiltered)
                                         No participants match the current filters.
                                     @else

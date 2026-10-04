@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Http\Controllers\ParticipantSizeController;
 use App\Http\Controllers\Payment\RegistrationPaymentController;
 use App\Jobs\SendTemplateSms;
 use App\Mail\EventTemplateMail;
@@ -85,6 +86,24 @@ class EventNotifier
 
         return $this->queueForManager($registration, EventTemplates::PAYMENT_REMINDER, $userId)
             + $this->textForManager($registration, EventTemplates::PAYMENT_REMINDER, $userId);
+    }
+
+    /**
+     * Ask the registrant to confirm a shirt size for everybody on the entry.
+     *
+     * Goes to the registrant alone, like the reminder above, because they are the one
+     * who knows the squad's sizes.
+     *
+     * Email only, and deliberately so even though the reminder also texts. The page is
+     * reached by a signed URL far too long for a text message, exactly as noted on
+     * text() below, and there is nothing here to chase: a size is a question, not a
+     * debt.
+     */
+    public function sizeConfirmation(EventRegistration $registration, ?int $userId = null): int
+    {
+        $registration->loadMissing(['event', 'participants', 'addonLines']);
+
+        return $this->queueForManager($registration, EventTemplates::SIZE_CONFIRMATION, $userId);
     }
 
     /**
@@ -322,11 +341,23 @@ class EventNotifier
          | this, the entry most in need of chasing — one whose charge was corrected after
          | it had already paid — received a reminder with no way to pay.
          */
-        $link = $registration->owesBalance()
+        /*
+         | The size confirmation is the one message that carries neither. It asks for a
+         | shirt size and promises that nothing is owed, so handing it a checkout would
+         | contradict its own wording — and it is sent to entries that are fully paid as
+         | well, which owesBalance() would have excluded anyway.
+         */
+        $isSizeConfirmation = $key === EventTemplates::SIZE_CONFIRMATION;
+
+        $link = ! $isSizeConfirmation && $registration->owesBalance()
             ? RegistrationPaymentController::urlFor($registration)
             : null;
 
-        return $this->queue($registration, $template, $manager->email, collect([$manager]), $link, $userId);
+        $sizeLink = $isSizeConfirmation
+            ? ParticipantSizeController::urlFor($registration)
+            : null;
+
+        return $this->queue($registration, $template, $manager->email, collect([$manager]), $link, $userId, 0, $sizeLink);
     }
 
     private function queueForPlayers(EventRegistration $registration, string $key, ?int $userId = null): int
@@ -414,8 +445,9 @@ class EventNotifier
         ?string $paymentLink,
         ?int $userId,
         int $delaySeconds = 0,
+        ?string $sizeLink = null,
     ): int {
-        $rendered = $this->renderer->render($template, $registration, $recipients, $paymentLink);
+        $rendered = $this->renderer->render($template, $registration, $recipients, $paymentLink, $sizeLink);
 
         $notification = $this->record(
             $registration,

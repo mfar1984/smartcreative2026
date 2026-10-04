@@ -47,6 +47,23 @@ use Illuminate\Support\Facades\DB;
  * the shirt would charge a one-person entry that has already paid RM 40.00 another
  * RM 40.00. The fee today is RM 0.00 and that is the fee.
  *
+ * TWO KINDS OF WRONG
+ *
+ * This used to judge an entry on its total alone, which left a shape A entry naming
+ * one person untouched: RM 40.00 is the right total for one shirt, so there was
+ * nothing to move. The money was never wrong on those rows; what it is called is.
+ * registration_fee carries the charge on an event whose fee is RM 0.00, and there is
+ * no item line, so the shirt list — which is built from item lines — came back
+ * twenty-two shirts short of the people who had paid for one, and RM 880.00 of shirt
+ * income read as registration fees.
+ *
+ * So a correction is now either of two things, and TotalCorrection names them apart:
+ * movesMoney(), where the total itself is wrong, and reshapes(), where the total is
+ * right and the two columns describing it are not. Both are written by the same
+ * confirmed press. Only the first may touch a payment status, a place, a checkout or
+ * anything else that follows the money — see commit(), where every one of those is
+ * fenced behind movesMoney().
+ *
  * Two steps, never one. preview() reads and reports; apply() writes, and only the rows
  * preview() said would change. The separation is the whole point: this runs against
  * production while people are registering, so the operator sees every figure before
@@ -426,6 +443,10 @@ class RegistrationTotalsRecalculator
             'addons_total' => (float) $correction->registration->addons_total,
             'payment_status' => $correction->registration->payment_status,
             'status' => $correction->registration->status,
+
+            // Part of the shape, not decoration: a correction that moves no money is
+            // only legible in the trail as the fee and the item count swapping over.
+            'addon_lines' => $correction->registration->addonLines->count(),
         ];
 
         /** @var EventRegistration|null $written */
@@ -498,10 +519,16 @@ class RegistrationTotalsRecalculator
              | The URL is cleared rather than the attempt removed. purchase_id is how the
              | webhook recognises a payment that arrives late, and losing it would orphan
              | money. Pressing Pay now opens a fresh purchase for what is actually owed.
+             |
+             | Only when the figure actually moved. A shape correction leaves the charge
+             | at exactly what the open page quotes, so that page is still correct and
+             | tearing it down would send somebody mid-payment back to the start.
              */
-            $registration->checkouts()
-                ->whereNotNull('checkout_url')
-                ->update(['checkout_url' => null]);
+            if ($correction->movesMoney()) {
+                $registration->checkouts()
+                    ->whereNotNull('checkout_url')
+                    ->update(['checkout_url' => null]);
+            }
 
             /*
              | The fee as the event charges it today, not the snapshot on the row.
@@ -531,7 +558,17 @@ class RegistrationTotalsRecalculator
              */
             $outstanding = round($correction->correctedAmount - (float) $registration->amount_paid, 2);
 
-            if ($registration->payment_status === EventRegistration::PAYMENT_PAID && $outstanding > 0.005) {
+            /*
+             | And not at all when the total does not move.
+             |
+             | A shape correction re-describes a charge; it does not re-charge, so
+             | nothing about what has been received or settled may be touched by it. The
+             | badge, the place, the receipts and the ledger are all judged against an
+             | amount that is the same number before and after.
+             */
+            if ($correction->movesMoney()
+                && $registration->payment_status === EventRegistration::PAYMENT_PAID
+                && $outstanding > 0.005) {
                 $registration->payment_status = $registration->hasMoneyReceived()
                     ? EventRegistration::PAYMENT_PARTIAL
                     : EventRegistration::PAYMENT_UNPAID;
@@ -552,32 +589,56 @@ class RegistrationTotalsRecalculator
             return false;
         }
 
-        AdminLogger::audit($written, 'amount.recalculated', $before, [
+        /*
+         | Two kinds of correction, named apart in the trail.
+         |
+         | A row whose total moved is a re-pricing. A row whose total did not is a
+         | re-description, and recording that as "recalculated" would leave anybody
+         | reading the log later hunting for money that never went anywhere.
+         */
+        $reshapeOnly = ! $correction->movesMoney();
+
+        AdminLogger::audit($written, $reshapeOnly ? 'amount.reitemised' : 'amount.recalculated', $before, [
             'amount' => (float) $written->amount,
             'registration_fee' => (float) $written->registration_fee,
             'addons_total' => (float) $written->addons_total,
             'payment_status' => $written->payment_status,
             'status' => $written->status,
+            'addon_lines' => $written->addonLines()->count(),
             'people' => $correction->people,
             'difference' => $correction->difference(),
             'lines_added' => $correction->additionsCount(),
             'amount_paid' => (float) $written->amount_paid,
             'outstanding' => $written->outstandingAmount(),
-            'reason' => 'Items re-priced per participant from the head count.',
+            'reason' => $reshapeOnly
+                ? 'Charge re-itemised onto the required per-participant item. Total unchanged.'
+                : 'Items re-priced per participant from the head count.',
         ]);
 
         AdminLogger::activity(
             'participants.recalculate',
-            sprintf(
-                'Recalculated %s: %d people, %s became %s (%s). Now %s, %s outstanding.',
-                $written->reference,
-                $correction->people,
-                PaymentFigures::money($correction->currentAmount),
-                PaymentFigures::money($correction->correctedAmount),
-                $correction->differenceLabel(),
-                $written->paymentStatusLabel(),
-                $written->outstandingAmountLabel(),
-            ),
+            $reshapeOnly
+                ? sprintf(
+                    'Re-itemised %s: %d people, %s moved from the event fee onto %d item %s. Still %s, %s, %s outstanding.',
+                    $written->reference,
+                    $correction->people,
+                    PaymentFigures::money($correction->correctedAddonsTotal),
+                    $correction->additionsCount(),
+                    $correction->additionsCount() === 1 ? 'line' : 'lines',
+                    PaymentFigures::money($correction->correctedAmount),
+                    $written->paymentStatusLabel(),
+                    $written->outstandingAmountLabel(),
+                )
+                : sprintf(
+                    'Recalculated %s: %d people, %s became %s (%s). Now %s, %s outstanding.',
+                    $written->reference,
+                    $correction->people,
+                    PaymentFigures::money($correction->currentAmount),
+                    PaymentFigures::money($correction->correctedAmount),
+                    $correction->differenceLabel(),
+                    $written->paymentStatusLabel(),
+                    $written->outstandingAmountLabel(),
+                ),
         );
 
         return true;

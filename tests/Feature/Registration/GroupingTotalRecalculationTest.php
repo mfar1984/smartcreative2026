@@ -938,33 +938,54 @@ class GroupingTotalRecalculationTest extends TestCase
         $this->assertSame(EventRegistration::PAYMENT_PARTIAL, $correction->correctedPaymentStatus());
     }
 
-    public function test_a_one_person_fee_era_entry_is_left_completely_untouched(): void
+    /**
+     * REG-2026-0047: one person who paid RM 40.00 and owes RM 40.00.
+     *
+     * This used to be asserted as left completely untouched, on the grounds that the
+     * total was right. The total is right; the row is still wrong, and the shirt list
+     * is what proves it — it is built from item lines, and this entry has none, so
+     * somebody who has paid for a shirt does not appear on it. So the money stays
+     * exactly where it is and the description of it is corrected. The whole of the
+     * money side is pinned here: amount, amount_paid, status and badge.
+     */
+    public function test_a_one_person_fee_era_entry_is_re_itemised_without_moving_its_money(): void
     {
         $event = $this->event();
-        $this->tee($event);
+        [$addon] = $this->tee($event);
 
-        // REG-2026-0047: one person who paid RM 40.00 and owes RM 40.00. The split
-        // between fee and item is wrong on the row, the total is not, and the total is
-        // what this action exists to correct.
         $registration = $this->shapeA($event, 1);
         $this->receipt($registration, 40);
 
         $correction = $this->recalculator()->preview($event)[0];
 
         $this->assertSame(40.0, $correction->correctedAmount);
-        $this->assertFalse($correction->changes());
+        $this->assertSame(0.0, $correction->difference());
 
-        $before = $registration->fresh();
+        // The two kinds of wrong, named apart. Nothing about the total moves.
+        $this->assertFalse($correction->movesMoney());
+        $this->assertTrue($correction->reshapes());
+        $this->assertTrue($correction->changes());
 
-        $this->assertSame([], $this->recalculator()->apply($event));
+        $this->assertCount(1, $this->recalculator()->apply($event));
 
         $after = $registration->fresh();
 
-        $this->assertEquals($before->updated_at, $after->updated_at);
-        $this->assertSame('40.00', $after->registration_fee);
+        // Not a sen moves, and nothing that follows the money is touched.
         $this->assertSame('40.00', $after->amount);
-        $this->assertSame(0, $after->addonLines()->count());
+        $this->assertSame('40.00', $after->amount_paid);
         $this->assertSame(EventRegistration::PAYMENT_PAID, $after->payment_status);
+        $this->assertSame(EventRegistration::STATUS_CONFIRMED, $after->status);
+
+        // The charge now says what it is for.
+        $this->assertSame('0.00', $after->registration_fee);
+        $this->assertSame('40.00', $after->addons_total);
+
+        $line = $after->addonLines->sole();
+
+        $this->assertSame($addon->id, $line->event_addon_id);
+        $this->assertSame($registration->participants->sole()->id, $line->event_participant_id);
+        $this->assertSame('40.00', $line->line_total);
+        $this->assertNull($line->event_addon_variant_id);
     }
 
     public function test_the_three_shapes_together_change_only_the_ones_that_are_wrong(): void
@@ -981,10 +1002,15 @@ class GroupingTotalRecalculationTest extends TestCase
         $corrections = collect($this->recalculator()->preview($event))
             ->keyBy(fn ($correction) => $correction->registration->reference);
 
-        $this->assertTrue($corrections[$feeEra->reference]->changes());
+        $this->assertTrue($corrections[$feeEra->reference]->movesMoney());
         $this->assertSame(240.0, $corrections[$feeEra->reference]->correctedAmount);
 
-        $this->assertFalse($corrections[$feeEraSingle->reference]->changes());
+        // Right total, wrong description: corrected without moving money.
+        $this->assertFalse($corrections[$feeEraSingle->reference]->movesMoney());
+        $this->assertTrue($corrections[$feeEraSingle->reference]->reshapes());
+
+        // Already itemised the way this would write it. Left alone entirely, lines and
+        // all, because the split it was sold with is not wrong.
         $this->assertFalse($corrections[$groupLine->reference]->changes());
 
         $this->assertFalse($corrections[$perHead->reference]->changes());
@@ -992,8 +1018,11 @@ class GroupingTotalRecalculationTest extends TestCase
 
         $applied = $this->recalculator()->apply($event);
 
-        $this->assertCount(1, $applied);
-        $this->assertSame($feeEra->reference, $applied[0]->registration->reference);
+        $this->assertCount(2, $applied);
+        $this->assertSame(
+            [$feeEra->reference, $feeEraSingle->reference],
+            collect($applied)->map(fn ($correction) => $correction->registration->reference)->sort()->values()->all(),
+        );
     }
 
     public function test_confirming_a_fee_era_entry_itemises_it_per_person_and_clears_the_old_fee(): void

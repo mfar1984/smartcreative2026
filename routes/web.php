@@ -11,6 +11,7 @@ use App\Http\Controllers\CartController;
 use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\Payment\ChipWebhookController;
 use App\Http\Controllers\PortfolioController;
+use App\Http\Controllers\ParticipantSizeController;
 use App\Http\Controllers\Payment\RegistrationPaymentController;
 use App\Http\Controllers\Payment\ShopOrderPaymentController;
 use App\Http\Controllers\Public\PlayerMessageController;
@@ -175,6 +176,29 @@ Route::middleware('signed')->group(function () {
     Route::get('/registration/payment/{reference}/return/{outcome}', [RegistrationPaymentController::class, 'handleReturn'])
         ->name('registration.payment.return');
 });
+
+/*
+| Confirming the shirt size of everybody on one registration.
+|
+| Above the catch all slug route below, for the same reason the payment pages are: a
+| reference must never be read as an event slug.
+|
+| Deliberately NOT in the `signed` group above, even though both routes are signed. That
+| middleware answers an expired link by throwing, and the people holding these links are
+| participants: the controller checks the signature itself so an expired one gets a page
+| that says so rather than a stack trace. The signature covers the whole URL including
+| the reference, so it cannot be edited to reach another entry, and the registration is
+| resolved from the route rather than from anything posted.
+|
+| Two routes on one path. The GET draws the form; the POST records the answer, throttled
+| because it is an unauthenticated write, and it carries no money of any kind.
+*/
+Route::get('/registration/sizes/{reference}', [ParticipantSizeController::class, 'show'])
+    ->name('registration.sizes');
+
+Route::post('/registration/sizes/{reference}', [ParticipantSizeController::class, 'store'])
+    ->middleware('throttle:10,1')
+    ->name('registration.sizes.store');
 
 Route::get('/registration/{slug}', [RegistrationController::class, 'show'])->name('registration.show');
 

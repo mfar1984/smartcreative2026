@@ -68,19 +68,69 @@ readonly class TotalCorrection
         return round($this->correctedAmount - $this->currentAmount, 2);
     }
 
+    /** What the row says it was charged as a registration fee today. */
+    public function currentRegistrationFee(): float
+    {
+        return round((float) $this->registration->registration_fee, 2);
+    }
+
+    /** What the row says its items add up to today. */
+    public function currentAddonsTotal(): float
+    {
+        return round((float) $this->registration->addons_total, 2);
+    }
+
+    /**
+     * Whether applying this would move money.
+     *
+     * The total alone: this is the part that changes what somebody owes, and the only
+     * part that may touch a payment status or reopen a balance.
+     */
+    public function movesMoney(): bool
+    {
+        return $this->blocked === null && abs($this->difference()) > 0.005;
+    }
+
+    /**
+     * Whether the total is right and the itemisation does not describe it.
+     *
+     * The case this was added for. An entry taken while the shirt was the event fee
+     * carries RM 40.00 in registration_fee with no item line behind it, and on an
+     * event whose fee is now RM 0.00 that single figure is already the right total —
+     * so the arithmetic above finds nothing to move and the row was skipped. The
+     * money was never wrong; what it is called is. The shirt list is built from item
+     * lines, so twenty-two people who have paid for a shirt do not appear on it, and
+     * RM 880.00 of shirt income reads as registration fees on an event that charges
+     * none.
+     *
+     * Judged on the two columns that name the charge rather than on the lines, which
+     * is what keeps it narrow: a row whose fee and item total already agree with the
+     * event's catalogue is left alone even if its lines split that total differently
+     * from how this would write them. Those were sold that way and are not wrong.
+     */
+    public function reshapes(): bool
+    {
+        if ($this->blocked !== null || $this->movesMoney()) {
+            return false;
+        }
+
+        return abs($this->currentRegistrationFee() - $this->correctedRegistrationFee) > 0.005
+            || abs($this->currentAddonsTotal() - $this->correctedAddonsTotal) > 0.005;
+    }
+
     /**
      * Whether applying this would change anything.
      *
-     * Judged on the total alone, and that is deliberate. A single-participant entry
-     * comes out of the arithmetic with the same total and a different split between
-     * its lines — the shirt price moving off the group line and onto the one person's
-     * line, or off the event fee and onto it — and rewriting it would touch a row
-     * that is already charging the right amount. Those are left exactly as they are,
-     * which is also what makes a second run a no-op.
+     * Either the total is wrong, or the total is right and the items do not describe
+     * it. Both are corrections and both are written by the same confirmed press; the
+     * preview keeps them in separate tables because only the first one moves money.
+     *
+     * A row where neither holds is not written at all, which is what makes a second
+     * run a no-op.
      */
     public function changes(): bool
     {
-        return $this->blocked === null && abs($this->difference()) > 0.005;
+        return $this->movesMoney() || $this->reshapes();
     }
 
     /** What is still owed once the corrected charge is in place. */
@@ -97,7 +147,13 @@ readonly class TotalCorrection
      */
     public function correctedPaymentStatus(): string
     {
-        if (! $this->changes()) {
+        /*
+         | Nothing that leaves the total where it is may touch the badge. A shape
+         | correction re-describes a charge that has already been settled or is still
+         | being chased, and the amount it is judged against does not move by a sen,
+         | so whatever the row reads now is still the truth.
+         */
+        if (! $this->movesMoney()) {
             return $this->registration->payment_status;
         }
 
@@ -142,6 +198,34 @@ readonly class TotalCorrection
     public function correctedOutstandingLabel(): string
     {
         return PaymentFigures::money($this->correctedOutstanding());
+    }
+
+    /* ---------------------------------------------------------------------
+     | The shape, before and after
+     |
+     | Four figures the preview puts side by side, so the operator can read along the
+     | row and see that the two totals are the same number while the two columns
+     | describing it swap over.
+     * ------------------------------------------------------------------ */
+
+    public function currentRegistrationFeeLabel(): string
+    {
+        return PaymentFigures::money($this->currentRegistrationFee());
+    }
+
+    public function correctedRegistrationFeeLabel(): string
+    {
+        return PaymentFigures::money($this->correctedRegistrationFee);
+    }
+
+    public function currentAddonsTotalLabel(): string
+    {
+        return PaymentFigures::money($this->currentAddonsTotal());
+    }
+
+    public function correctedAddonsTotalLabel(): string
+    {
+        return PaymentFigures::money($this->correctedAddonsTotal);
     }
 
     /**

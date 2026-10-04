@@ -285,6 +285,34 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('participants.remind');
 
             /*
+             | Asking a registrant to confirm the shirt size of everybody on the entry,
+             | for an event that began collecting sizes after those entries were made.
+             |
+             | Behind participants.notify, the permission that already governs reaching a
+             | participant's inbox, so no role needs re-seeding: it is the same capability
+             | as the reminder beside it, aimed at a question rather than a debt. Nothing
+             | here reads or writes money.
+             |
+             | The bulk form is declared before the per-entry one so "sizes" is never read
+             | as a registration id, and both carry the same permission: it is the same
+             | act, and inventing a second permission for the plural would mean a role
+             | that may email one person but not twenty.
+             |
+             | Throttled, the way the shop's pair is. The sender already leaves one
+             | registrant alone for six hours after a link goes out, which is the
+             | per-person guard; these are the per-operator ones, so a stuck finger on a
+             | confirm dialog cannot walk the list twice. The bulk one is tighter because
+             | each press can reach every entry on the filtered list.
+             */
+            Route::post('participants/sizes', [ParticipantController::class, 'sendAllSizeLinks'])
+                ->middleware(['permission:participants.notify', 'throttle:4,1'])
+                ->name('participants.sizes.all');
+
+            Route::post('participants/{registration}/sizes', [ParticipantController::class, 'sendSizeLink'])
+                ->middleware(['permission:participants.notify', 'throttle:20,1'])
+                ->name('participants.sizes');
+
+            /*
              | Its own permission: it moves an entry between two events, changing the
              | seat count on both and discarding the add-on lines and answers that
              | belonged to the old one. Throttled because each press writes to two

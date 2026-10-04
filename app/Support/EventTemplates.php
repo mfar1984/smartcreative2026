@@ -37,6 +37,15 @@ class EventTemplates
     public const PAYMENT_REMINDER = 'payment.reminder';
 
     /**
+     * The one template that asks for a shirt size rather than for money.
+     *
+     * Named here for the same reason the reminder above is: the notifier that sends it,
+     * the registration that reads its own message log to answer "has this registrant
+     * been asked", and the list that draws that answer all have to mean the same row.
+     */
+    public const SIZE_CONFIRMATION = 'size.confirmation';
+
+    /**
      * Channels that speak to participants, and so share one set of moments.
      *
      * Telegram is not among them. It posts into one staff group, which makes its
@@ -90,6 +99,15 @@ class EventTemplates
         'payment_status' => 'Payment status in words',
 
         'payment_link' => 'Link for the manager to pay. Never put this in a player message',
+
+        /*
+         | The size confirmation page. Its own placeholder rather than reusing
+         | {{payment_link}}: that one opens a checkout, this one records a shirt size
+         | and takes nothing, and a template that mixed them up would either ask for
+         | money on a message promising none or send somebody to a form instead of a
+         | payment page.
+         */
+        'size_link' => 'Link for the registrant to confirm each person\'s size. Takes no payment',
         'paid_on' => 'When payment was received',
         'payment_method' => 'How it was paid, for example FPX',
         'payment_reference' => 'The gateway\'s own reference',
@@ -224,6 +242,32 @@ class EventTemplates
                 'manager_email',
                 'manager_phone',
                 'payment_link',
+            ],
+        ],
+
+        /*
+        | Sent by hand from the Participants screen, like the reminder above.
+        |
+        | It exists because an event can start collecting a size part way through its
+        | entries: everybody who registered before that was charged for a shirt and
+        | never asked which size, and a size cannot be guessed. Addressed to whoever
+        | registered, because they are the one who knows the squad's sizes.
+        |
+        | Deliberately carries no money placeholder at all. These registrants have been
+        | receiving payment reminders for the same event, so the wording has to say
+        | plainly that nothing is owed on this one; quoting a figure beside that
+        | sentence is how it gets read as another bill.
+        */
+        'size.confirmation' => [
+            'label' => 'Confirm Shirt Size — Registrant',
+            'audience' => 'Whoever registered: the manager of a squad, or the person on a solo entry',
+            'description' => 'Asks for the size of everybody on the entry, for an event that began collecting sizes after these entries were made. {{size_link}} opens a short form and takes no payment. Say so in the wording: these people are also being chased for money, and this must not read as another bill.',
+            'placeholders' => [
+                ...self::SHARED,
+                'player_list',
+                'participant_addon_list',
+                'manager_email',
+                'size_link',
             ],
         ],
 

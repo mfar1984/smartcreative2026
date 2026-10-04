@@ -39,8 +39,9 @@ class EventTemplateRenderer
         EventRegistration $registration,
         iterable $recipients = [],
         ?string $paymentLink = null,
+        ?string $sizeLink = null,
     ): array {
-        $values = $this->values($registration, collect($recipients), $paymentLink);
+        $values = $this->values($registration, collect($recipients), $paymentLink, $sizeLink);
 
         return [
             'subject' => $this->substitute((string) $template->subject, $values),
@@ -107,6 +108,7 @@ class EventTemplateRenderer
         EventRegistration $registration,
         $recipients,
         ?string $paymentLink,
+        ?string $sizeLink = null,
     ): array {
         $registration->loadMissing(['event', 'participants']);
         $event = $registration->event;
@@ -143,6 +145,11 @@ class EventTemplateRenderer
             // asks for one on a player message produces nothing instead of the
             // raw placeholder.
             'payment_link' => $paymentLink ?? '',
+
+            // Kept strictly separate from the one above. Each is passed only to the
+            // message that is meant to carry it, so a template cannot acquire a
+            // checkout it was never given or a size form it has no business sending.
+            'size_link' => $sizeLink ?? '',
 
             'paid_on' => $payment?->paidOn()?->format('d M Y, g:i a') ?? '',
             'payment_method' => $payment?->paymentMethod() ?? '',
@@ -287,6 +294,7 @@ class EventTemplateRenderer
             'payment_status' => 'Partly Paid',
 
             'payment_link' => url('/registration/payment/REG-2026-0003?expires=0&signature=sample'),
+            'size_link' => url('/registration/sizes/REG-2026-0003?expires=0&signature=sample'),
 
             'paid_on' => '26 Aug 2026, 5:49 pm',
             'payment_method' => 'FPX',

@@ -159,6 +159,58 @@ class EventTemplateSeeder extends Seeder
                     TEXT,
                 ],
 
+                /*
+                | Not a bill, and it has to prove that in the first two lines.
+                |
+                | Everybody receiving this has also been receiving payment reminders for
+                | the same event, so an email that opens with the event and a link reads
+                | as another demand. It opens by saying nothing is owed, says it again
+                | beside the link, and carries no money placeholder at all: there is no
+                | figure on it that could be mistaken for an amount due.
+                |
+                | The event block is here for the same reason it is on the reminder.
+                | Somebody asked for a shirt size weeks after registering needs to know
+                | which event and which date they are answering about.
+                */
+                'size.confirmation' => [
+                    'subject' => 'Confirm your shirt size: {{event_name}} ({{reference}})',
+                    'body' => <<<'TEXT'
+                    Hello {{manager_name}},
+
+                    We need one small thing from you: the shirt size for everybody on your
+                    entry for {{event_name}}.
+
+                    NOTHING IS OWED AND NOTHING IS BEING CHARGED. This is not a payment
+                    request. The size was simply not collected when this registration was
+                    made, and the organiser needs it before the shirts can be ordered.
+
+                    Confirm the sizes here
+                    {{size_link}}
+
+                    It takes a moment, needs no login, and asks for nothing but a size. If a
+                    size is already shown for somebody, it is what we have on record — change
+                    it if it is wrong.
+
+                    Reference: {{reference}}
+                    Entry: {{team_name}}
+                    People entered: {{people_count}}
+
+                    Event details
+                    {{event_dates}}
+                    {{event_time}}
+                    {{event_location}}
+
+                    People on this entry
+                    {{player_list}}
+
+                    If any of those names is wrong, or you did not expect this, reply to this
+                    email and tell us.
+
+                    Thank you,
+                    {{site_name}}
+                    TEXT,
+                ],
+
                 'payment.manager' => [
                     'subject' => 'Payment received: {{event_name}} ({{reference}})',
                     'body' => <<<'TEXT'
@@ -245,6 +297,20 @@ class EventTemplateSeeder extends Seeder
                 // The balance, for the same reason as the email above.
                 'payment.reminder' => [
                     'body' => '{{team_name}}: {{amount_outstanding}} still due for {{event_name}}, ref {{reference}}. Place not confirmed until paid. See your email to pay.',
+                ],
+
+                /*
+                | Seeded so the SMS screen is not left with one empty box that blocks
+                | saving the others, and worded for the only thing a text can do here:
+                | the size form is reached by a signed URL far too long for a message.
+                |
+                | Nothing sends it. SmsSettings::ALERTS does not list this template, and
+                | allowsTemplate() answers false for anything no alert group claims, so a
+                | new template never silently starts texting people. The notifier only
+                | ever emails this one.
+                */
+                'size.confirmation' => [
+                    'body' => '{{team_name}}: we need shirt sizes for {{event_name}}, ref {{reference}}. No payment needed. Check your email for the link.',
                 ],
 
                 'payment.manager' => [

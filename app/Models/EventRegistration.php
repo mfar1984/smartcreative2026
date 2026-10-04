@@ -190,6 +190,20 @@ class EventRegistration extends Model
         return $this->notifications()->where('template_key', EventTemplates::PAYMENT_REMINDER);
     }
 
+    /**
+     * Every size confirmation link ever raised for this entry, newest first.
+     *
+     * Read from the message log for exactly the reason set out above, and the reason is
+     * worth repeating because the temptation is a `size_link_sent_at` column: this
+     * project has twice been bitten by two sources recording one fact. The list's
+     * "never asked / queued / sent / failed" and the cooldown that stops a second press
+     * are the same rows.
+     */
+    public function sizeConfirmations(): HasMany
+    {
+        return $this->notifications()->where('template_key', EventTemplates::SIZE_CONFIRMATION);
+    }
+
     /* ---------------------------------------------------------------------
      | Logo
      * ------------------------------------------------------------------ */
@@ -544,6 +558,76 @@ class EventRegistration extends Model
     public static function paymentLinkCooldownCutoff(): Carbon
     {
         return now()->subHours(self::PAYMENT_LINK_COOLDOWN_HOURS);
+    }
+
+    /* ---------------------------------------------------------------------
+     | Asking for a shirt size
+     |
+     | The same shape as the payment link above, and read from the same message log.
+     | Written as a second set of readers rather than one parameterised pair because
+     | the two answers are needed side by side on one row of the list: an entry can
+     | have been chased for money and never asked for a size.
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Hours a registrant is left alone after a size link goes out.
+     *
+     * Defined as the payment link's window rather than as its own 6, so there is one
+     * number on this screen and the two cannot drift apart.
+     */
+    public const SIZE_LINK_COOLDOWN_HOURS = self::PAYMENT_LINK_COOLDOWN_HOURS;
+
+    /**
+     * The most recent size confirmation raised for this entry, whatever became of it.
+     *
+     * Email by preference for the same reason as the reminder: that is the copy that
+     * carries the link. Reads the loaded relation when the list has eager loaded it.
+     */
+    public function lastSizeConfirmation(): ?EventNotification
+    {
+        $sent = $this->relationLoaded('sizeConfirmations')
+            ? $this->sizeConfirmations
+            : $this->sizeConfirmations()->get();
+
+        return $sent->firstWhere('channel', EventTemplates::CHANNEL_EMAIL)
+            ?? $sent->first();
+    }
+
+    /**
+     * When the last size link the queue accepted was raised.
+     *
+     * Null when none ever was, which includes an entry whose only attempts failed or
+     * were skipped for want of an address. Those told nobody anything, so they must
+     * not hold the next press back.
+     */
+    public function sizeLinkSentAt(): ?Carbon
+    {
+        $sent = $this->lastSizeConfirmation();
+
+        return $sent !== null && $sent->reachedTheQueue()
+            ? $sent->raisedAt()
+            : null;
+    }
+
+    /** Whether a size link went out recently enough that another would be spam. */
+    public function sizeLinkSentRecently(): bool
+    {
+        $sentAt = $this->sizeLinkSentAt();
+
+        return $sentAt !== null && $sentAt->greaterThan(self::sizeLinkCooldownCutoff());
+    }
+
+    /** When the next one may go, or null when one may go now. */
+    public function sizeLinkCooldownEndsAt(): ?Carbon
+    {
+        return $this->sizeLinkSentRecently()
+            ? $this->sizeLinkSentAt()->copy()->addHours(self::SIZE_LINK_COOLDOWN_HOURS)
+            : null;
+    }
+
+    public static function sizeLinkCooldownCutoff(): Carbon
+    {
+        return now()->subHours(self::SIZE_LINK_COOLDOWN_HOURS);
     }
 
     public function statusLabel(): string

@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\TransferRegistrationRequest;
 use App\Http\Requests\Admin\UpdateParticipantRequest;
 use App\Http\Requests\Admin\UpdateRegistrationEntryRequest;
 use App\Models\Event;
+use App\Models\EventAddon;
 use App\Models\EventAddonVariant;
 use App\Models\EventParticipant;
 use App\Models\EventParticipantAnswer;
@@ -22,10 +23,12 @@ use App\Services\Payment\RegistrationPaymentUpdater;
 use App\Services\Payment\RegistrationTally;
 use App\Services\Registration\RegistrationTotalsRecalculator;
 use App\Services\Registration\TotalCorrection;
+use App\Services\SizeConfirmationSender;
 use App\Support\EventTemplates;
 use App\Support\GatewayPaymentRecord;
 use App\Support\LocalTime;
 use App\Support\ParticipantOptions;
+use App\Support\ParticipantSizes;
 use App\Support\PaymentFigures;
 use App\Support\PaymentSettings;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -85,7 +88,13 @@ class ParticipantController extends Controller
             // anybody actually told this registrant". Same reasoning: one query for
             // the page instead of one per row, and it is read from the message log
             // rather than from a column on the registration.
-            ->with(['event', 'participants', 'addonLines', 'checkouts', 'paymentReminders'])
+            //
+            // event.addons.variants and sizeConfirmations are loaded for the Size
+            // column, which answers "who still has no shirt size" and "has anybody
+            // been asked for it". The catalogue is needed because which items collect
+            // a size is a property of the event, not of the entry, and the second is
+            // read from the message log for the same reason the Reminder column is.
+            ->with(['event.addons.variants', 'participants', 'addonLines', 'checkouts', 'paymentReminders', 'sizeConfirmations'])
             ->latest()
             ->paginate(self::PER_PAGE)
             ->withQueryString();
@@ -141,6 +150,18 @@ class ParticipantController extends Controller
             'search' => $search,
             'eventId' => $eventId,
             'isFiltered' => $search !== '' || $eventId !== '',
+
+            /*
+             | How many entries on this list still owe a shirt size, and how many
+             | people that is.
+             |
+             | Over filtered() — the same method the rows and the money figures are
+             | built from — and over the active tab as well, so the figure on screen is
+             | exactly the set the "ask everybody" button beside it would write to. A
+             | count that covered more than the button sends is how an operator ends up
+             | believing a job is finished.
+             */
+            'sizesMissing' => $this->sizesOutstanding($request, $tab),
             /*
              | Read through PaymentFigures, over the list's own filtered query.
              |
@@ -222,11 +243,24 @@ class ParticipantController extends Controller
             'event' => $event,
             'corrections' => $corrections,
 
-            // Split here rather than in the markup, so the screen and the counts in
-            // its headings cannot disagree about which rows are which.
+            /*
+             | Split here rather than in the markup, so the screen and the counts in
+             | its headings cannot disagree about which rows are which.
+             |
+             | Three buckets, not two, because there are two different kinds of wrong
+             | and reading them in one table would hide the one that matters most: a
+             | row whose total moves is money the organiser is about to start chasing,
+             | and a row whose total stays put is a charge being re-described. Mixing
+             | them puts a column of +RM 0.00 beside real shortfalls and invites the
+             | operator to skim past both.
+             */
             'changing' => array_values(array_filter(
                 $corrections,
-                fn (TotalCorrection $correction) => $correction->changes(),
+                fn (TotalCorrection $correction) => $correction->movesMoney(),
+            )),
+            'reitemised' => array_values(array_filter(
+                $corrections,
+                fn (TotalCorrection $correction) => $correction->reshapes(),
             )),
             'unchanged' => array_values(array_filter(
                 $corrections,
@@ -270,24 +304,53 @@ class ParticipantController extends Controller
             $applied,
         )), 2);
 
+        /*
+         | Counted apart in the message for the same reason the preview tables are.
+         | "22 entries corrected, RM 0.00 added to what is owed" reads like nothing
+         | happened; it is the sentence an owner would dismiss.
+         */
+        $reitemised = count(array_filter(
+            $applied,
+            fn (TotalCorrection $correction) => $correction->reshapes(),
+        ));
+
+        $repriced = count($applied) - $reitemised;
+
+        $summary = trim(sprintf(
+            '%s%s',
+            $repriced > 0
+                ? sprintf(
+                    '%d %s re-priced, %s added to what is owed. ',
+                    $repriced,
+                    $repriced === 1 ? 'entry' : 'entries',
+                    PaymentFigures::money($moved),
+                )
+                : '',
+            $reitemised > 0
+                ? sprintf(
+                    '%d %s re-itemised at the same amount, so the items now describe the charge.',
+                    $reitemised,
+                    $reitemised === 1 ? 'entry' : 'entries',
+                )
+                : '',
+        ));
+
         AdminLogger::activity(
             'participants.recalculate',
             sprintf(
-                'Recalculated add-on totals for %s: %d entries corrected, %s added to what is owed.',
+                'Rechecked add-on totals for %s: %s',
                 $event->title,
-                count($applied),
-                PaymentFigures::money($moved),
+                $summary,
             ),
         );
 
         return redirect()
             ->route('admin.event.participants.recalculate', $event)
             ->with('status', sprintf(
-                '%d %s corrected on %s. %s added to what is owed. Each change is in the activity log.',
-                count($applied),
-                count($applied) === 1 ? 'entry' : 'entries',
+                '%s on %s. %s Each change is in the activity log.',
+                sprintf('%d %s corrected', count($applied), count($applied) === 1 ? 'entry' : 'entries'),
                 $event->title,
-                PaymentFigures::money($moved),
+                $summary,
             ));
     }
 
@@ -473,6 +536,255 @@ class ParticipantController extends Controller
             $registration->outstandingAmountLabel(),
             filled($address) ? ', to ' . $address : '',
         ));
+    }
+
+    /**
+     * Ask one registrant to confirm the shirt size of everybody on the entry.
+     *
+     * The case this exists for: an event began collecting a size part way through its
+     * entries. Everybody who registered before that was charged for a shirt and never
+     * asked which size, so the organiser cannot order or hand them out. A size cannot
+     * be guessed, and backfilling one would misstate what to print, so it is collected
+     * from the person who registered.
+     *
+     * Behind participants.notify, the permission that already governs reaching a
+     * participant's inbox. Nothing about money is touched by this press or by the page
+     * it sends them to.
+     *
+     * Every rule about who may be asked lives in SizeConfirmationSender, shared with
+     * sendAllSizeLinks() below.
+     */
+    public function sendSizeLink(Request $request, EventRegistration $registration, SizeConfirmationSender $sender)
+    {
+        if ($reason = $sender->skipReason($registration)) {
+            return back()->with('warning', sprintf(
+                'No size link went out for %s: %s.',
+                $registration->reference,
+                $this->whyNoSizeLink($registration, $reason),
+            ));
+        }
+
+        if (! $sender->send($registration, $request->user()?->id)) {
+            return back()->with('warning', sprintf(
+                'No size link went out for %s. Check the Confirm Shirt Size template is switched on under Event > Settings, and that the registrant has an email address.',
+                $registration->reference,
+            ));
+        }
+
+        $missing = ParticipantSizes::missingCount($registration);
+
+        AdminLogger::activity('participants.size-link', sprintf(
+            'Queued a size confirmation for %s (%d %s outstanding).',
+            $registration->reference,
+            $missing,
+            $missing === 1 ? 'size' : 'sizes',
+        ));
+
+        $address = $registration->load('sizeConfirmations')->lastSizeConfirmation()?->recipient;
+
+        return back()->with('status', sprintf(
+            'Size link queued for %s (%d %s outstanding)%s. It carries no payment, and the Size column says when it actually leaves.',
+            $this->registrant($registration)?->full_name ?? $registration->reference,
+            $missing,
+            $missing === 1 ? 'size' : 'sizes',
+            filled($address) ? ', to ' . $address : '',
+        ));
+    }
+
+    /**
+     * Ask everybody on the list, as it is currently filtered.
+     *
+     * Thirty-two entries needing a size is thirty-two presses of the row action, which
+     * is what this replaces. Deliberately not a schedule: somebody with the notify
+     * permission decides, and it is recorded against their name.
+     *
+     * "As currently filtered" is the whole contract. The tab, the event and the search
+     * box arrive in the query string of this URL and go into the same filtered() the
+     * table itself paginates, so an operator who has narrowed the list to one event and
+     * presses a button labelled "all" means those, not the database. Nothing in the
+     * request decides who is eligible or what is written: eligibility is the sender's,
+     * and the link is signed and rebuilt server-side per registration.
+     */
+    public function sendAllSizeLinks(Request $request, SizeConfirmationSender $sender)
+    {
+        /*
+         | The filters are the only input, and they may only be values that exist. They
+         | can narrow the set or match nothing; a crafted value cannot widen it past the
+         | tab, and it cannot reach an entry the sender would refuse.
+         */
+        $request->validate([
+            'tab' => ['nullable', Rule::in(array_keys(self::TABS))],
+            'q' => ['nullable', 'string', 'max:190'],
+            'event' => ['nullable', 'integer', 'exists:events,id'],
+        ]);
+
+        $tab = $this->resolveTab($request->query('tab'));
+
+        $queued = 0;
+        /** @var array<string, int> $skipped  reason => how many */
+        $skipped = [];
+
+        /*
+         | Walked in id order in chunks rather than loaded at once: this is a live list
+         | that keeps growing. chunkById pages on the primary key, and nothing in the
+         | loop writes to event_registrations at all, so the pages cannot shuffle
+         | underneath it.
+         */
+        $this->filtered($request, $tab)
+            ->with(['event.addons.variants', 'participants', 'addonLines', 'sizeConfirmations'])
+            ->chunkById(100, function ($registrations) use ($sender, $request, &$queued, &$skipped) {
+                foreach ($registrations as $registration) {
+                    // Asked once and counted, never asked twice: the reason is what the
+                    // operator is told afterwards.
+                    $reason = $sender->skipReason($registration);
+
+                    if ($reason === null && $sender->send($registration, $request->user()?->id)) {
+                        $queued++;
+
+                        continue;
+                    }
+
+                    // Nothing to skip it for, but the queue would not take it. Rare,
+                    // logged by the notifier, and worth a line of its own so the counts
+                    // still add up to what was on the list.
+                    $reason ??= SizeConfirmationSender::SKIP_QUEUE_FAILED;
+
+                    $skipped[$reason] = ($skipped[$reason] ?? 0) + 1;
+                }
+            });
+
+        $passedOver = array_sum($skipped);
+        $breakdown = SizeConfirmationSender::breakdown($skipped);
+
+        // One entry for the whole press: who, what was filtered, and the counts. A bulk
+        // outbound action touching real participants has to be answerable for later.
+        AdminLogger::activity('participants.size-link-all', sprintf(
+            'Queued %d size %s from the %s participants list (%s). Skipped %d%s.',
+            $queued,
+            $queued === 1 ? 'confirmation' : 'confirmations',
+            strtolower(self::TABS[$tab]['label'] ?? $tab),
+            $this->sizeFilterLabel($request),
+            $passedOver,
+            $breakdown === '' ? '' : ': ' . $breakdown,
+        ));
+
+        if ($queued === 0) {
+            return back()->with('warning', $passedOver === 0
+                ? 'Nothing on this list is waiting for a size, so no links went out.'
+                : sprintf(
+                    'No size links went out. All %d %s on this list were passed over: %s.',
+                    $passedOver,
+                    $passedOver === 1 ? 'entry' : 'entries',
+                    $breakdown,
+                ));
+        }
+
+        return back()->with('status', sprintf(
+            '%d size %s queued, and %s out as soon as the queue worker runs. No payment is asked for on any of them.%s',
+            $queued,
+            $queued === 1 ? 'link' : 'links',
+            $queued === 1 ? 'goes' : 'go',
+            $passedOver === 0
+                ? ' Nothing was passed over.'
+                : sprintf(
+                    ' %d %s passed over: %s.',
+                    $passedOver,
+                    $passedOver === 1 ? 'entry' : 'entries',
+                    $breakdown,
+                ),
+        ));
+    }
+
+    /**
+     * Why there is nothing to ask for, in words the operator can act on.
+     */
+    private function whyNoSizeLink(EventRegistration $registration, string $reason): string
+    {
+        if ($reason === SizeConfirmationSender::SKIP_COOLDOWN) {
+            return sprintf(
+                'one was already queued %s, to %s, so the registrant is being left alone until %s',
+                $registration->sizeLinkSentAt()->diffForHumans(),
+                $registration->lastSizeConfirmation()?->recipient ?: 'the registrant',
+                LocalTime::format($registration->sizeLinkCooldownEndsAt()),
+            );
+        }
+
+        return SizeConfirmationSender::reasons()[$reason] ?? 'there is nothing to confirm';
+    }
+
+    /**
+     * The filters in force, in words, for the activity entry.
+     */
+    private function sizeFilterLabel(Request $request): string
+    {
+        $search = trim((string) $request->query('q'));
+        $eventId = trim((string) $request->query('event'));
+
+        $parts = [];
+
+        if ($eventId !== '') {
+            $parts[] = 'event ' . (Event::query()->whereKey($eventId)->value('title') ?? $eventId);
+        }
+
+        if ($search !== '') {
+            $parts[] = 'search "' . $search . '"';
+        }
+
+        return $parts === [] ? 'no filters' : implode(', ', $parts);
+    }
+
+    /**
+     * How many entries on this list still owe a size, and how many people that is.
+     *
+     * Built over filtered(), the list's own query, so it cannot describe a different
+     * set from the rows. Which items collect a size and who has not answered is
+     * ParticipantSizes' single definition, applied in PHP rather than rewritten as a
+     * second SQL predicate: the per-head rule already lives on the add-on, and a
+     * duplicate of it in a WHERE clause is exactly how two parts of this screen
+     * started answering the same question differently.
+     *
+     * Chunked with the catalogue and the lines eager loaded, so the cost is a handful
+     * of queries whatever the scope holds, not one per row.
+     *
+     * @return array{registrations: int, participants: int}
+     */
+    private function sizesOutstanding(Request $request, string $tab): array
+    {
+        $registrations = 0;
+        $people = 0;
+
+        $this->filtered($request, $tab)
+            /*
+             | Rows that could not possibly be missing a size are never walked.
+             |
+             | Deliberately a broader test than ParticipantSizes applies — it leaves out
+             | the per-head condition, which belongs to the event's mode — so anything
+             | the real rule would accept is still here. It decides only whether a row is
+             | worth looking at, and most of the table is not: one event collects sizes
+             | and the rest never will, so this is what keeps a screen that lists every
+             | event from hydrating all of them.
+             */
+            ->whereHas('event.addons', fn (Builder $addons) => $addons
+                ->where('is_active', true)
+                ->where('selection_type', EventAddon::SELECTION_RADIO)
+                ->whereHas('variants'))
+            ->with(['event.addons.variants', 'participants', 'addonLines'])
+            ->chunkById(200, function ($rows) use (&$registrations, &$people) {
+                foreach ($rows as $registration) {
+                    if ($registration->status === EventRegistration::STATUS_CANCELLED) {
+                        continue;
+                    }
+
+                    $missing = ParticipantSizes::missingCount($registration);
+
+                    if ($missing > 0) {
+                        $registrations++;
+                        $people += $missing;
+                    }
+                }
+            });
+
+        return ['registrations' => $registrations, 'participants' => $people];
     }
 
     /**
