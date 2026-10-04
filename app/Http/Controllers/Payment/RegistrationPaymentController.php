@@ -7,6 +7,7 @@ use App\Models\EventRegistration;
 use App\Services\Payment\CheckoutUrls;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
+use App\Services\Payment\RegistrationBalanceCharge;
 use App\Services\Payment\RegistrationPaymentUpdater;
 use App\Support\PaymentSettings;
 use Illuminate\Support\Facades\Log;
@@ -33,6 +34,7 @@ class RegistrationPaymentController extends Controller
     public function __construct(
         private readonly PaymentGatewayManager $gateways,
         private readonly RegistrationPaymentUpdater $updater,
+        private readonly RegistrationBalanceCharge $balance,
     ) {
     }
 
@@ -67,7 +69,16 @@ class RegistrationPaymentController extends Controller
     {
         $registration = $this->find($reference);
 
-        if (! $registration->awaitingPayment()) {
+        /*
+         | owesBalance() rather than awaitingPayment(), so a part-paid entry may settle
+         | the rest here.
+         |
+         | awaitingPayment() excludes it on the grounds that the ordinary checkout is
+         | built from the full charge and would take the whole fee again. That reasoning
+         | still holds, and is why a part-paid entry is sent to the gateway through
+         | RegistrationBalanceCharge below, which asks for the balance alone.
+         */
+        if (! $registration->owesBalance()) {
             return redirect()->to(self::urlFor($registration));
         }
 
@@ -91,12 +102,27 @@ class RegistrationPaymentController extends Controller
         try {
             $gateway = $this->gateways->active();
 
-            $session = $gateway->createCheckout($registration, new CheckoutUrls(
+            $urls = new CheckoutUrls(
                 success: $this->returnUrl($registration, 'success'),
                 failure: $this->returnUrl($registration, 'failure'),
                 cancel: $this->returnUrl($registration, 'cancel'),
                 callback: route('payments.chip.webhook'),
-            ));
+            );
+
+            /*
+             | Two ways to the same gateway, and which one is used is decided by the row
+             | rather than by anything the payer sends.
+             |
+             | Nothing has arrived: the ordinary checkout, itemising the fee and every
+             | add-on, because that is what the invoice says and what the receipt should.
+             |
+             | Some of it has arrived: one line for the balance, recomputed here. Those
+             | invoice lines add up to the full charge, so sending them would ask for the
+             | whole fee a second time.
+             */
+            $session = $registration->amountPaid() > 0
+                ? $gateway->createCharge($this->balance->build($registration), $urls)
+                : $gateway->createCheckout($registration, $urls);
         } catch (PaymentGatewayException $e) {
             Log::warning('Could not open a checkout.', [
                 'reference' => $registration->reference,

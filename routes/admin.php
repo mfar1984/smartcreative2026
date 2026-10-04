@@ -152,6 +152,39 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('participants/export', [ParticipantController::class, 'export'])
                 ->middleware('permission:participants.export')
                 ->name('participants.export');
+
+            /*
+             | Re-pricing one event's entries after its add-on charging rule changed.
+             |
+             | Two routes because it is two acts. The GET is a read-only preview that
+             | writes nothing and may be opened as often as the operator likes; the POST
+             | is the one that moves money, and it is refused unless the confirmation on
+             | that screen was ticked.
+             |
+             | Behind participants.update: it corrects what an entry was charged, which
+             | is the same kind of act as correcting anything else on the record, and it
+             | needs no role to be re-seeded.
+             |
+             | Declared above the {registration} route for the same reason "export" is,
+             | and scoped to one event rather than offered as a sweep: this runs against
+             | a live table while people are registering.
+             */
+            Route::get('participants/recalculate/{event}', [ParticipantController::class, 'recalculateForm'])
+                ->middleware('permission:participants.update')
+                ->whereNumber('event')
+                ->name('participants.recalculate');
+
+            /*
+             | Its own path rather than the same one by verb, so a GET to it is refused
+             | outright with a 405 instead of quietly rendering the preview. The two are
+             | different acts and a link, a scanner or a mail client following one must
+             | never land on the other.
+             */
+            Route::post('participants/recalculate/{event}/apply', [ParticipantController::class, 'recalculate'])
+                ->middleware(['permission:participants.update', 'throttle:10,1'])
+                ->whereNumber('event')
+                ->name('participants.recalculate.apply');
+
             Route::get('participants/{registration}', [ParticipantController::class, 'show'])
                 ->middleware('permission:participants.view')
                 ->name('participants.show');

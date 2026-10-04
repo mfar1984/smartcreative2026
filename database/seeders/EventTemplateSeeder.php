@@ -112,19 +112,28 @@ class EventTemplateSeeder extends Seeder
                 | A chase-up, so it opens with what is owed rather than with
                 | thanks. Deliberately plain about the consequence of not
                 | paying, since that is the only reason to send it.
+                |
+                | The figures are the balance, not the charge. {{amount}} is what the
+                | entry costs, and quoting it here asked an entrant who had already
+                | transferred part of it for the whole fee again. The three lines
+                | together read correctly either way: nothing received yet shows
+                | RM 0.00 against the full total, and the link charges the same
+                | outstanding figure this says.
                 */
                 'payment.reminder' => [
                     'subject' => 'Payment still outstanding: {{event_name}} ({{reference}})',
                     'body' => <<<'TEXT'
                     Hello {{manager_name}},
 
-                    Your entry for {{event_name}} is not yet paid, so the place is not
-                    confirmed.
+                    Your entry for {{event_name}} is not yet paid in full, so the place is
+                    not confirmed.
 
                     Reference: {{reference}}
                     Team: {{team_name}}
                     People entered: {{people_count}}
-                    Amount due: {{amount}}
+                    Total for this entry: {{amount}}
+                    Received so far: {{amount_paid}}
+                    Still to pay: {{amount_outstanding}}
 
                     Pay here
                     {{payment_link}}
@@ -223,8 +232,9 @@ class EventTemplateSeeder extends Seeder
                     'body' => '{{manager_name}} entered you for {{event_name}} with {{team_name}}. Ref {{reference}}. Check your email.',
                 ],
 
+                // The balance, for the same reason as the email above.
                 'payment.reminder' => [
-                    'body' => '{{team_name}}: {{amount}} still due for {{event_name}}, ref {{reference}}. Place not confirmed until paid. See your email to pay.',
+                    'body' => '{{team_name}}: {{amount_outstanding}} still due for {{event_name}}, ref {{reference}}. Place not confirmed until paid. See your email to pay.',
                 ],
 
                 'payment.manager' => [

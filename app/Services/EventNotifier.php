@@ -311,9 +311,18 @@ class EventNotifier
             return 0;
         }
 
-        // The payment link only ever goes here. A player copy is rendered with an
-        // empty link, so a template that asks for one produces nothing.
-        $link = $registration->awaitingPayment()
+        /*
+         | The payment link only ever goes here. A player copy is rendered with an
+         | empty link, so a template that asks for one produces nothing.
+         |
+         | owesBalance() rather than awaitingPayment(), so a part-paid entry gets one
+         | too. It was excluded because the checkout was built from the full charge and
+         | would have taken the fee twice; the page it lands on now opens a purchase for
+         | the balance alone, worked out from the row when the button is pressed. Without
+         | this, the entry most in need of chasing — one whose charge was corrected after
+         | it had already paid — received a reminder with no way to pay.
+         */
+        $link = $registration->owesBalance()
             ? RegistrationPaymentController::urlFor($registration)
             : null;
 

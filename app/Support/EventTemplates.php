@@ -205,7 +205,7 @@ class EventTemplates
         'payment.reminder' => [
             'label' => 'Payment Reminder — Registrant',
             'audience' => 'Whoever registered: the manager of a squad, or the person on a solo entry',
-            'description' => 'A chase-up for an entry that is still unpaid. Sent from the Participants list. Carries the payment link.',
+            'description' => 'A chase-up for an entry that still owes money, whether it has paid nothing or part of it. Sent from the Participants list. Carries a payment link for the outstanding balance, so write the figures as {{amount_outstanding}} rather than {{amount}}.',
             'placeholders' => [
                 ...self::SHARED,
                 ...self::MONEY,

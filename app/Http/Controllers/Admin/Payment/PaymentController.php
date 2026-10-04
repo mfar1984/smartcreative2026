@@ -442,7 +442,13 @@ class PaymentController extends Controller
      */
     public function remind(Request $request, EventRegistration $registration, EventNotifier $notifier)
     {
-        if (! $registration->awaitingPayment()) {
+        /*
+         | owesBalance() rather than awaitingPayment(), matching the same button on the
+         | Participants screen. A part-paid entry owes a balance and is listed on this
+         | very screen, so refusing to chase it here told the operator there was nothing
+         | to chase about a row the page had just shown them as owing money.
+         */
+        if (! $registration->owesBalance()) {
             return back()->with('warning', sprintf(
                 'Nothing to chase on %s: it is %s.',
                 $registration->reference,
@@ -459,10 +465,12 @@ class PaymentController extends Controller
             ));
         }
 
+        // The balance, not the charge. Quoting the charge told the operator that an
+        // entry which had already transferred part of it still owed the whole fee.
         return back()->with('status', sprintf(
-            'Payment reminder queued for %s (%s).',
+            'Payment reminder queued for %s (%s outstanding).',
             $registration->reference,
-            $registration->amountLabel(),
+            $registration->outstandingAmountLabel(),
         ));
     }
 

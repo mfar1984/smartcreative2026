@@ -124,16 +124,30 @@
                      identity card number ever collected is a different risk from one
                      event's, and the controller refuses it either way; a disabled
                      button with a reason on hover says so before the press. --}}
-                @if ($canExport)
+                @if ($canExport || $canRecalculate)
                     <x-slot:actions>
-                        @if ($eventId !== '')
+                        {{-- Re-pricing the entries taken before an event started charging
+                             items per participant. Offered only once an event is chosen,
+                             because the arithmetic belongs to one event's catalogue and a
+                             sweep across all of them is not something to hand anybody.
+                             The link is the preview; nothing is written from here. --}}
+                        @if ($canRecalculate && $eventId !== '')
+                            <a href="{{ route('admin.event.participants.recalculate', $eventId) }}"
+                               title="Check whether these entries were charged the right amount for their items"
+                               class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3.5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                <x-admin.icon name="cash" class="w-4 h-4" />
+                                Recheck Totals
+                            </a>
+                        @endif
+
+                        @if ($canExport && $eventId !== '')
                             <a href="{{ route('admin.event.participants.export', request()->only('event', 'tab', 'q')) }}"
                                title="One row per person, matching the filters. Carries identity card numbers and addresses."
                                class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3.5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
                                 <x-admin.icon name="archive" class="w-4 h-4" />
                                 Export CSV
                             </a>
-                        @else
+                        @elseif ($canExport)
                             <span title="Choose an event first. A file covering every event would carry more personal data than any one job needs."
                                   aria-disabled="true"
                                   class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2 text-sm font-semibold text-gray-400 cursor-not-allowed">
@@ -209,6 +223,18 @@
                                     <x-admin.badge :tone="$payTones[$registration->payment_status] ?? 'gray'">
                                         {{ $registration->paymentStatusLabel() }}
                                     </x-admin.badge>
+
+                                    {{-- The balance, under the badge, and only where the two
+                                         figures differ. "Partly Paid" on its own does not say
+                                         how much is still owed, which is the first thing
+                                         anybody chasing it needs, and it is the figure the
+                                         reminder and the payment link will ask for. --}}
+                                    @if ($registration->isPartlyPaid())
+                                        <span class="block text-xs text-gray-500 mt-0.5 tabular-nums">
+                                            {{ $registration->outstandingAmountLabel() }} of
+                                            {{ $registration->amountLabel() }} outstanding
+                                        </span>
+                                    @endif
                                 </td>
 
                                 <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">

@@ -19,6 +19,8 @@ use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\RegistrationPaymentUpdater;
 use App\Services\Payment\RegistrationTally;
+use App\Services\Registration\RegistrationTotalsRecalculator;
+use App\Services\Registration\TotalCorrection;
 use App\Support\EventTemplates;
 use App\Support\GatewayPaymentRecord;
 use App\Support\ParticipantOptions;
@@ -111,6 +113,10 @@ class ParticipantController extends Controller
             'canExport' => $request->user()->hasPermission('participants.export'),
             'canTransfer' => $request->user()->hasPermission('participants.transfer'),
 
+            // Correcting what an entry was charged is a correction to the record, so
+            // it sits behind the same permission as correcting anything else on it.
+            'canRecalculate' => $request->user()->hasPermission('participants.update'),
+
             /*
              | Events an entry could be moved to. Only those still accepting entries,
              | because moving one onto a finished event would create something the
@@ -186,6 +192,95 @@ class ParticipantController extends Controller
             'reachedGateway' => $reachedGateway,
             'gatewayLabel' => PaymentSettings::providerLabel(),
         ]);
+    }
+
+    /**
+     * What re-pricing one event's entries would do, before anything is written.
+     *
+     * A read-only screen. Entries stored before the event charged add-ons per head
+     * still name the old figure — a group of six choosing a RM40 shirt each was
+     * charged RM40 — and this is where the operator sees every row that would move,
+     * with its head count, what it says now, what it should say and the difference,
+     * alongside the rows that need nothing. Applying it is a separate press.
+     *
+     * Scoped to one chosen event on purpose. A sweep across every event would be a
+     * single irreversible press against a live table holding other organisers' money.
+     */
+    public function recalculateForm(Request $request, Event $event, RegistrationTotalsRecalculator $recalculator)
+    {
+        $corrections = $recalculator->preview($event);
+
+        return view('admin.event.participants-recalculate', [
+            'event' => $event,
+            'corrections' => $corrections,
+
+            // Split here rather than in the markup, so the screen and the counts in
+            // its headings cannot disagree about which rows are which.
+            'changing' => array_values(array_filter(
+                $corrections,
+                fn (TotalCorrection $correction) => $correction->changes(),
+            )),
+            'unchanged' => array_values(array_filter(
+                $corrections,
+                fn (TotalCorrection $correction) => ! $correction->changes(),
+            )),
+        ]);
+    }
+
+    /**
+     * Write the corrected totals for one event.
+     *
+     * POST only, and refused unless the operator has ticked the confirmation on the
+     * preview: the figures on that screen are what they are agreeing to. Every amount
+     * is recomputed from the database here rather than carried in the request, so a
+     * replayed or edited post cannot name its own total.
+     */
+    public function recalculate(Request $request, Event $event, RegistrationTotalsRecalculator $recalculator)
+    {
+        $request->validate([
+            'confirm' => ['accepted'],
+        ], [
+            'confirm.accepted' => 'Tick the confirmation to apply these corrections.',
+        ]);
+
+        $applied = $recalculator->apply($event);
+
+        if ($applied === []) {
+            // Back to the preview by name rather than back(): this is also what a
+            // second press lands on, and it must say so on a page rather than
+            // depending on a referer being there.
+            return redirect()
+                ->route('admin.event.participants.recalculate', $event)
+                ->with('warning', sprintf(
+                    'Nothing to correct on %s. Every entry is already charging the right amount.',
+                    $event->title,
+                ));
+        }
+
+        $moved = round(array_sum(array_map(
+            fn (TotalCorrection $correction) => $correction->difference(),
+            $applied,
+        )), 2);
+
+        AdminLogger::activity(
+            'participants.recalculate',
+            sprintf(
+                'Recalculated add-on totals for %s: %d entries corrected, %s added to what is owed.',
+                $event->title,
+                count($applied),
+                PaymentFigures::money($moved),
+            ),
+        );
+
+        return redirect()
+            ->route('admin.event.participants.recalculate', $event)
+            ->with('status', sprintf(
+                '%d %s corrected on %s. %s added to what is owed. Each change is in the activity log.',
+                count($applied),
+                count($applied) === 1 ? 'entry' : 'entries',
+                $event->title,
+                PaymentFigures::money($moved),
+            ));
     }
 
     /**
