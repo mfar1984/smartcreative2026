@@ -58,11 +58,84 @@ class SmsSettings
         'notify_payment_reminder' => ['payment.reminder'],
     ];
 
+    /*
+    | One-time codes for collecting goods at a counter.
+    |
+    | Three numbers, and the first two are easy to confuse with each other, so they
+    | are spelled out here as well as on the screen:
+    |
+    |   expiry   — how long a code stays usable. Stops yesterday's code working today.
+    |   attempts — how many wrong guesses a code survives before it is burned. Six
+    |              digits is a million combinations, which is only safe while the
+    |              number of tries is capped.
+    |   cooldown — how long before another code can be asked for. Stops a counter
+    |              queue, a double press or somebody bored texting the same handset
+    |              over and over.
+    |
+    | Settings rather than constants because they are operational: a stadium with bad
+    | signal wants a longer expiry, and a quiet counter wants a shorter cooldown.
+    */
+    public const CODE_EXPIRY_DEFAULT = 10;
+    public const CODE_ATTEMPTS_DEFAULT = 5;
+    public const CODE_COOLDOWN_DEFAULT = 2;
+
+    /*
+    | Upper bounds, enforced on the screen and again when the value is read.
+    |
+    | Read as well as written, because a row already in the database was not
+    | necessarily put there by this version of the form. A two-day expiry would
+    | defeat the point of an expiry, and fifty attempts would defeat the point of a
+    | six-digit code.
+    */
+    public const CODE_EXPIRY_CEILING = 120;
+    public const CODE_ATTEMPTS_CEILING = 10;
+    public const CODE_COOLDOWN_CEILING = 60;
+
     private const GROUP = 'integration.sms';
 
     public static function get(string $key, ?string $default = null): ?string
     {
         return Setting::read(self::GROUP . '.' . $key, $default);
+    }
+
+    /* ---------------------------------------------------------------------
+     | Collection codes
+     * ------------------------------------------------------------------ */
+
+    /** How long a collection code stays usable, in minutes. */
+    public static function collectionCodeExpiryMinutes(): int
+    {
+        return self::boundedCount('collection_code_expiry_minutes', self::CODE_EXPIRY_DEFAULT, self::CODE_EXPIRY_CEILING);
+    }
+
+    /** How many wrong entries a collection code survives before it is burned. */
+    public static function collectionCodeMaxAttempts(): int
+    {
+        return self::boundedCount('collection_code_max_attempts', self::CODE_ATTEMPTS_DEFAULT, self::CODE_ATTEMPTS_CEILING);
+    }
+
+    /** How long before another collection code may be asked for, in minutes. */
+    public static function collectionCodeCooldownMinutes(): int
+    {
+        return self::boundedCount('collection_code_cooldown_minutes', self::CODE_COOLDOWN_DEFAULT, self::CODE_COOLDOWN_CEILING);
+    }
+
+    /**
+     * A stored counter read as a positive whole number inside its bounds.
+     *
+     * Clamped rather than trusted. Settings are strings in a table that other tools
+     * can write to, and a blank, a zero or a negative here would mean a code that
+     * expires before it is sent or one that never expires at all.
+     */
+    private static function boundedCount(string $key, int $default, int $ceiling): int
+    {
+        $raw = self::get($key);
+
+        if ($raw === null || trim($raw) === '' || ! is_numeric($raw)) {
+            return $default;
+        }
+
+        return max(1, min($ceiling, (int) $raw));
     }
 
     public static function provider(): string

@@ -294,6 +294,14 @@ class IntegrationController extends Controller
                 'Infobip Credentials' => ['icon' => 'lock', 'fields' => ['base_url', 'api_key']],
                 'Legacy Credentials' => ['icon' => 'lock', 'fields' => ['endpoint', 'username', 'api_secret']],
                 'Alerts' => ['icon' => 'clipboard', 'fields' => ['notify_registration', 'notify_payment', 'notify_payment_reminder']],
+                'Collection Codes' => [
+                    'icon' => 'shield',
+                    'fields' => [
+                        'collection_code_expiry_minutes',
+                        'collection_code_max_attempts',
+                        'collection_code_cooldown_minutes',
+                    ],
+                ],
             ],
             'fields' => [
                 'enabled' => [
@@ -363,6 +371,50 @@ class IntegrationController extends Controller
                     'type' => 'toggle',
                     'rules' => ['nullable', 'boolean'],
                     'help' => 'Sent from the Participants screen, alongside the email reminder.',
+                ],
+
+                /* ---- One-time codes for a counter handover ----
+                 |
+                 | These three govern the code texted to somebody collecting goods on
+                 | another person's behalf. Sent straight out rather than queued,
+                 | because a code that arrives a minute later is useless with a queue
+                 | of people waiting.
+                 |
+                 | Expiry and cooldown are different things and the help text says so
+                 | on both, because they are the pair that gets confused: one is how
+                 | long a code works for, the other is how soon a replacement can be
+                 | asked for.
+                 |
+                 | The '' . on the defaults is not decoration: SCHEMA is a const, and
+                 | PHP will not allow a (string) cast inside a constant expression.
+                 | Concatenation is allowed and does the same job.
+                 */
+                'collection_code_expiry_minutes' => [
+                    'label' => 'Code Expires After',
+                    'type' => 'number',
+                    'rules' => ['required', 'integer', 'min:1', 'max:' . SmsSettings::CODE_EXPIRY_CEILING],
+                    'default' => '' . SmsSettings::CODE_EXPIRY_DEFAULT,
+                    'placeholder' => '' . SmsSettings::CODE_EXPIRY_DEFAULT,
+                    'help' => 'Minutes a code stays usable, counted from when it was texted. Not the same as the cooldown below: this one decides how long the collector has to read it out. Default '
+                        . SmsSettings::CODE_EXPIRY_DEFAULT . ', most ' . SmsSettings::CODE_EXPIRY_CEILING . '.',
+                ],
+                'collection_code_max_attempts' => [
+                    'label' => 'Tries Before A Code Is Burned',
+                    'type' => 'number',
+                    'rules' => ['required', 'integer', 'min:1', 'max:' . SmsSettings::CODE_ATTEMPTS_CEILING],
+                    'default' => '' . SmsSettings::CODE_ATTEMPTS_DEFAULT,
+                    'placeholder' => '' . SmsSettings::CODE_ATTEMPTS_DEFAULT,
+                    'help' => 'How many wrong entries a code survives. After that it stops working and a new one has to be sent. Six digits is only safe while the number of tries is capped. Default '
+                        . SmsSettings::CODE_ATTEMPTS_DEFAULT . ', most ' . SmsSettings::CODE_ATTEMPTS_CEILING . '.',
+                ],
+                'collection_code_cooldown_minutes' => [
+                    'label' => 'Wait Before Sending Another',
+                    'type' => 'number',
+                    'rules' => ['required', 'integer', 'min:1', 'max:' . SmsSettings::CODE_COOLDOWN_CEILING],
+                    'default' => '' . SmsSettings::CODE_COOLDOWN_DEFAULT,
+                    'placeholder' => '' . SmsSettings::CODE_COOLDOWN_DEFAULT,
+                    'help' => 'Minutes before a replacement code can be asked for. Not the same as the expiry above: this one stops a double press or a bored staff member texting the same handset repeatedly. Default '
+                        . SmsSettings::CODE_COOLDOWN_DEFAULT . ', most ' . SmsSettings::CODE_COOLDOWN_CEILING . '.',
                 ],
 
             ],
@@ -985,7 +1037,14 @@ class IntegrationController extends Controller
                 continue;
             }
 
-            $values[$key] = $stored["integration.{$tab}.{$key}"] ?? null;
+            $value = $stored["integration.{$tab}.{$key}"] ?? null;
+
+            /*
+             | A field that declares a default shows it rather than an empty box.
+             | Without this a required number on a fresh installation renders blank
+             | and refuses to save until somebody guesses what belongs in it.
+             */
+            $values[$key] = filled($value) ? $value : ($field['default'] ?? null);
         }
 
         return $values;

@@ -163,8 +163,12 @@
                      so the panel can never offer a press the controller would refuse. --}}
                 @if ($canUpdate && $order->awaitsCollection())
                     <x-admin.panel title="Hand Over At The Counter" icon="identification">
+                        {{-- The wording is deliberately neutral about who is taking
+                             it: the form now asks that, so a confirm() naming the
+                             buyer would contradict a third-party handover being
+                             recorded two inches above it. --}}
                         <form action="{{ route('admin.shop.orders.collect', $order) }}" method="POST"
-                              onsubmit="return confirm('Hand order {{ $order->reference }} over to {{ addslashes($order->customer_name) }}?\n\nCheck their identity card first. This records the goods as collected, against your name.');"
+                              onsubmit="return confirm('Record order {{ $order->reference }} as handed over?\n\nCheck the identity card first. This records the goods as collected, against your name.');"
                               class="px-5 py-4 space-y-4">
                             @csrf
 
@@ -188,20 +192,25 @@
                                 @endif
                             </div>
 
+                            {{-- Who took it. Same partial as the dialog on the orders
+                                 list, so the two screens cannot ask for different
+                                 things about the same act. --}}
+                            @include('admin.shop.partials.collector-fields', ['order' => $order, 'uid' => 'show'])
+
                             <div>
                                 <label for="collect_note" class="block text-sm font-semibold text-gray-700 mb-1.5">
                                     Note
                                 </label>
                                 <input type="text" id="collect_note" name="note" maxlength="255"
                                        value="{{ old('note') }}"
-                                       placeholder="Who picked it up, if it was not the buyer"
+                                       placeholder="Anything else worth recording"
                                        class="{{ $input }}">
                                 <p class="text-xs text-gray-500 mt-1">
                                     Optional. Goes on the history below next to your name.
                                 </p>
                             </div>
 
-                            <button type="submit"
+                            <button type="submit" data-collector-submit
                                     class="w-full inline-flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-green-700 transition shadow-sm">
                                 <x-admin.icon name="check" class="w-4 h-4" />
                                 Confirm collection
@@ -274,6 +283,65 @@
                             it. Reopening one would let it come back to life without anybody deciding so.
                         </p>
                     </div>
+                @endif
+
+                {{-- ==================== Who took it ====================
+
+                     Only when there is a record. Nothing was backfilled, so an order
+                     collected before this existed has no row here and reads exactly
+                     as it did before: the handover is in the history below, in the
+                     note it was given at the time. --}}
+                @if ($order->handover)
+                    @php
+                        $handover = $order->handover;
+                    @endphp
+
+                    <x-admin.panel title="Who Collected It" icon="identification">
+                        <div class="px-5 py-4 space-y-3">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <x-admin.badge :tone="$handover->assuranceTone()" :dot="true">
+                                    {{ $handover->assuranceLabel() }}
+                                </x-admin.badge>
+
+                                <span class="text-xs text-gray-500">
+                                    {{ \App\Support\LocalTime::format($handover->collected_at) }}
+                                </span>
+                            </div>
+
+                            <dl class="grid gap-x-4 gap-y-2 sm:grid-cols-[10rem_1fr] text-sm">
+                                <dt class="text-gray-500">Collected by</dt>
+                                <dd class="text-gray-900 font-semibold">
+                                    {{ \App\Models\CollectionHandover::KINDS[$handover->collector_kind] ?? $handover->collector_kind }}
+                                </dd>
+
+                                @if ($handover->byThirdParty())
+                                    <dt class="text-gray-500">Name</dt>
+                                    <dd class="text-gray-900">{{ $handover->collector_name ?: '—' }}</dd>
+
+                                    <dt class="text-gray-500">Identity card</dt>
+                                    <dd class="text-gray-900 tabular-nums">{{ $handover->collector_ic ?: '—' }}</dd>
+
+                                    <dt class="text-gray-500">Telephone</dt>
+                                    <dd class="text-gray-900 tabular-nums">{{ $handover->collector_phone ?: '—' }}</dd>
+                                @endif
+
+                                <dt class="text-gray-500">Confirmed by</dt>
+                                <dd class="text-gray-900">{{ $handover->confirmed_by_label ?: 'System' }}</dd>
+                            </dl>
+
+                            {{-- The reason, in full and in red. Somebody reading this
+                                 months later after a dispute should not have to work
+                                 out that no code was ever checked. --}}
+                            @if ($handover->wasOverridden())
+                                <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                                    <p class="text-sm font-semibold text-red-800">
+                                        Handed over without SMS verification
+                                    </p>
+                                    <p class="text-sm text-red-700 mt-1">{{ $handover->override_reason }}</p>
+                                </div>
+                            @endif
+                        </div>
+                    </x-admin.panel>
                 @endif
 
                 {{-- ==================== History ==================== --}}
@@ -738,3 +806,7 @@
         </div>
     </x-admin.page-card>
 @endsection
+
+@push('scripts')
+@include('admin.shop.partials.collector-script')
+@endpush

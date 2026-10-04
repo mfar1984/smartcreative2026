@@ -3,15 +3,21 @@
 namespace App\Http\Controllers\Admin\Shop;
 
 use App\Http\Controllers\Controller;
+use App\Models\CollectionHandover;
 use App\Models\ShopOrder;
 use App\Services\AdminLogger;
+use App\Services\Collection\CollectionCodeException;
+use App\Services\Collection\CollectionVerifier;
+use App\Services\Messaging\MessagingException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\ShopOrderWriter;
 use App\Services\ShopPaymentLinkSender;
 use App\Support\LocalTime;
 use App\Support\PaymentFigures;
+use App\Support\PhoneNumber;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -35,6 +41,9 @@ class OrderController extends Controller
          */
         $orders = $this->matching($filters)
             ->withCount('items')
+            // Eager loaded so the Hand Over cell can say a handover went out without
+            // a verified code. One extra query for the page rather than one per row.
+            ->with('handover')
             ->latest('id')
             ->paginate(self::PER_PAGE)
             ->withQueryString();
@@ -188,7 +197,7 @@ class OrderController extends Controller
 
     public function show(Request $request, ShopOrder $order)
     {
-        $order->load(['items', 'events.user']);
+        $order->load(['items', 'events.user', 'handover']);
 
         return view('admin.shop.order-show', [
             'order' => $order,
@@ -294,25 +303,139 @@ class OrderController extends Controller
     }
 
     /**
-     * Record that a counter-collected order was actually handed over.
+     * Text a one-time code to somebody collecting an order on the buyer's behalf.
+     *
+     * Answers JSON because the confirm dialog stays open: the operator types the
+     * collector's details, presses this, and reads the gateway's own answer in place
+     * without losing what they have already filled in. A redirect would clear the
+     * form and send them round the houses with a queue waiting.
+     *
+     * Synchronous, straight through the gateway. The queue runs from cron once a
+     * minute, which is useless when somebody is standing there.
+     *
+     * No code is in the response. CollectionVerifier never hands the digits back,
+     * and the only thing returned here is where the message went and what the
+     * gateway said about it.
+     *
+     * Gated on shop.orders.update, the same permission as the handover itself.
+     */
+    public function sendCollectionCode(Request $request, ShopOrder $order, CollectionVerifier $verifier)
+    {
+        $data = $request->validate([
+            'collector_name' => ['required', 'string', 'max:190'],
+            'collector_ic' => ['required', 'string', 'max:30'],
+            'collector_phone' => ['required', 'string', 'max:30'],
+        ], [
+            'collector_name.required' => 'Name the person collecting. The record is worthless without it.',
+            'collector_ic.required' => 'Their identity card number is required.',
+            'collector_phone.required' => 'A telephone number is required: it is where the code goes.',
+        ]);
+
+        /*
+         | Nothing to verify. Checked before a code is issued so a double press on an
+         | order that has already gone out cannot text anybody.
+         */
+        if ($order->isCollected() || ! $order->isOffline() || ! $order->awaitsCollection()) {
+            return response()->json([
+                'ok' => false,
+                'message' => sprintf(
+                    'Order %s is not waiting to be collected, so no code was sent.',
+                    $order->reference,
+                ),
+            ], 422);
+        }
+
+        try {
+            $issued = $verifier->issue($order, $data['collector_phone'], 'order ' . $order->reference);
+        } catch (CollectionCodeException $e) {
+            // Our own rules: the cooldown, or too many codes to one handset. Not a
+            // fault, so it reads as a wait rather than a failure.
+            return response()->json(['ok' => false, 'message' => $e->publicMessage], 422);
+        } catch (MessagingException $e) {
+            /*
+             | The gateway refused, could not be reached, or is not configured. The
+             | public message only: the real one can quote the account base URL. The
+             | gateway has already logged the detail.
+             */
+            return response()->json([
+                'ok' => false,
+                'message' => $e->publicMessage . ' If it will not go through, open "The code will not go through" below and say why.',
+            ], 422);
+        }
+
+        AdminLogger::activity('shop.orders.collection-code', sprintf(
+            'Texted a collection code for order %s to %s for %s.',
+            $order->reference,
+            $issued->sms->destination,
+            $data['collector_name'],
+        ));
+
+        return response()->json([
+            'ok' => true,
+            'message' => $issued->summary(),
+        ]);
+    }
+
+    /**
+     * Record that a counter-collected order was actually handed over, and to whom.
      *
      * Its own route rather than a status posted through updateStatus(), and that is
      * the point of it: nothing in the request says which order moves or where it moves
-     * to. The order comes from the route binding, the destination is a constant in
-     * this method, and the only field read is a note for the history. A stale page or
-     * a crafted body therefore cannot aim this at an unpaid order or at a posted one.
+     * to. The order comes from the route binding and the destination is a constant in
+     * this method, so a stale page or a crafted body cannot aim this at an unpaid
+     * order or at a posted one.
      *
      * Paying is not collecting. For a counter order the two are separated by however
      * long it is until the event, which is why payment leaves the order at paid —
      * awaiting collection — and this is the only thing that moves it to delivered.
      *
+     * Two cases, treated differently on purpose:
+     *
+     *   The BUYER collects. Identity is established by the identity card check this
+     *   counter has always run, against the number carried on the order. An SMS code
+     *   here would cost counter time and prove nothing extra, so none is asked for.
+     *   This is the default, and the flow is exactly what it was.
+     *
+     *   SOMEBODY ELSE collects. The risky case, and the reason any of this exists.
+     *   Their name, identity card and telephone number are required, and a code
+     *   texted to that number has to be read back before the handover is recorded.
+     *
+     * And an override, which is not optional kindness. Stadium signal is poor,
+     * numbers get mistyped and gateways go down; a counter with no way through will
+     * record the collector as the buyer and the record becomes a lie. So there is an
+     * explicit way to complete without a code, it demands a reason, and it marks the
+     * record as unverified wherever it is shown. An audited override beats a forged
+     * record.
+     *
      * Gated on shop.orders.update, the permission that already covers moving an order
      * along, so nothing needs re-seeding to grant it.
      */
-    public function confirmCollection(Request $request, ShopOrder $order, ShopOrderWriter $writer)
-    {
+    public function confirmCollection(
+        Request $request,
+        ShopOrder $order,
+        ShopOrderWriter $writer,
+        CollectionVerifier $verifier,
+    ) {
         $validated = $request->validate([
+            /*
+             | Absent means the buyer, which is what every existing form and every
+             | existing habit means. Nothing about today's press changes.
+             */
+            'collector' => ['nullable', Rule::in(array_keys(CollectionHandover::KINDS))],
+
+            'collector_name' => ['required_if:collector,other', 'string', 'max:190'],
+            'collector_ic' => ['required_if:collector,other', 'string', 'max:30'],
+            'collector_phone' => ['required_if:collector,other', 'string', 'max:30'],
+
+            // Never logged, never echoed, never put in an error message.
+            'code' => ['nullable', 'string', 'max:12'],
+
+            'override_reason' => ['nullable', 'string', 'max:255'],
             'note' => ['nullable', 'string', 'max:255'],
+        ], [
+            'collector_name.required_if' => 'Name the person collecting. A record that does not say who took the goods answers nothing later.',
+            'collector_ic.required_if' => 'Their identity card number is required.',
+            'collector_phone.required_if' => 'A telephone number is required: it is where the code goes.',
         ]);
 
         /*
@@ -346,35 +469,189 @@ class OrderController extends Controller
             ));
         }
 
+        $kind = ($validated['collector'] ?? CollectionHandover::KIND_BUYER) === CollectionHandover::KIND_OTHER
+            ? CollectionHandover::KIND_OTHER
+            : CollectionHandover::KIND_BUYER;
+
+        $override = trim((string) ($validated['override_reason'] ?? ''));
+        $note = trim((string) ($validated['note'] ?? ''));
+
+        $verification = null;
+
+        if ($kind === CollectionHandover::KIND_OTHER && $override === '') {
+            /*
+             | A blank box is answered before verify() is asked, so an empty submit
+             | does not spend one of the code's tries. Submitting nothing is not a
+             | guess.
+             */
+            if (preg_replace('/\D+/', '', (string) ($validated['code'] ?? '')) === '') {
+                return back()->withInput()->withErrors([
+                    'code' => 'Enter the six-digit code the collector was texted, or say why you are handing it over without one.',
+                ]);
+            }
+
+            $pending = $verifier->pendingFor($order);
+
+            /*
+             | The number on the record has to be the number the code reached.
+             | Without this a code could be sent to one handset and the handover
+             | written against somebody else's details, which is the exact kind of
+             | plausible-looking record this change exists to prevent. Checked before
+             | verify() so a mismatch does not cost an attempt.
+             */
+            if ($pending !== null
+                && $pending->phone !== PhoneNumber::toInternational((string) $validated['collector_phone'])) {
+                return back()
+                    ->withInput()
+                    ->withErrors([
+                        'collector_phone' => 'The code for this order went to a different number. Correct the number, or send a new code to this one.',
+                    ]);
+            }
+
+            $check = $verifier->verify($order, (string) ($validated['code'] ?? ''));
+
+            if (! $check->isVerified()) {
+                // The order is untouched. Nothing is handed over on a failed code.
+                return back()->withInput()->withErrors(['code' => $check->reason()]);
+            }
+
+            $verification = $check->verification;
+        }
+
         $before = $order->status;
+        $collector = $this->collectorDetails($order, $kind, $validated);
+        $user = $request->user();
 
         /*
-         | moveTo() is what stamps delivered_at and writes the trail entry, and the
-         | trail entry is where who-did-it is recorded: ShopOrderWriter::record() puts
-         | the signed-in user's id and label on it. So the answer to "who confirmed
-         | this collection, and when" is on the order's own history, which is the panel
-         | somebody opens when a buyer rings up, rather than only in a log.
+         | The move and the record of who took it, together or not at all. moveTo()
+         | is what stamps delivered_at and writes the trail entry; the handover row is
+         | the structured answer to "who physically walked away with this". One
+         | without the other is the state this change set out to fix.
          */
-        $writer->moveTo($order, ShopOrder::STATUS_DELIVERED, $validated['note']
-            ?? 'Handed over at the counter after checking the identity card.');
+        DB::transaction(function () use ($order, $writer, $kind, $collector, $verification, $override, $note, $user) {
+            $writer->moveTo(
+                $order,
+                ShopOrder::STATUS_DELIVERED,
+                $this->collectionTrailNote($kind, $collector, $verification !== null, $override, $note),
+            );
+
+            CollectionHandover::create([
+                'collectable_type' => $order->getMorphClass(),
+                'collectable_id' => $order->getKey(),
+                'collector_kind' => $kind,
+                'collector_name' => $collector['name'],
+                'collector_ic' => $collector['ic'],
+                'collector_phone' => $collector['phone'],
+                'collection_verification_id' => $verification?->id,
+                'verified_at' => $verification?->verified_at,
+                'override_reason' => $override === '' ? null : $override,
+                'confirmed_by' => $user?->id,
+                'confirmed_by_label' => $user?->logLabel(),
+                'collected_at' => $order->delivered_at ?? now(),
+            ]);
+        });
 
         AdminLogger::activity('shop.orders.collected', sprintf(
-            'Confirmed collection of order %s by %s at %s.',
+            'Confirmed collection of order %s by %s at %s.%s',
             $order->reference,
-            $order->customer_name,
+            $kind === CollectionHandover::KIND_OTHER
+                ? sprintf('%s on behalf of %s', $collector['name'], $order->customer_name)
+                : $order->customer_name,
             $order->collection_location ?: ($order->collection_label ?: 'the counter'),
+            $override === '' ? '' : ' No SMS verification: ' . $override,
         ));
 
         AdminLogger::audit($order, 'collected', ['status' => $before], [
             'status' => $order->status,
             'delivered_at' => $order->delivered_at?->toDateTimeString(),
+
+            // Who took it and how sure we are. No code and no hash: this trail is
+            // read by people, and neither would tell them anything.
+            'collector_kind' => $kind,
+            'collector_name' => $collector['name'],
+            'sms_verified' => $verification !== null,
+            'override_reason' => $override === '' ? null : $override,
         ]);
 
-        return back()->with('status', sprintf(
-            'Order %s handed over at the counter. Recorded against your name at %s.',
+        return back()->with($override === '' ? 'status' : 'warning', sprintf(
+            'Order %s handed over at the counter to %s. Recorded against your name at %s.%s',
             $order->reference,
+            $kind === CollectionHandover::KIND_OTHER ? $collector['name'] : $order->customer_name,
             LocalTime::format($order->delivered_at),
+            $override === '' ? '' : ' Marked as handed over without SMS verification.',
         ));
+    }
+
+    /**
+     * Who the record says collected it.
+     *
+     * For the buyer that is the order's own snapshot, so the record stands on its
+     * own even if the customer row is later edited. For anybody else it is what the
+     * operator was told and checked at the counter.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array{name: string|null, ic: string|null, phone: string|null}
+     */
+    private function collectorDetails(ShopOrder $order, string $kind, array $validated): array
+    {
+        if ($kind === CollectionHandover::KIND_BUYER) {
+            return [
+                'name' => $order->customer_name,
+                'ic' => $order->identity_card,
+                'phone' => $order->customer_phone,
+            ];
+        }
+
+        return [
+            'name' => trim((string) ($validated['collector_name'] ?? '')),
+            'ic' => trim((string) ($validated['collector_ic'] ?? '')),
+            'phone' => trim((string) ($validated['collector_phone'] ?? '')),
+        ];
+    }
+
+    /**
+     * The sentence that goes on the order history.
+     *
+     * The buyer case is word for word what it has always been, including using the
+     * operator's note verbatim when they typed one, because that is a flow in daily
+     * use and there is no reason for it to read differently today.
+     *
+     * A third-party handover says who took it and whether a code backed it up. An
+     * override says so in capitals: somebody reading this history months later
+     * should not have to hunt for that fact.
+     *
+     * @param  array{name: string|null, ic: string|null, phone: string|null}  $collector
+     */
+    private function collectionTrailNote(
+        string $kind,
+        array $collector,
+        bool $verified,
+        string $override,
+        string $note,
+    ): string {
+        if ($kind === CollectionHandover::KIND_BUYER) {
+            return $note !== ''
+                ? $note
+                : 'Handed over at the counter after checking the identity card.';
+        }
+
+        $sentence = sprintf(
+            'Handed over to %s. %s%s',
+            collect([
+                $collector['name'],
+                filled($collector['ic']) ? 'IC ' . $collector['ic'] : null,
+                $collector['phone'],
+            ])->filter()->join(', '),
+            $verified
+                ? 'SMS code verified.'
+                : 'HANDED OVER WITHOUT SMS VERIFICATION: ' . $override,
+            $note === '' ? '' : ' Note: ' . $note,
+        );
+
+        // shop_order_events.note is a varchar(255), and MySQL answers an overlong
+        // insert with an exception rather than a truncation. Recording the handover
+        // matters more than recording every word about it.
+        return Str::limit($sentence, 252, '...');
     }
 
     /**

@@ -268,6 +268,24 @@
                                             <x-admin.icon name="check" class="w-3.5 h-3.5" />
                                             Collected {{ \App\Support\LocalTime::format($order->delivered_at, 'd M Y', '') }}
                                         </span>
+
+                                        {{-- Said out loud on the row, not buried in the
+                                             history. A handover nobody verified is the
+                                             one somebody will ask about, and it should
+                                             not take three clicks to find.
+
+                                             Absent on every order collected before this
+                                             record existed: nothing was backfilled, so
+                                             there is simply no row to read. --}}
+                                        @if ($order->handover && ! $order->handover->isAssured())
+                                            <span class="block text-xs font-semibold text-red-600 mt-0.5">
+                                                No SMS verification
+                                            </span>
+                                        @elseif ($order->handover?->byThirdParty())
+                                            <span class="block text-xs text-gray-500 mt-0.5">
+                                                By {{ $order->handover->collector_name }}
+                                            </span>
+                                        @endif
                                     @elseif ($order->awaitsCollection())
                                         {{-- Paid, still with us. The same thing the
                                              counter at the top of this screen counts. --}}
@@ -456,12 +474,18 @@
                                 undone from here.
                             </p>
 
+                            {{-- Who took it. The structured record that replaces the
+                                 old free-text "who picked it up" box, which was
+                                 optional, unstructured and proved nothing once goods
+                                 went missing. --}}
+                            @include('admin.shop.partials.collector-fields', ['order' => $order, 'uid' => $order->id])
+
                             <div>
                                 <label for="collect-note-{{ $order->id }}" class="block text-sm font-semibold text-gray-700 mb-1.5">
                                     Note
                                 </label>
                                 <input type="text" id="collect-note-{{ $order->id }}" name="note" maxlength="255"
-                                       placeholder="Who picked it up, if it was not the buyer"
+                                       placeholder="Anything else worth recording"
                                        class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
                                 <p class="text-xs text-gray-500 mt-1">
                                     Optional. Goes on the order history next to your name.
@@ -473,7 +497,11 @@
                                         class="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
                                     Cancel
                                 </button>
-                                <button type="submit"
+                                {{-- Disabled by the script while a third-party
+                                     handover has neither a code nor a written reason.
+                                     A courtesy only: the route refuses the same
+                                     thing. --}}
+                                <button type="submit" data-collector-submit
                                         class="inline-flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-green-700 transition shadow-sm">
                                     <x-admin.icon name="check" class="w-4 h-4" />
                                     Collected
@@ -523,4 +551,6 @@
         });
     })();
 </script>
+
+@include('admin.shop.partials.collector-script')
 @endpush

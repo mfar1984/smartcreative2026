@@ -767,6 +767,24 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('orders.collect');
 
             /*
+            | Texting a one-time code to somebody collecting on the buyer's behalf.
+            |
+            | Same permission as the handover it guards, deliberately: issuing the
+            | code and recording the handover are two halves of one act, and a second
+            | permission would mean re-seeding roles to grant something already
+            | granted.
+            |
+            | POST and CSRF protected like everything else here. No route throttle:
+            | the limits that matter are the per-order cooldown and the per-number
+            | burst limit, and those live in CollectionVerifier where they are counted
+            | in the database against the actual order and handset rather than against
+            | whoever happens to share an IP with the counter.
+            */
+            Route::post('orders/{order}/collection-code', [ShopOrderController::class, 'sendCollectionCode'])
+                ->middleware('permission:shop.orders.update')
+                ->name('orders.collection-code');
+
+            /*
             | Email the buyer a payment link.
             |
             | Separate from orders.payment: that one asserts money arrived, this one

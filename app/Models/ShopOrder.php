@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -197,6 +198,18 @@ class ShopOrder extends Model
     public function checkouts(): HasMany
     {
         return $this->hasMany(ShopOrderCheckout::class)->latest('id');
+    }
+
+    /**
+     * Who physically took the goods, for an order collected at a counter.
+     *
+     * Null on every order collected before this record existed, and on every posted
+     * one. Nothing was backfilled, so the screens ask whether there is a row rather
+     * than assuming there is.
+     */
+    public function handover(): MorphOne
+    {
+        return $this->morphOne(CollectionHandover::class, 'collectable');
     }
 
     /* ---------------------------------------------------------------------
