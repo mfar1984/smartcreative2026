@@ -7,6 +7,7 @@ use App\Models\EventRegistrationPayment;
 use App\Services\AdminLogger;
 use App\Services\EventNotifier;
 use App\Services\Messaging\StaffAlerts;
+use App\Support\GatewayPaymentRecord;
 use App\Support\PaymentFigures;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,16 @@ use Throwable;
  */
 class RegistrationPaymentUpdater
 {
+    /**
+     * Purchase states that mean the gateway actually took the money.
+     *
+     * The same three ChipGateway::PURCHASE_STATUS_MAP translates to PAYMENT_PAID.
+     * Named here as well because this class will only write a receipt against a
+     * payload in one of them, and that refusal is load bearing: a payload is only
+     * evidence of money when it says the purchase was paid.
+     */
+    private const PAID_PURCHASE_STATUSES = ['paid', 'settled', 'captured'];
+
     public function __construct(
         private readonly EventNotifier $notifier,
         private readonly StaffAlerts $alerts,
@@ -30,9 +41,13 @@ class RegistrationPaymentUpdater
     /**
      * @param  string  $status  one of EventRegistration::PAYMENT_*
      * @param  string  $source  short description for the log, e.g. the gateway event name
+     * @param  array<string, mixed>|null  $payment  the gateway's own record of the purchase,
+     *                                              when the caller is holding one. It is the
+     *                                              only thing allowed to decide how much
+     *                                              money arrived.
      * @return bool  whether anything changed
      */
-    public function apply(EventRegistration $registration, string $status, string $source): bool
+    public function apply(EventRegistration $registration, string $status, string $source, ?array $payment = null): bool
     {
         if (! $this->shouldApply($registration, $status)) {
             return false;
@@ -41,33 +56,73 @@ class RegistrationPaymentUpdater
         $before = [
             'payment_status' => $registration->payment_status,
             'status' => $registration->status,
+            'amount_paid' => (float) $registration->amount_paid,
         ];
 
-        $registration->payment_status = $status;
-
-        // Paying confirms the place; a failure leaves it pending so an
-        // administrator can chase it rather than losing the entry.
         if ($status === EventRegistration::PAYMENT_PAID) {
-            $registration->status = EventRegistration::STATUS_CONFIRMED;
-            $this->settleLedger($registration);
+            /*
+             | The ledger first, then the badge, and in that order for a reason: the
+             | status is now read off the money rather than off the gateway's word.
+             |
+             | A gateway event says a purchase was paid. It does not say the
+             | registration's whole charge was paid, and those two stopped being the
+             | same thing the moment a charge could be corrected upwards after a
+             | payment had already been taken.
+             */
+            $this->settleLedger($registration, $payment);
+
+            $status = $registration->paymentStatusFromLedger();
         }
+
+        // Paying confirms the place; anything less leaves it pending so an
+        // administrator can chase it rather than losing the entry.
+        $placeStatus = $status === EventRegistration::PAYMENT_PAID
+            ? EventRegistration::STATUS_CONFIRMED
+            : $registration->status;
+
+        /*
+         | Nothing moved, so nothing is written and nothing is announced.
+         |
+         | shouldApply() refuses a repeat of the status the row is sitting on, but it
+         | cannot see a replay that would have derived the same status by a different
+         | route: a second purchase.paid for a part-paid entry asks for "paid" and
+         | resolves to "partial" again. Without this it would write an audit entry and
+         | send a receipt on every retry CHIP makes.
+         */
+        if ($status === $before['payment_status']
+            && $placeStatus === $before['status']
+            && abs((float) $registration->amount_paid - $before['amount_paid']) <= 0.005) {
+            return false;
+        }
+
+        $registration->payment_status = $status;
+        $registration->status = $placeStatus;
 
         $registration->save();
 
         AdminLogger::activity(
             'payments.status',
-            sprintf('Payment for %s became %s (%s).', $registration->reference, $status, $source),
+            sprintf(
+                'Payment for %s became %s (%s). %s of %s on record.',
+                $registration->reference,
+                $status,
+                $source,
+                PaymentFigures::money((float) $registration->amount_paid),
+                PaymentFigures::money((float) $registration->amount),
+            ),
         );
 
         AdminLogger::audit($registration, 'payment.updated', $before, [
             'payment_status' => $registration->payment_status,
             'status' => $registration->status,
+            'amount_paid' => (float) $registration->amount_paid,
+            'outstanding' => $registration->outstandingAmount(),
             'source' => $source,
         ]);
 
-        // Told once, and only once: shouldApply() has already refused a repeat
-        // of a status the registration is sitting on, so a reloaded return page
-        // or a webhook arriving twice cannot send a second receipt.
+        // Told once, and only once. The guard above has already refused a repeat, so
+        // a reloaded return page or a webhook arriving twice cannot send a second
+        // receipt, and a part-paid entry is not told it is settled.
         if ($status === EventRegistration::PAYMENT_PAID) {
             $this->announcePayment($registration);
         }
@@ -104,7 +159,9 @@ class RegistrationPaymentUpdater
         $status = $gateway->statusFromPayment($payment);
 
         if ($status !== null) {
-            $this->apply($registration, $status, 'gateway lookup');
+            // The purchase object goes with the status. It is the only thing that
+            // knows how much the gateway actually took.
+            $this->apply($registration, $status, 'gateway lookup', $payment);
         }
 
         return $payment;
@@ -364,44 +421,149 @@ class RegistrationPaymentUpdater
     }
 
     /**
-     * Make the ledger add up to the charge, and the running total match the ledger.
+     * Record what the GATEWAY SAYS IT TOOK, and nothing else.
      *
      * A gateway payment has no receipt row of its own: nobody typed it in. Without
      * one this table would hold only hand-recorded money, and Settlements, which
      * reconciles against a bank statement, would show a fraction of the takings.
      *
-     * Written as "top up to the charge" rather than "insert the charge" so it is
-     * correct in the awkward case as well: somebody transfers RM 100 of RM 250 by
-     * hand, then pays the rest on the gateway. The row added is the RM 150 that
-     * actually arrived, not a second RM 250.
+     * WHY THIS IS NOT "TOP UP TO THE CHARGE" ANY MORE
      *
-     * Does nothing when the ledger already covers the charge, which is what happens
-     * when a hand-recorded receipt is the thing that completed it.
+     * It used to be. It inserted `amount - already recorded`, which is correct for
+     * exactly as long as a charge never moves, and it invented money the day one did.
+     * Recheck add-on totals raises a charge after the fact — a group of three went
+     * from RM 40.00 to RM 120.00 — and the next gateway PAID event for the same
+     * purchase recomputed the shortfall against the new figure and wrote itself an
+     * RM 80.00 receipt for a transaction CHIP never had. Two entries read Paid and
+     * Confirmed while RM 120.00 of the takings had never arrived.
+     *
+     * So the figure comes from one place only: the purchase object, where CHIP
+     * reports `payment.amount` in cents. Subtraction against the registration's own
+     * charge takes no part in it.
+     *
+     * The awkward case the old comment existed for still works, and works better.
+     * Somebody transfers RM 100.00 of RM 250.00 by hand and pays the rest on the
+     * gateway: the gateway reports the RM 150.00 it took, so RM 150.00 is what is
+     * written. That was previously right by arithmetic coincidence and is now right
+     * because it is what happened.
+     *
+     * IDEMPOTENT PER PURCHASE
+     *
+     * One gateway receipt per purchase reference, holding the amount CHIP reports for
+     * it. A replayed webhook, a late event, a gateway lookup and somebody reloading
+     * the return page all find that row already correct and add nothing.
+     *
+     * @param  array<string, mixed>|null  $payment  the purchase object, when the caller has one
      */
-    private function settleLedger(EventRegistration $registration): void
+    private function settleLedger(EventRegistration $registration, ?array $payment = null): void
     {
+        /*
+         | Resynced from the ledger first and unconditionally. The column is a
+         | denormalised convenience that must always be able to prove itself from the
+         | rows, and every path out of this method leaves it agreeing with them.
+         */
+        $registration->amount_paid = (float) $registration->payments()->sum('amount');
+
         if ((float) $registration->amount <= 0) {
             return;
         }
 
-        $recorded = (float) $registration->payments()->sum('amount');
-        $shortfall = round((float) $registration->amount - $recorded, 2);
+        // The payload the caller is holding, or the last one stored against the row.
+        // Both are the gateway's own words; neither is inferred from our books.
+        $record = GatewayPaymentRecord::make($payment ?? $registration->payment_details);
 
-        if ($shortfall > 0.005) {
+        /*
+         | The payload has to describe a purchase that was actually taken.
+         |
+         | Without this, recording a payment by hand would reach here through apply()
+         | and read whatever purchase object was last stored — quite possibly an
+         | abandoned checkout sitting at "created", whose `purchase.total` is the
+         | charge. It would then write a gateway receipt for a purchase nobody ever
+         | completed, which is the same fault in a new costume.
+         */
+        if (! in_array($record?->status(), self::PAID_PURCHASE_STATUSES, true)) {
+            return;
+        }
+
+        $purchaseId = $record?->id() ?? $registration->payment_reference;
+        $reported = $record?->amount();
+
+        if (blank($purchaseId) || $reported === null || $reported <= 0.005) {
+            /*
+             | No figure from the gateway, so nothing is recorded. This is the branch
+             | that used to fabricate, and refusing to write here is the whole fix: a
+             | receipt we cannot evidence is worse than a short ledger, because the
+             | short ledger is visible and the invented one is not.
+             */
+            Log::error('A gateway payment reported no amount, so no receipt was recorded.', [
+                'registration' => $registration->reference,
+                'purchase_id' => $purchaseId,
+            ]);
+
+            return;
+        }
+
+        /*
+         | Receipts already on record for this very purchase, gateway-sourced only.
+         |
+         | A hand-recorded row carrying the same reference is deliberately left out of
+         | the comparison: it is money somebody saw arrive by another route, and CHIP
+         | reporting RM 40.00 for its own purchase says nothing about it.
+         */
+        $existing = $registration->payments()
+            ->where('source', EventRegistrationPayment::SOURCE_GATEWAY)
+            ->where('reference', $purchaseId)
+            ->reorder('id')
+            ->get();
+
+        $recorded = round((float) $existing->sum('amount'), 2);
+
+        // A replay. The gateway's figure is already on the ledger, to the cent.
+        if (abs($recorded - $reported) <= 0.005) {
+            return;
+        }
+
+        if ($recorded > $reported || $existing->count() > 1) {
+            /*
+             | More on record against this purchase than CHIP reports for it, or more
+             | than one row claiming to be it. Both are the damage the old arithmetic
+             | left behind, and neither is something to resolve in the middle of a
+             | webhook: removing a payment row is irreversible, so it belongs to the
+             | previewed correction on the Gateway Receipts screen.
+             */
+            Log::warning('The ledger disagrees with what the gateway reports for a purchase.', [
+                'registration' => $registration->reference,
+                'purchase_id' => $purchaseId,
+                'rows' => $existing->count(),
+                'recorded' => $recorded,
+                'reported' => $reported,
+            ]);
+
+            return;
+        }
+
+        if ($receipt = $existing->first()) {
+            /*
+             | One row, holding less than CHIP now reports. Corrected to the reported
+             | figure rather than joined by a second row, so the invariant above holds:
+             | one gateway receipt per purchase, carrying what that purchase took.
+             */
+            $receipt->amount = $reported;
+            $receipt->received_at = $record?->paidOn() ?? $receipt->received_at;
+            $receipt->save();
+        } else {
             $registration->payments()->create([
-                'amount' => $shortfall,
-                'received_at' => $registration->payment_synced_at ?? now(),
-                'reference' => $registration->payment_reference,
+                'amount' => $reported,
+                'received_at' => $record?->paidOn() ?? $registration->payment_synced_at ?? now(),
+                'reference' => $purchaseId,
                 'note' => 'Taken by the payment gateway.',
                 'source' => EventRegistrationPayment::SOURCE_GATEWAY,
                 'recorded_by' => null,
                 'actor_label' => null,
             ]);
-
-            $recorded = round($recorded + $shortfall, 2);
         }
 
-        $registration->amount_paid = $recorded;
+        $registration->amount_paid = (float) $registration->payments()->sum('amount');
     }
 
     private function shouldApply(EventRegistration $registration, string $status): bool

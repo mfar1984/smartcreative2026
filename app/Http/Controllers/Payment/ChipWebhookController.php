@@ -131,7 +131,14 @@ class ChipWebhookController extends Controller
             $this->updater->rememberPayment($registration, $payload);
         }
 
-        $this->updater->apply($registration, $status, $event);
+        /*
+         | The body goes with the status, and this is what stops the webhook inventing
+         | money. The updater records what CHIP reports it took for this purchase —
+         | `payment.amount`, in cents — rather than whatever is left of the
+         | registration's charge. A replay of this same event finds that figure already
+         | on the ledger and adds nothing.
+         */
+        $this->updater->apply($registration, $status, $event, $payload);
 
         return response()->json(['message' => 'Acknowledged.']);
     }

@@ -378,6 +378,66 @@ class EventRegistration extends Model
     }
 
     /**
+     * Whether the money on record covers the charge.
+     *
+     * THE one test for "settled", read by the badge on the list, by the footer of the
+     * payments table on the detail page, and by the derivation below that writes
+     * `payment_status`. They each used to decide it for themselves, and the owner was
+     * shown the result: a list saying "Partly Paid, RM 40.00 of RM 80.00 outstanding"
+     * beside a payments table saying "Settled in full" about the same entry.
+     *
+     * Half a cent of tolerance because both sides are decimals.
+     */
+    public function isSettledInFull(): bool
+    {
+        return $this->outstandingAmount() <= 0.005;
+    }
+
+    /**
+     * The payment status the money itself supports.
+     *
+     * The ledger decides, never the gateway's word and never an operator's. A
+     * purchase settling at the gateway proves that purchase was paid; it does not
+     * prove the registration's charge was covered, and those two stopped being the
+     * same thing the moment a charge could be corrected upwards after a payment had
+     * been taken.
+     *
+     * Everything that writes `payment_status` on the strength of money arriving reads
+     * this, so the badge and the ledger cannot drift apart.
+     *
+     * Nothing on record returns PENDING rather than PAID. A gateway event claiming a
+     * payment we have no figure for is not evidence that money arrived, and saying
+     * "awaiting payment" leaves it chaseable and payable instead of hiding it.
+     */
+    public function paymentStatusFromLedger(): string
+    {
+        if ($this->isFree() || $this->isSettledInFull()) {
+            return self::PAYMENT_PAID;
+        }
+
+        return (float) $this->amount_paid > 0.005
+            ? self::PAYMENT_PARTIAL
+            : self::PAYMENT_PENDING;
+    }
+
+    /**
+     * Where the money stands, in one sentence, for any screen that needs to say it.
+     *
+     * Shared so two screens cannot word the same position differently, which is how
+     * "Partly Paid" and "Settled in full" ended up on the same registration.
+     */
+    public function paymentPositionLabel(): string
+    {
+        if ($this->isFree()) {
+            return 'Free of charge.';
+        }
+
+        return $this->isSettledInFull()
+            ? 'Settled in full.'
+            : sprintf('%s of %s still outstanding.', $this->outstandingAmountLabel(), $this->amountLabel());
+    }
+
+    /**
      * Whether money is still owed on this entry.
      *
      * Broader than awaitingPayment(): it also covers a part-paid entry, which owes

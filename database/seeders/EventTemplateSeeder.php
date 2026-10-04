@@ -119,6 +119,11 @@ class EventTemplateSeeder extends Seeder
                 | together read correctly either way: nothing received yet shows
                 | RM 0.00 against the full total, and the link charges the same
                 | outstanding figure this says.
+                |
+                | The event block says when and where, in the same shape as the receipt
+                | below it. Somebody being asked for money weeks later needs to know
+                | which event and which date they are settling for; naming only the
+                | title made that a guess.
                 */
                 'payment.reminder' => [
                     'subject' => 'Payment still outstanding: {{event_name}} ({{reference}})',
@@ -134,6 +139,11 @@ class EventTemplateSeeder extends Seeder
                     Total for this entry: {{amount}}
                     Received so far: {{amount_paid}}
                     Still to pay: {{amount_outstanding}}
+
+                    Event details
+                    {{event_dates}}
+                    {{event_time}}
+                    {{event_location}}
 
                     Pay here
                     {{payment_link}}

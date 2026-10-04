@@ -151,26 +151,40 @@ class RegistrationTally
 
         $wasPaid = $registration->isPaid();
 
-        $this->updater->apply($registration, EventRegistration::PAYMENT_PAID, 'tallied against the gateway');
+        /*
+         | The purchase object goes with the status. settleLedger() records the figure
+         | CHIP reports for this purchase and nothing else, so a tally against an entry
+         | whose charge was corrected upwards writes what arrived rather than what is
+         | owed.
+         */
+        $this->updater->apply(
+            $registration,
+            EventRegistration::PAYMENT_PAID,
+            'tallied against the gateway',
+            $paid['payment'],
+        );
 
         /*
-         | The receipt, written only when this tally is what settled it. apply() calls
-         | settleLedger(), which tops the ledger up to the charge, so a row already
-         | exists by now for the amount owed. This replaces its detail with what the
-         | gateway actually reported, so the ledger says the truth about the date and
-         | the reference rather than "taken by the payment gateway, some time today".
+         | The receipt, written only when this tally is what settled it. apply() has
+         | already recorded the gateway's figure against this purchase, so this only
+         | adds the words: that the match was made by hand from this screen.
          */
         if (! $wasPaid) {
             $this->describeReceipt($registration, $paid);
         }
 
+        $registration->refresh();
+
         return [
             'changed' => true,
             'message' => sprintf(
-                'Matched to purchase %s, which the gateway reports as paid%s. %s is now recorded as paid in full.',
+                'Matched to purchase %s, which the gateway reports as paid%s. %s is now %s, with %s on record. %s',
                 $paid['purchase_id'],
                 $paid['paid_on'] instanceof Carbon ? ' on ' . $paid['paid_on']->format('d M Y, g:i a') : '',
                 $registration->reference,
+                strtolower($registration->paymentStatusLabel()),
+                PaymentFigures::money((float) $registration->amount_paid),
+                $registration->paymentPositionLabel(),
             ),
             'findings' => $findings,
         ];
@@ -183,16 +197,21 @@ class RegistrationTally
      */
     private function describeReceipt(EventRegistration $registration, array $paid): void
     {
+        /*
+         | Scoped to the purchase this tally settled. Taking the newest gateway row
+         | whatever it referred to would relabel a receipt belonging to another
+         | purchase, which on an entry that has paid in instalments is somebody else's
+         | money being renamed.
+         */
         $receipt = $registration->payments()
             ->where('source', EventRegistrationPayment::SOURCE_GATEWAY)
-            ->orderByDesc('id')
+            ->where('reference', $paid['purchase_id'])
+            ->reorder('id')
             ->first();
 
         if ($receipt === null) {
             return;
         }
-
-        $receipt->reference = $paid['purchase_id'];
 
         if ($paid['paid_on'] instanceof Carbon) {
             $receipt->received_at = $paid['paid_on'];

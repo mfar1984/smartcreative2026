@@ -185,6 +185,38 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->whereNumber('event')
                 ->name('participants.recalculate.apply');
 
+            /*
+             | Receipt rows the gateway's own record contradicts, and removing them.
+             |
+             | Two routes because it is two acts, the same shape as the re-pricing pair
+             | above. The GET is a read-only diagnostic that writes nothing; the POST
+             | deletes payment rows and is refused unless the confirmation on that
+             | screen was ticked.
+             |
+             | Behind payments.record, which already exists and is already granted to
+             | the roles trusted with the registration ledger. It is the permission that
+             | writes rows into event_registration_payments, and this is the only other
+             | thing that touches them, so no role needs re-seeding. Viewer does not
+             | hold it, which is the point.
+             |
+             | Declared above the {registration} route for the same reason "export" is,
+             | and scoped to one event rather than offered as a sweep.
+             */
+            Route::get('participants/receipts/{event}', [ParticipantController::class, 'receiptsForm'])
+                ->middleware('permission:payments.record')
+                ->whereNumber('event')
+                ->name('participants.receipts');
+
+            /*
+             | Its own path rather than the same one by verb, so a GET to it is refused
+             | with a 405 instead of quietly deleting anything. Throttled because each
+             | press removes rows from a live money table.
+             */
+            Route::post('participants/receipts/{event}/apply', [ParticipantController::class, 'receipts'])
+                ->middleware(['permission:payments.record', 'throttle:10,1'])
+                ->whereNumber('event')
+                ->name('participants.receipts.apply');
+
             Route::get('participants/{registration}', [ParticipantController::class, 'show'])
                 ->middleware('permission:participants.view')
                 ->name('participants.show');

@@ -124,7 +124,7 @@
                      identity card number ever collected is a different risk from one
                      event's, and the controller refuses it either way; a disabled
                      button with a reason on hover says so before the press. --}}
-                @if ($canExport || $canRecalculate)
+                @if ($canExport || $canRecalculate || $canAuditReceipts)
                     <x-slot:actions>
                         {{-- Re-pricing the entries taken before an event started charging
                              items per participant. Offered only once an event is chosen,
@@ -137,6 +137,19 @@
                                class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3.5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
                                 <x-admin.icon name="cash" class="w-4 h-4" />
                                 Recheck Totals
+                            </a>
+                        @endif
+
+                        {{-- The receipt ledger against what the gateway reports for each
+                             purchase. A read-only diagnostic; the rows it finds are only
+                             removed by a second, confirmed press on that screen. Scoped
+                             to one event for the same reason Recheck Totals is. --}}
+                        @if ($canAuditReceipts && $eventId !== '')
+                            <a href="{{ route('admin.event.participants.receipts', $eventId) }}"
+                               title="Check every gateway receipt against what the gateway reports for its purchase"
+                               class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3.5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                <x-admin.icon name="cash" class="w-4 h-4" />
+                                Gateway Receipts
                             </a>
                         @endif
 

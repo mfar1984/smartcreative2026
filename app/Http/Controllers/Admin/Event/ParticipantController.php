@@ -15,6 +15,7 @@ use App\Models\EventRegistration;
 use App\Models\EventRegistrationPayment;
 use App\Services\AdminLogger;
 use App\Services\EventNotifier;
+use App\Services\Payment\GatewayReceiptAudit;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\RegistrationPaymentUpdater;
@@ -116,6 +117,13 @@ class ParticipantController extends Controller
             // Correcting what an entry was charged is a correction to the record, so
             // it sits behind the same permission as correcting anything else on it.
             'canRecalculate' => $request->user()->hasPermission('participants.update'),
+
+            /*
+             | Checking the receipt ledger against what the gateway reports. Behind
+             | payments.record, the permission that already governs writing rows into
+             | that ledger, because this is the only other thing that touches them.
+             */
+            'canAuditReceipts' => $request->user()->hasPermission('payments.record'),
 
             /*
              | Events an entry could be moved to. Only those still accepting entries,
@@ -280,6 +288,78 @@ class ParticipantController extends Controller
                 count($applied) === 1 ? 'entry' : 'entries',
                 $event->title,
                 PaymentFigures::money($moved),
+            ));
+    }
+
+    /**
+     * Receipt rows the gateway's own record contradicts, before anything is removed.
+     *
+     * A read-only screen, and the reason it exists rather than a one-off script:
+     * settleLedger() used to insert whatever was left of a charge when a gateway event
+     * said paid, which invented money the moment a charge was corrected upwards. Rows
+     * like that may have been written since any particular database was taken, so this
+     * is a diagnostic that can be run again rather than a fix that was applied once.
+     *
+     * Every row listed carries its evidence: the purchase it names, what the stored
+     * gateway payload reports that purchase took, and what the ledger claims.
+     */
+    public function receiptsForm(Request $request, Event $event, GatewayReceiptAudit $audit)
+    {
+        return view('admin.event.participants-receipts', [
+            'event' => $event,
+            'findings' => $audit->preview($event),
+        ]);
+    }
+
+    /**
+     * Remove the rows the diagnostic identified.
+     *
+     * POST only, and refused unless the operator has ticked the confirmation on the
+     * diagnostic: deleting a payment record cannot be undone. Every figure and every
+     * row id is worked out again from the database inside the service, so a replayed or
+     * edited post cannot name its own rows.
+     */
+    public function receipts(Request $request, Event $event, GatewayReceiptAudit $audit)
+    {
+        $request->validate([
+            'confirm' => ['accepted'],
+        ], [
+            'confirm.accepted' => 'Tick the confirmation to remove these rows.',
+        ]);
+
+        $corrected = $audit->correct($event);
+
+        if ($corrected === []) {
+            // Back to the diagnostic by name rather than back(): this is also what a
+            // second press lands on, and it must say so on a page.
+            return redirect()
+                ->route('admin.event.participants.receipts', $event)
+                ->with('warning', sprintf(
+                    'Nothing to remove on %s. Every gateway receipt matches what the gateway reports for its purchase.',
+                    $event->title,
+                ));
+        }
+
+        $removed = GatewayReceiptAudit::total($corrected);
+
+        AdminLogger::activity(
+            'payments.phantom',
+            sprintf(
+                'Removed gateway receipts the payload contradicts on %s: %d entries, %s taken back out of the takings.',
+                $event->title,
+                count($corrected),
+                PaymentFigures::money($removed),
+            ),
+        );
+
+        return redirect()
+            ->route('admin.event.participants.receipts', $event)
+            ->with('status', sprintf(
+                '%d %s corrected on %s. %s removed from the takings because the gateway never took it. Every removed row is in the audit trail.',
+                count($corrected),
+                count($corrected) === 1 ? 'entry' : 'entries',
+                $event->title,
+                PaymentFigures::money($removed),
             ));
     }
 

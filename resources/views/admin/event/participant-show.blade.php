@@ -499,12 +499,18 @@
                                 <td class="px-5 py-3 text-right text-base font-bold text-green-700 tabular-nums whitespace-nowrap">
                                     {{ $registration->amountPaidLabel() }}
                                 </td>
+                                {{-- The badge and the sentence, from the one source.
+
+                                     This footer decided for itself whether the entry was
+                                     settled, and the list decided from payment_status, so
+                                     the owner was shown "Partly Paid, RM 40.00 of RM 80.00
+                                     outstanding" on one screen and "Settled in full" on
+                                     the other about the same registration. Both now read
+                                     isSettledInFull(), and payment_status is derived from
+                                     it, so they cannot disagree. --}}
                                 <td colspan="3" class="px-5 py-3 text-xs text-gray-500">
-                                    @if ($registration->outstandingAmount() > 0.005)
-                                        {{ $registration->outstandingAmountLabel() }} of {{ $registration->amountLabel() }} still outstanding.
-                                    @else
-                                        Settled in full.
-                                    @endif
+                                    <span class="font-semibold text-gray-700">{{ $registration->paymentStatusLabel() }}</span>
+                                    &middot; {{ $registration->paymentPositionLabel() }}
                                 </td>
                             </tr>
                         </tfoot>
