@@ -26,7 +26,7 @@
 
     <x-admin.page-card
         :title="$campaign->name"
-        :description="$campaign->channelLabel() . ' · ' . $campaign->audienceLabel() . ' · sent ' . ($campaign->started_at?->format('d M Y, g:i a') ?? 'unknown')"
+        :description="$campaign->channelLabel() . ' · ' . $campaign->audienceLabel() . ' · sent ' . \App\Support\LocalTime::format($campaign->started_at, \App\Support\LocalTime::DATE_TIME, 'unknown')"
         :back="route('admin.campaigns.reports')">
 
         <x-slot:actions>
@@ -189,7 +189,7 @@
 
                                     @if ($campaign->isEmail())
                                         <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                            {{ $recipient->opened_at?->format('d M, g:i a') ?? 'Not recorded' }}
+                                            {{ \App\Support\LocalTime::format($recipient->opened_at, 'd M, g:i a', 'Not recorded') }}
                                         </td>
                                         <td class="px-5 py-3 text-right tabular-nums text-gray-700">{{ $recipient->open_count }}</td>
                                         <td class="px-5 py-3 text-right tabular-nums {{ $recipient->click_count > 0 ? 'text-blue-700 font-semibold' : 'text-gray-400' }}">
@@ -202,7 +202,7 @@
                                             @if ($recipient->wasDelivered())
                                                 <x-admin.badge tone="green" dot>{{ $recipient->deliveryLabel() }}</x-admin.badge>
                                                 <span class="block text-xs text-gray-400 mt-0.5">
-                                                    {{ $recipient->delivered_at->format('d M, g:i a') }}
+                                                    {{ \App\Support\LocalTime::format($recipient->delivered_at, 'd M, g:i a') }}
                                                 </span>
                                             @elseif ($recipient->delivery_status !== null)
                                                 <x-admin.badge tone="red">{{ $recipient->deliveryLabel() }}</x-admin.badge>
@@ -216,7 +216,7 @@
                                     @endif
 
                                     <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                        {{ $recipient->sent_at?->format('d M, g:i a') ?? '—' }}
+                                        {{ \App\Support\LocalTime::format($recipient->sent_at, 'd M, g:i a') }}
                                     </td>
                                 </tr>
                             @empty

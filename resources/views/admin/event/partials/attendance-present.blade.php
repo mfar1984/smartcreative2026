@@ -68,7 +68,7 @@
                         </td>
 
                         <td class="px-5 py-3 whitespace-nowrap text-gray-700">
-                            {{ $row->checked_in_at?->format('d M Y, g:i a') }}
+                            {{ \App\Support\LocalTime::format($row->checked_in_at, \App\Support\LocalTime::DATE_TIME, '') }}
                             <span class="block text-xs text-gray-400">{{ $row->checked_in_at?->diffForHumans() }}</span>
                         </td>
 

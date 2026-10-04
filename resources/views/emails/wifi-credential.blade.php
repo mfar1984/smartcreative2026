@@ -47,7 +47,11 @@
 
         <h2 style="margin:24px 0 8px;font-size:15px;color:#111827;">How to get online</h2>
         <ol style="margin:0;padding-left:20px;font-size:14px;line-height:1.7;color:#374151;">
-            <li>Connect to the event Wi-Fi@if ($networkName), named <strong>{{ $networkName }}</strong>@endif.</li>
+            {{-- One expression rather than a directive, for the reason spelt out in
+                 pages/registration.blade.php: a directive following a word character
+                 is not compiled, so "Wi-Fi@if" shipped the raw @if and @endif to the
+                 reader as text. The name is escaped because the markup is not. --}}
+            <li>Connect to the event Wi-Fi{!! $networkName ? ', named <strong>' . e($networkName) . '</strong>' : '' !!}.</li>
             <li>A login page opens by itself. If it does not, open a browser and visit any website.</li>
             <li>Type the username and password above.</li>
         </ol>

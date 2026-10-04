@@ -385,7 +385,7 @@
                                             · top {{ $stage->advance_count }} advance
                                         @endif
                                         @if ($stage->hasDraw())
-                                            · drawn {{ $stage->drawn_at->format('d M, g:i a') }}
+                                            · drawn {{ \App\Support\LocalTime::format($stage->drawn_at, 'd M, g:i a') }}
                                         @endif
                                     </p>
                                 </div>

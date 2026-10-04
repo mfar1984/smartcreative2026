@@ -197,12 +197,12 @@
                                     <dl class="text-xs text-gray-600 mt-2 space-y-1">
                                         @if ($epConnectedAt)
                                             <div><dt class="inline text-gray-500">Connected</dt>
-                                                <dd class="inline">{{ $epConnectedAt->toDayDateTimeString() }}</dd></div>
+                                                <dd class="inline">{{ \App\Support\LocalTime::format($epConnectedAt, 'D, M j, Y g:i A') }}</dd></div>
                                         @endif
                                         <div><dt class="inline text-gray-500">Access token expires</dt>
-                                            <dd class="inline">{{ $epAccessExpiry?->toDayDateTimeString() ?? 'unstated' }}</dd></div>
+                                            <dd class="inline">{{ \App\Support\LocalTime::format($epAccessExpiry, 'D, M j, Y g:i A', 'unstated') }}</dd></div>
                                         <div><dt class="inline text-gray-500">Reconnection needed by</dt>
-                                            <dd class="inline">{{ $epRefreshExpiry?->toFormattedDayDateString() ?? 'unstated' }}</dd></div>
+                                            <dd class="inline">{{ \App\Support\LocalTime::format($epRefreshExpiry, 'D, M j, Y', 'unstated') }}</dd></div>
                                     </dl>
                                     <p class="text-xs text-gray-500 mt-2">
                                         The access token is renewed automatically as it nears expiry. You

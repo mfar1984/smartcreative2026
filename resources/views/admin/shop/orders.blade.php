@@ -212,6 +212,8 @@
                                 @if ($isOffline)
                                     <span class="text-gray-700">{{ $order->collection_location ?: ($order->collection_label ?: 'Not recorded') }}</span>
                                     @if ($order->collection_at)
+                                        {{-- ->format() directly, not through LocalTime: typed
+                                             into a datetime-local input and stored as written. --}}
                                         <span class="block text-xs text-gray-500">
                                             {{ $order->collection_at->format('d M Y, g:i a') }}
                                         </span>
@@ -241,8 +243,8 @@
                             </td>
 
                             <td class="px-5 py-3 whitespace-nowrap text-gray-600">
-                                {{ $order->created_at->format('d M Y') }}
-                                <span class="block text-xs text-gray-400">{{ $order->created_at->format('g:i a') }}</span>
+                                {{ \App\Support\LocalTime::format($order->created_at, 'd M Y') }}
+                                <span class="block text-xs text-gray-400">{{ \App\Support\LocalTime::format($order->created_at, 'g:i a') }}</span>
                             </td>
 
                             @if ($isOffline)
@@ -328,7 +330,7 @@
                                              one" is on the row instead of behind a
                                              press that gets refused. --}}
                                         <span class="inline-flex items-center gap-1 px-1.5 text-xs text-gray-400"
-                                              title="A payment link was queued {{ $order->payment_link_sent_at->diffForHumans() }}. It can be sent again after {{ $order->paymentLinkCooldownEndsAt()?->format('g:i a, d M') }}.">
+                                              title="A payment link was queued {{ $order->payment_link_sent_at->diffForHumans() }}. It can be sent again after {{ \App\Support\LocalTime::format($order->paymentLinkCooldownEndsAt(), 'g:i a, d M', '') }}.">
                                             <x-admin.icon name="check" class="w-3.5 h-3.5" />
                                             Sent
                                         </span>

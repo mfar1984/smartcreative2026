@@ -170,7 +170,7 @@
                                     <div class="text-right shrink-0">
                                         <span class="block text-xs text-gray-400">Published</span>
                                         <span class="block text-sm font-semibold text-gray-600">
-                                            {{ $tournament?->published_at?->format('d M Y') ?? '—' }}
+                                            {{ \App\Support\LocalTime::format($tournament?->published_at, 'd M Y') }}
                                         </span>
                                     </div>
                                 </div>

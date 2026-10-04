@@ -192,7 +192,7 @@
                                     <td class="px-5 py-3 text-gray-600">{{ $registration->event?->title ?? '—' }}</td>
                                     <td class="px-5 py-3 text-right tabular-nums text-gray-900">{{ $registration->amountLabel() }}</td>
                                     <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                        {{ $registration->payment_synced_at?->format('d M Y, g:i a') ?? 'Recorded by hand' }}
+                                        {{ \App\Support\LocalTime::format($registration->payment_synced_at, \App\Support\LocalTime::DATE_TIME, 'Recorded by hand') }}
                                     </td>
                                 </tr>
                             @endforeach

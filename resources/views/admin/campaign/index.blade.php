@@ -167,7 +167,7 @@
                                 </td>
 
                                 <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                    {{ ($campaign->started_at ?? $campaign->created_at)?->format('d M Y, g:i a') }}
+                                    {{ \App\Support\LocalTime::format($campaign->started_at ?? $campaign->created_at, \App\Support\LocalTime::DATE_TIME, '') }}
                                 </td>
                             </tr>
                         @empty

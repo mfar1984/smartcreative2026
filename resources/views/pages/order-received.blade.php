@@ -29,7 +29,7 @@
 
                         <p class="text-base text-green-800">
                             You confirmed this arrived on
-                            {{ $order->received_confirmed_at->format('d M Y') }}. There is nothing else to do.
+                            {{ \App\Support\LocalTime::format($order->received_confirmed_at, 'd M Y') }}. There is nothing else to do.
                         </p>
                     </div>
                 @else

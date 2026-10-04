@@ -448,6 +448,15 @@
                         <tbody class="divide-y divide-gray-100">
                             @foreach ($registration->payments as $receipt)
                                 <tr>
+                                    {{-- ->format() directly, not through LocalTime, and deliberately
+                                         so: this list mixes both sources. A gateway row's received_at
+                                         is the payload's paid_on, a real UTC instant. A hand-recorded
+                                         row's is the date and time a member of staff typed off a slip
+                                         and stored exactly as typed. One clock cannot be right for
+                                         both, and the column cannot be told apart row by row without
+                                         reading the Source cell, so nothing is shifted here. The
+                                         gateway-only screen (participants-receipts) does convert,
+                                         because every row on it is provably the gateway's own. --}}
                                     <td class="px-5 py-3 whitespace-nowrap text-gray-700">
                                         {{ $receipt->received_at?->format('d M Y') }}
                                         <span class="block text-xs text-gray-400">{{ $receipt->received_at?->format('g:i a') }}</span>
@@ -726,7 +735,7 @@
                                     @if ($answer->answered)
                                         <x-admin.badge tone="green">Yes</x-admin.badge>
                                         @if ($answer->answered_at)
-                                            <span class="text-xs text-gray-400 ml-1">{{ $answer->answered_at->format('d M Y, g:ia') }}</span>
+                                            <span class="text-xs text-gray-400 ml-1">{{ \App\Support\LocalTime::format($answer->answered_at, 'd M Y, g:ia') }}</span>
                                         @endif
                                     @else
                                         <x-admin.badge tone="gray">No</x-admin.badge>
@@ -1232,7 +1241,7 @@
                                 {{ $payment->issued() ?? '—' }}
                                 @if ($payment->paidOn())
                                     <span class="text-gray-300 mx-1">|</span>
-                                    paid {{ $payment->paidOn()->format('d M Y, g:i a') }}
+                                    paid {{ \App\Support\LocalTime::format($payment->paidOn()) }}
                                 @endif
                             </td>
                         </tr>
@@ -1342,7 +1351,7 @@
                                 <div @class(['min-w-0', 'pb-4' => ! $loop->last])>
                                     <p class="text-sm font-semibold text-gray-900">{{ $entry['label'] }}</p>
                                     <p class="text-xs text-gray-500">
-                                        {{ $entry['at']?->format('d M Y, g:i:s a') ?? 'Time not recorded' }}
+                                        {{ \App\Support\LocalTime::format($entry['at'], 'd M Y, g:i:s a', 'Time not recorded') }}
                                     </p>
                                 </div>
                             </li>
@@ -1364,7 +1373,7 @@
                         <p class="text-xs text-gray-500">
                             {{ number_format(strlen($payment->toJson())) }} characters
                             @if ($registration->payment_synced_at)
-                                &middot; retrieved {{ $registration->payment_synced_at->format('d M Y, g:i a') }}
+                                &middot; retrieved {{ \App\Support\LocalTime::format($registration->payment_synced_at) }}
                             @endif
                         </p>
 
@@ -1483,7 +1492,7 @@
                             @endif
 
                             <p class="text-xs text-gray-500 mt-1.5">
-                                {{ ($notification->sent_at ?? $notification->created_at)->format('d M Y, g:i a') }}
+                                {{ \App\Support\LocalTime::format($notification->sent_at ?? $notification->created_at) }}
                             </p>
                         </div>
                     </div>

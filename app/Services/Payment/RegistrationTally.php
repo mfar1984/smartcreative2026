@@ -4,6 +4,7 @@ namespace App\Services\Payment;
 
 use App\Models\EventRegistration;
 use App\Models\EventRegistrationPayment;
+use App\Support\LocalTime;
 use App\Support\PaymentFigures;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -180,7 +181,7 @@ class RegistrationTally
             'message' => sprintf(
                 'Matched to purchase %s, which the gateway reports as paid%s. %s is now %s, with %s on record. %s',
                 $paid['purchase_id'],
-                $paid['paid_on'] instanceof Carbon ? ' on ' . $paid['paid_on']->format('d M Y, g:i a') : '',
+                $paid['paid_on'] instanceof Carbon ? ' on ' . LocalTime::format($paid['paid_on']) : '',
                 $registration->reference,
                 strtolower($registration->paymentStatusLabel()),
                 PaymentFigures::money((float) $registration->amount_paid),

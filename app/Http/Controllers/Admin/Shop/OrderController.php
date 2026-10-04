@@ -885,7 +885,7 @@ class OrderController extends Controller
             return sprintf(
                 'one was already queued %s, so the buyer is being left alone until %s',
                 $order->payment_link_sent_at->diffForHumans(),
-                $order->paymentLinkCooldownEndsAt()?->format('g:i a, d M') ?? 'later',
+                LocalTime::format($order->paymentLinkCooldownEndsAt(), 'g:i a, d M', 'later'),
             );
         }
 

@@ -95,7 +95,7 @@
                     Checked in
                 </p>
                 <p class="text-xs text-gray-500 mt-0.5">
-                    {{ $attendance->checked_in_at?->format('g:i a, d M') }}
+                    {{ \App\Support\LocalTime::format($attendance->checked_in_at, 'g:i a, d M', '') }}
                     <span class="block">by {{ $attendance->recordedByName() }}</span>
                 </p>
 
@@ -371,7 +371,7 @@
                             @endif
 
                             <span class="text-gray-300 mx-1">&middot;</span>
-                            {{ $change->created_at?->format('g:i a, d M') }}
+                            {{ \App\Support\LocalTime::format($change->created_at, 'g:i a, d M', '') }}
                         </li>
                     @endforeach
                 </ul>

@@ -90,7 +90,7 @@
                                     </td>
 
                                     <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                        {{ ($contact->unsubscribed_at ?? $contact->bounced_at ?? $contact->complained_at)?->format('d M Y, g:i a') }}
+                                        {{ \App\Support\LocalTime::format($contact->unsubscribed_at ?? $contact->bounced_at ?? $contact->complained_at, \App\Support\LocalTime::DATE_TIME, '') }}
                                     </td>
 
                                     @if ($canRestore)

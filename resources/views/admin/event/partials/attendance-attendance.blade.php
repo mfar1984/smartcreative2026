@@ -217,6 +217,15 @@
                             <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                                 <span class="text-sm font-bold text-gray-900 tabular-nums">{{ $receipt->amountLabel() }}</span>
                                 <span class="text-xs text-gray-500">
+                                    {{-- ->format() directly, not through LocalTime, and this is the
+                                         one timestamp on the counter screens that must stay that
+                                         way. The list above is filtered to source=manual, and a
+                                         hand-recorded receipt's received_at is built in
+                                         ParticipantController from the date and time boxes a member
+                                         of staff typed off a transfer slip and stored exactly as
+                                         typed. Converting it would read back a 2:30 pm slip as
+                                         10:30 pm. The gateway's own instants are the ones that get
+                                         converted, on admin/event/participants-receipts. --}}
                                     {{ $receipt->received_at?->format('d M Y, g:i a') }}
                                 </span>
                             </div>

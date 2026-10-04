@@ -4,6 +4,7 @@ namespace App\Support\Tournament;
 
 use App\Models\Tournament;
 use App\Models\TournamentEntrant;
+use App\Support\LocalTime;
 use Illuminate\Support\Str;
 
 /**
@@ -78,7 +79,7 @@ final class TournamentProgress
                 'key' => 'draw',
                 'label' => 'Draw generated',
                 'detail' => $tournament->hasDraw()
-                    ? 'Generated ' . $tournament->draw_generated_at->format('d M Y, g:i a')
+                    ? 'Generated ' . LocalTime::format($tournament->draw_generated_at)
                     : 'Not generated',
                 'done' => $tournament->hasDraw(),
                 'blocker' => match (true) {

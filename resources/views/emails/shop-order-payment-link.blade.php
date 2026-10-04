@@ -16,7 +16,7 @@
 
         <h1 style="margin:0 0 4px;font-size:20px;color:#111827;">Pay for your order</h1>
         <p style="margin:0 0 20px;font-size:13px;color:#6b7280;">
-            Order {{ $order->reference }} &middot; placed {{ $order->created_at->format('d M Y, g:i a') }}
+            Order {{ $order->reference }} &middot; placed {{ \App\Support\LocalTime::format($order->created_at) }}
         </p>
 
         <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151;">

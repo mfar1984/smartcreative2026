@@ -138,8 +138,8 @@
                             @forelse ($activityEntries as $entry)
                                 <tr class="hover:bg-blue-50/40">
                                     <td class="px-5 py-3 text-xs text-gray-600 whitespace-nowrap">
-                                        {{ $entry->created_at?->format('d M Y') }}
-                                        <span class="block text-gray-400">{{ $entry->created_at?->format('g:i:s a') }}</span>
+                                        {{ \App\Support\LocalTime::format($entry->created_at, 'd M Y', '') }}
+                                        <span class="block text-gray-400">{{ \App\Support\LocalTime::format($entry->created_at, 'g:i:s a', '') }}</span>
                                     </td>
                                     <td class="px-5 py-3 whitespace-nowrap">
                                         <x-admin.badge :tone="$levelTones[$entry->level] ?? 'gray'">{{ strtoupper($entry->level) }}</x-admin.badge>
@@ -278,8 +278,8 @@
                             @forelse ($auditEntries as $entry)
                                 <tr class="hover:bg-blue-50/40 align-top">
                                     <td class="px-5 py-3 text-xs text-gray-600 whitespace-nowrap">
-                                        {{ $entry->created_at?->format('d M Y') }}
-                                        <span class="block text-gray-400">{{ $entry->created_at?->format('g:i:s a') }}</span>
+                                        {{ \App\Support\LocalTime::format($entry->created_at, 'd M Y', '') }}
+                                        <span class="block text-gray-400">{{ \App\Support\LocalTime::format($entry->created_at, 'g:i:s a', '') }}</span>
                                     </td>
                                     <td class="px-5 py-3 whitespace-nowrap">
                                         <x-admin.badge :tone="$eventTone($entry->event)">{{ $entry->event }}</x-admin.badge>

@@ -171,6 +171,11 @@
                                         @endif
                                     </td>
 
+                                    {{-- ->format() directly, not through LocalTime: scheduled_at is
+                                         a dateTime so it looks like a system instant, but it is
+                                         typed into the datetime-local box further down this page
+                                         and stored as written. Converting it would move the
+                                         fixture by eight hours. --}}
                                     <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
                                         {{ $match->scheduled_at?->format('d M, g:i a') ?? '—' }}
                                     </td>

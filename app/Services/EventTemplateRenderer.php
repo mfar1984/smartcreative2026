@@ -7,6 +7,7 @@ use App\Models\EventRegistration;
 use App\Models\EventTemplate;
 use App\Support\EventTemplates;
 use App\Support\GatewayPaymentRecord;
+use App\Support\LocalTime;
 use Illuminate\Support\Carbon;
 
 /**
@@ -151,7 +152,7 @@ class EventTemplateRenderer
             // checkout it was never given or a size form it has no business sending.
             'size_link' => $sizeLink ?? '',
 
-            'paid_on' => $payment?->paidOn()?->format('d M Y, g:i a') ?? '',
+            'paid_on' => LocalTime::format($payment?->paidOn(), LocalTime::DATE_TIME, ''),
             'payment_method' => $payment?->paymentMethod() ?? '',
             'payment_reference' => $registration->payment_reference ?? '',
         ];

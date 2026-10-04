@@ -284,7 +284,7 @@
                                         <td class="px-5 py-3 text-right tabular-nums text-gray-700">{{ $recipient->click_count }}</td>
                                     @endif
                                     <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                        {{ $recipient->sent_at?->format('d M, g:i a') ?? '—' }}
+                                        {{ \App\Support\LocalTime::format($recipient->sent_at, 'd M, g:i a') }}
                                     </td>
                                 </tr>
                             @endforeach

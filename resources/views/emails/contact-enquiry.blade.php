@@ -8,7 +8,7 @@
     <div style="max-width:600px;margin:0 auto;background-color:#ffffff;border-radius:8px;padding:24px;">
         <h1 style="margin:0 0 4px;font-size:20px;color:#111827;">New website enquiry</h1>
         <p style="margin:0 0 20px;font-size:13px;color:#6b7280;">
-            Received {{ $contactMessage->created_at->format('d M Y, g:i a') }}
+            Received {{ \App\Support\LocalTime::format($contactMessage->created_at) }}
         </p>
 
         <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;border-collapse:collapse;">

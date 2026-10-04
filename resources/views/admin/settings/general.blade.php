@@ -271,7 +271,7 @@
                                         <tr>
                                             <td class="px-5 py-3 text-gray-900 break-all">{{ $file['name'] }}</td>
                                             <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ number_format($file['size'] / 1024, 1) }} KB</td>
-                                            <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ \Illuminate\Support\Carbon::createFromTimestamp($file['modified'])->format('d M Y, g:i a') }}</td>
+                                            <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ \App\Support\LocalTime::format(\Illuminate\Support\Carbon::createFromTimestamp($file['modified'])) }}</td>
                                         </tr>
                                     @endforeach
                                 </tbody>

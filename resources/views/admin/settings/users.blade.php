@@ -122,7 +122,7 @@
 
                             <td class="px-6 py-3 text-xs text-gray-500 whitespace-nowrap">
                                 @if ($row->last_login_at)
-                                    {{ $row->last_login_at->format('d/m/Y g:i a') }}
+                                    {{ \App\Support\LocalTime::format($row->last_login_at, 'd/m/Y g:i a') }}
                                     @if ($row->last_login_ip)
                                         <span class="block text-gray-400">{{ $row->last_login_ip }}</span>
                                     @endif

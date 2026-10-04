@@ -2,6 +2,7 @@
 
 namespace App\Mail;
 
+use App\Support\LocalTime;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -34,7 +35,7 @@ class TestEmail extends Mailable
         return new Envelope(
             // Timestamped so a second test is obviously a second test, rather
             // than looking like the first one still sitting in the inbox.
-            subject: sprintf('Test email from %s at %s', $this->siteName, now()->format('d M Y, g:i:s a')),
+            subject: sprintf('Test email from %s at %s', $this->siteName, LocalTime::format(now(), 'd M Y, g:i:s a')),
         );
     }
 

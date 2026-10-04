@@ -9,7 +9,7 @@
 
         <h1 style="margin:0 0 4px;font-size:20px;color:#111827;">Your order is ready to collect</h1>
         <p style="margin:0 0 20px;font-size:13px;color:#6b7280;">
-            Order {{ $order->reference }} &middot; paid {{ $order->paid_at?->format('d M Y, g:i a') }}
+            Order {{ $order->reference }} &middot; paid {{ \App\Support\LocalTime::format($order->paid_at, \App\Support\LocalTime::DATE_TIME, '') }}
         </p>
 
         <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151;">
@@ -32,6 +32,10 @@
                     @endif
 
                     @if ($order->collection_at)
+                        {{-- ->format() directly, not through LocalTime: the collection date
+                             and time are typed into a datetime-local input and stored as
+                             written, so this is already the counter's own clock. Converting
+                             it would move the appointment by eight hours. --}}
                         <p style="margin:10px 0 0;font-size:13px;color:#1e40af;">On</p>
                         <p style="margin:0;font-size:16px;font-weight:bold;color:#1e3a8a;">
                             {{ $order->collection_at->format('l, d F Y') }}<br>

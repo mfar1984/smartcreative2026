@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\AdminLogger;
 use App\Services\Shipping\EasyParcelOAuth;
 use App\Services\Shipping\ShippingException;
+use App\Support\LocalTime;
 use App\Support\ShippingSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -100,7 +101,7 @@ class EasyParcelController extends Controller
             'settings.shipping.connected',
             sprintf(
                 'Connected an EasyParcel account. Access token expires %s.',
-                ShippingSettings::accessTokenExpiresAt()?->toDayDateTimeString() ?? 'at an unstated time',
+                LocalTime::format(ShippingSettings::accessTokenExpiresAt(), 'D, M j, Y g:i A', 'at an unstated time'),
             ),
         );
 

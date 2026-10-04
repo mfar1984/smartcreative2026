@@ -117,8 +117,14 @@
                                         </td>
 
                                         <td class="px-5 py-3 whitespace-nowrap text-gray-700">
-                                            {{ $receipt->payment->received_at?->format('d M Y') }}
-                                            <span class="block text-xs text-gray-400">{{ $receipt->payment->received_at?->format('g:i a') }}</span>
+                                            {{-- Through LocalTime: every row on this screen was
+                                                 written by the gateway (GatewayReceiptAudit keeps
+                                                 only source=gateway rows with no member of staff
+                                                 and no slip), so received_at here is the gateway's
+                                                 own UTC instant and must read on the office clock
+                                                 like the participants list beside it. --}}
+                                            {{ \App\Support\LocalTime::format($receipt->payment->received_at, 'd M Y', '') }}
+                                            <span class="block text-xs text-gray-400">{{ \App\Support\LocalTime::format($receipt->payment->received_at, 'g:i a', '') }}</span>
                                         </td>
 
                                         <td class="px-5 py-3 text-right text-gray-900 tabular-nums whitespace-nowrap">{{ $receipt->reportedLabel() }}</td>

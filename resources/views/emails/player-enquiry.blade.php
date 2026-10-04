@@ -20,7 +20,7 @@
     <div style="max-width:620px;margin:0 auto;background-color:#ffffff;border-radius:8px;padding:24px;">
         <h1 style="margin:0 0 4px;font-size:20px;color:#111827;">Message for a competitor</h1>
         <p style="margin:0 0 20px;font-size:13px;color:#6b7280;">
-            Received {{ $playerMessage->created_at->format('d M Y, g:i a') }} through the player profile on the website.
+            Received {{ \App\Support\LocalTime::format($playerMessage->created_at) }} through the player profile on the website.
         </p>
 
         <div style="background-color:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:12px 16px;margin:0 0 20px;">

@@ -361,7 +361,7 @@
                                     </td>
 
                                     <td class="px-5 py-3 whitespace-nowrap text-gray-600">
-                                        {{ $image->created_at->format('d M Y') }}
+                                        {{ \App\Support\LocalTime::format($image->created_at, 'd M Y') }}
                                     </td>
 
                                     @if ($canUpdate || $canDelete)

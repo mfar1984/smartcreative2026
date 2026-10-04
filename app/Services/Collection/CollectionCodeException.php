@@ -2,6 +2,7 @@
 
 namespace App\Services\Collection;
 
+use App\Support\LocalTime;
 use Illuminate\Support\Carbon;
 use RuntimeException;
 
@@ -32,7 +33,7 @@ class CollectionCodeException extends RuntimeException
             sprintf('A code was sent less than %d minutes ago.', $minutes),
             sprintf(
                 'A code was already texted for this collection. Another can be sent from %s. Use the override below if the first one never arrived.',
-                $retryAt->copy()->setTimezone(config('app.display_timezone', 'Asia/Kuala_Lumpur'))->format('g:i a'),
+                LocalTime::format($retryAt, 'g:i a'),
             ),
             $retryAt,
         );

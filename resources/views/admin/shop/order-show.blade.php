@@ -47,7 +47,7 @@
 @section('content')
     <x-admin.page-card
         :title="'Order ' . $order->reference"
-        :description="$order->created_at->format('d M Y, g:i a') . ' · ' . $order->methodLabel()"
+        :description="\App\Support\LocalTime::format($order->created_at) . ' · ' . $order->methodLabel()"
         :back="route('admin.shop.orders')">
 
         <x-slot:actions>
@@ -364,7 +364,7 @@
                                 </div>
 
                                 <span class="text-xs text-gray-500 whitespace-nowrap tabular-nums">
-                                    {{ $event->created_at->format('d M Y, g:i a') }}
+                                    {{ \App\Support\LocalTime::format($event->created_at) }}
                                 </span>
                             </li>
                         @empty
@@ -387,7 +387,7 @@
                         <div class="px-5 py-4">
                             @if ($order->hasPaymentReceipt())
                                 <p class="text-xs text-gray-500">
-                                    Sent by the buyer {{ $order->payment_receipt_uploaded_at?->format('d M Y, g:i a') }}
+                                    Sent by the buyer {{ \App\Support\LocalTime::format($order->payment_receipt_uploaded_at, \App\Support\LocalTime::DATE_TIME, '') }}
                                 </p>
 
                                 @if ($order->paymentReceiptIsImage())
@@ -450,7 +450,7 @@
                                 <p role="status" class="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800 leading-relaxed">
                                     A payment link was queued {{ $order->payment_link_sent_at->diffForHumans() }}.
                                     The buyer is left alone until
-                                    {{ $order->paymentLinkCooldownEndsAt()?->format('g:i a, d M Y') }},
+                                    {{ \App\Support\LocalTime::format($order->paymentLinkCooldownEndsAt(), 'g:i a, d M Y', '') }},
                                     so another one cannot be sent yet.
                                 </p>
                             @else
@@ -652,6 +652,9 @@
                             @endif
 
                             @if ($order->collection_at)
+                                {{-- ->format() directly, not through LocalTime: typed into a
+                                     datetime-local input and stored as written, so it is
+                                     already the counter's clock. --}}
                                 <p class="text-gray-700">
                                     {{ $order->collection_at->format('l, d M Y') }} at {{ $order->collection_at->format('g:i a') }}
                                 </p>
@@ -719,7 +722,7 @@
                             @if ($order->isReceiptConfirmed())
                                 <p class="text-xs text-green-700 font-semibold pt-2">
                                     Receipt confirmed by the buyer on
-                                    {{ $order->received_confirmed_at->format('d M Y, g:i a') }}
+                                    {{ \App\Support\LocalTime::format($order->received_confirmed_at) }}
                                 </p>
                             @endif
                         </div>
@@ -732,7 +735,7 @@
 
                         @if ($order->isPaid())
                             <p class="text-green-700 font-semibold">
-                                Paid {{ $order->paid_at->format('d M Y, g:i a') }}
+                                Paid {{ \App\Support\LocalTime::format($order->paid_at) }}
                             </p>
                         @else
                             <p class="text-amber-700 font-semibold">Not paid</p>

@@ -104,14 +104,14 @@
 
                                 <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
                                     @if ($activeTab === 'published')
-                                        {{ $tournament->published_at?->format('d M Y, g:i a') }}
+                                        {{ \App\Support\LocalTime::format($tournament->published_at, \App\Support\LocalTime::DATE_TIME, '') }}
                                         @if ($tournament->champions->first()?->publisher)
                                             <span class="block text-gray-400">
                                                 by {{ $tournament->champions->first()->publisher->name }}
                                             </span>
                                         @endif
                                     @else
-                                        {{ $tournament->completed_at?->format('d M Y, g:i a') ?? '—' }}
+                                        {{ \App\Support\LocalTime::format($tournament->completed_at) }}
                                     @endif
                                 </td>
 

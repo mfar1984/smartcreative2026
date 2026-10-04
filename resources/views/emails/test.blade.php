@@ -8,7 +8,7 @@
     <div style="max-width:600px;margin:0 auto;background-color:#ffffff;border-radius:8px;padding:24px;">
         <h1 style="margin:0 0 4px;font-size:20px;color:#111827;">Email delivery is working</h1>
         <p style="margin:0 0 20px;font-size:13px;color:#6b7280;">
-            Sent {{ now()->format('d M Y, g:i:s a') }} from {{ $siteName }}.
+            Sent {{ \App\Support\LocalTime::format(now(), 'd M Y, g:i:s a') }} from {{ $siteName }}.
         </p>
 
         <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151;">

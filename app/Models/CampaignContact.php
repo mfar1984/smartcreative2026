@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\LocalTime;
 use App\Support\PhoneNumber;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -88,7 +89,7 @@ class CampaignContact extends Model
     public function suppressionReason(): ?string
     {
         if ($this->unsubscribed_at !== null) {
-            return 'Unsubscribed ' . $this->unsubscribed_at->format('d M Y');
+            return 'Unsubscribed ' . LocalTime::format($this->unsubscribed_at, 'd M Y');
         }
 
         if ($this->bounced_at !== null) {
@@ -96,7 +97,7 @@ class CampaignContact extends Model
         }
 
         if ($this->complained_at !== null) {
-            return 'Marked as a complaint ' . $this->complained_at->format('d M Y');
+            return 'Marked as a complaint ' . LocalTime::format($this->complained_at, 'd M Y');
         }
 
         return null;
