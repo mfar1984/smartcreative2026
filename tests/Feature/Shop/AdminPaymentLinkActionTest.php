@@ -127,25 +127,46 @@ class AdminPaymentLinkActionTest extends ShopPaymentTestCase
         $this->get(str_replace($order->reference, $other->reference, $url))->assertForbidden();
     }
 
-    public function test_pressing_it_twice_sends_twice_and_still_touches_nothing(): void
+    public function test_a_second_press_inside_the_cooldown_sends_nothing(): void
     {
         $order = $this->order();
 
-        $this->send($order);
-        $this->send($order);
+        $this->send($order)->assertSessionHas('status');
 
-        // An admin-initiated chase, not an idempotent operation: the second press is a
-        // second decision to chase.
-        Mail::assertQueued(ShopOrderPaymentLink::class, 2);
+        // The second press is refused rather than obeyed. An impatient admin, a
+        // reloaded page or two people working the same list must not reach the same
+        // buyer twice in a sitting, and the bulk control makes that far easier to do
+        // by accident than a single icon ever did.
+        $this->send($order)->assertSessionHas('warning');
+
+        Mail::assertQueued(ShopOrderPaymentLink::class, 1);
 
         $after = $order->fresh();
 
         $this->assertSame(ShopOrder::STATUS_PENDING_PAYMENT, $after->status);
         $this->assertNull($after->paid_at);
         $this->assertNull($after->payment_reference);
-        $this->assertSame(2, $after->events()
+        $this->assertNotNull($after->payment_link_sent_at);
+        $this->assertSame(1, $after->events()
             ->where('note', 'like', '%Payment link queued%')
             ->count());
+    }
+
+    public function test_it_can_be_sent_again_once_the_cooldown_has_passed(): void
+    {
+        $order = $this->order();
+
+        $this->send($order);
+
+        // Backdated past the window rather than travelling the clock, so the test says
+        // what the column means: a send this old no longer holds anybody back.
+        $order->forceFill([
+            'payment_link_sent_at' => now()->subHours(ShopOrder::PAYMENT_LINK_COOLDOWN_HOURS + 1),
+        ])->save();
+
+        $this->send($order->fresh())->assertSessionHas('status');
+
+        Mail::assertQueued(ShopOrderPaymentLink::class, 2);
     }
 
     public function test_without_the_notify_permission_the_route_refuses(): void

@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
@@ -111,6 +112,7 @@ class ShopOrder extends Model
         'payment_synced_at',
         'payment_receipt_path',
         'payment_receipt_uploaded_at',
+        'payment_link_sent_at',
         'paid_at',
         'customer_name',
         'customer_email',
@@ -150,6 +152,7 @@ class ShopOrder extends Model
             'payment_details' => 'array',
             'payment_synced_at' => 'datetime',
             'payment_receipt_uploaded_at' => 'datetime',
+            'payment_link_sent_at' => 'datetime',
             'collection_at' => 'datetime',
             'paid_at' => 'datetime',
             'shipped_at' => 'datetime',
@@ -245,6 +248,47 @@ class ShopOrder extends Model
         return $this->isPendingPayment()
             && $this->payment_method === self::METHOD_GATEWAY
             && (float) $this->grand_total > 0;
+    }
+
+    /* ---------------------------------------------------------------------
+     | Chasing the money
+     * ------------------------------------------------------------------ */
+
+    /**
+     * How long a buyer is left alone after a payment link goes out.
+     *
+     * Six hours: long enough that a double press, a reload or a second person
+     * working the same list cannot mail the same buyer twice in a sitting, short
+     * enough that chasing somebody again the same working day is still possible.
+     * A fixed figure rather than a setting, because nobody has asked to tune it and
+     * a setting nobody changes is one more thing that can be set wrong.
+     */
+    public const PAYMENT_LINK_COOLDOWN_HOURS = 6;
+
+    /** Whether a payment link went out recently enough that another would be spam. */
+    public function paymentLinkRemindedRecently(): bool
+    {
+        return $this->payment_link_sent_at !== null
+            && $this->payment_link_sent_at->greaterThan(self::paymentLinkCooldownCutoff());
+    }
+
+    /** When this order may be chased again, or null when it may be chased now. */
+    public function paymentLinkCooldownEndsAt(): ?Carbon
+    {
+        return $this->paymentLinkRemindedRecently()
+            ? $this->payment_link_sent_at->copy()->addHours(self::PAYMENT_LINK_COOLDOWN_HOURS)
+            : null;
+    }
+
+    /**
+     * A send at or before this moment is old enough to be ignored.
+     *
+     * One place for the arithmetic, so the row-level check and the SQL scope cannot
+     * disagree about where the window starts.
+     */
+    public static function paymentLinkCooldownCutoff(): Carbon
+    {
+        return now()->subHours(self::PAYMENT_LINK_COOLDOWN_HOURS);
     }
 
     /**
@@ -382,6 +426,29 @@ class ShopOrder extends Model
     public function isCollected(): bool
     {
         return $this->status === self::STATUS_DELIVERED;
+    }
+
+    /**
+     * Paid for, but still sitting with us.
+     *
+     * The row-level half of the figure the orders list has always shown at the top of
+     * the Offline tab: scopeOpen() counts a paid offline order as waiting to be
+     * collected, because the only thing left to happen to it is the handover. Written
+     * as a predicate so the Hand Over cell and the confirm-collection action read the
+     * same answer that counter does, instead of each deciding for itself and
+     * disagreeing on the same row.
+     *
+     * canMoveTo() carries the rest of the conditions without naming them twice:
+     * TRANSITIONS_OFFLINE allows delivered out of paid and out of nowhere else, so an
+     * order already collected, cancelled or fully refunded is false here. isPaid()
+     * reads paid_at rather than the status, so a row whose status was moved without
+     * the money ever landing cannot be handed over.
+     */
+    public function awaitsCollection(): bool
+    {
+        return $this->isOffline()
+            && $this->isPaid()
+            && $this->canMoveTo(self::STATUS_DELIVERED);
     }
 
     /* ---------------------------------------------------------------------
@@ -567,6 +634,29 @@ class ShopOrder extends Model
     public function scopeFulfilment(Builder $query, string $fulfilment): Builder
     {
         return $query->where('fulfilment', $fulfilment);
+    }
+
+    /**
+     * Orders a payment link could go out to right now.
+     *
+     * The SQL mirror of awaitsGatewayPayment() plus an address to send to and the
+     * cooldown. Used only to count, so a button can say how many it would email and
+     * disappear when the answer is none: the send loop asks
+     * ShopPaymentLinkSender::skipReason() about each row, which is the authority and
+     * the thing that produces the reason breakdown.
+     */
+    public function scopeRemindableForPayment(Builder $query): Builder
+    {
+        return $query
+            ->where('status', self::STATUS_PENDING_PAYMENT)
+            ->whereNull('paid_at')
+            ->where('payment_method', self::METHOD_GATEWAY)
+            ->where('grand_total', '>', 0)
+            ->whereNotNull('customer_email')
+            ->where('customer_email', '!=', '')
+            ->where(fn (Builder $inner) => $inner
+                ->whereNull('payment_link_sent_at')
+                ->orWhere('payment_link_sent_at', '<=', self::paymentLinkCooldownCutoff()));
     }
 
     /** Bank transfers still waiting for somebody to check the money arrived. */

@@ -649,12 +649,41 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('orders.payment');
 
             /*
+            | Handing a counter-collected order over.
+            |
+            | Its own route rather than a status posted to orders.status, because the
+            | request must not be able to name the destination: paying for a counter
+            | order and collecting it are weeks apart, and the whole fix is that only
+            | this press moves one to delivered.
+            |
+            | Same permission as orders.status, so nothing needs re-seeding to grant
+            | it: somebody trusted to move an order along is trusted to record a
+            | handover. POST, so it cannot be fired by a link, a prefetch or a crawler.
+            */
+            Route::post('orders/{order}/collect', [ShopOrderController::class, 'confirmCollection'])
+                ->middleware('permission:shop.orders.update')
+                ->name('orders.collect');
+
+            /*
             | Email the buyer a payment link.
             |
             | Separate from orders.payment: that one asserts money arrived, this one
-            | asks for it. Per order, from a press on the row — never in bulk, because
-            | deciding to chase somebody is a judgement about that order.
+            | asks for it.
+            |
+            | The bulk form is declared before the per-order one so "payment-links" is
+            | never read as an order id, and both carry the same permission: it is the
+            | same act, and inventing a second permission for the plural would mean
+            | re-seeding roles to grant something already granted.
+            |
+            | POST on both, so neither can be fired by a link, a prefetch or a crawler.
+            | The bulk one is throttled far harder because one press is already
+            | twenty-odd emails, and the per-order cooldown on the order row is what
+            | stops a second press reaching the same buyer.
             */
+            Route::post('orders/payment-links', [ShopOrderController::class, 'sendAllPaymentLinks'])
+                ->middleware(['permission:shop.orders.notify', 'throttle:4,1'])
+                ->name('orders.payment-links');
+
             Route::post('orders/{order}/payment-link', [ShopOrderController::class, 'sendPaymentLink'])
                 ->middleware(['permission:shop.orders.notify', 'throttle:20,1'])
                 ->name('orders.payment-link');

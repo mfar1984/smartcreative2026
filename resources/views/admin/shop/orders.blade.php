@@ -101,22 +101,65 @@
             </select>
         </x-admin.filter-bar>
 
-        {{-- The two figures somebody opening this screen is looking for. --}}
+        {{-- The two figures somebody opening this screen is looking for, and the one
+             action that applies to all of them at once. --}}
         <div class="flex flex-wrap items-center justify-between gap-3 px-6 py-2.5 bg-gray-50 border-b border-gray-200">
             <p class="text-xs text-gray-500">
                 {{ $orders->total() }} {{ Str::plural('order', $orders->total()) }} on this tab
             </p>
-            <p class="text-xs text-gray-500">
-                <span class="font-semibold text-amber-700">{{ $awaitingPayment }}</span> awaiting payment
-                @if ($awaitingReceiptCheck > 0)
+
+            <div class="flex flex-wrap items-center gap-3">
+                <p class="text-xs text-gray-500">
+                    <span class="font-semibold text-amber-700">{{ $awaitingPayment }}</span> awaiting payment
+                    @if ($awaitingReceiptCheck > 0)
+                        <span class="mx-1.5 text-gray-300" aria-hidden="true">|</span>
+                        <span class="font-semibold text-amber-700">{{ $awaitingReceiptCheck }}</span>
+                        {{ Str::plural('receipt', $awaitingReceiptCheck) }} to check
+                    @endif
                     <span class="mx-1.5 text-gray-300" aria-hidden="true">|</span>
-                    <span class="font-semibold text-amber-700">{{ $awaitingReceiptCheck }}</span>
-                    {{ Str::plural('receipt', $awaitingReceiptCheck) }} to check
+                    <span class="font-semibold text-blue-700">{{ $openCount }}</span>
+                    {{ $isOffline ? 'waiting to be collected' : 'owe a parcel' }}
+                </p>
+
+                {{-- Chase everybody on the list in one press, instead of twenty-two
+                     envelopes.
+
+                     It sits here, directly under the filters and above the table,
+                     because what it sends is decided by those filters: the tab, the
+                     status, the method and the search box all travel with it in the
+                     hidden fields below, and the count on the label is counted through
+                     the same clauses. Below the filters it reads as "and to these".
+
+                     Hidden from the start when there is nobody to chase, rather than
+                     disabled: a dead button on a screen with twenty-two amber rows
+                     invites a second and a third press. --}}
+                @if ($canNotify && $remindableCount > 0)
+                    <form action="{{ route('admin.shop.orders.payment-links') }}" method="POST"
+                          onsubmit="return confirm('Email a payment link to {{ $remindableCount }} {{ Str::plural('buyer', $remindableCount) }} on this list?\n\nOnly orders still waiting for an online payment are emailed. Anything already paid, cancelled, refunded, settled by hand or reminded in the last {{ App\Models\ShopOrder::PAYMENT_LINK_COOLDOWN_HOURS }} hours is skipped.\n\nNothing is marked paid by this.');">
+                        @csrf
+
+                        {{-- The filters in force, posted back so the server narrows to
+                             the same set that is on screen. The server re-reads them
+                             through the same filter reader the table used and decides
+                             eligibility and the amount from the order rows, never from
+                             these. --}}
+                        <input type="hidden" name="tab" value="{{ $activeTab }}">
+                        <input type="hidden" name="q" value="{{ $search }}">
+                        <input type="hidden" name="status" value="{{ $status }}">
+                        <input type="hidden" name="method" value="{{ $method }}">
+
+                        <button type="submit"
+                                class="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 transition shadow-sm">
+                            {{-- The same envelope as the per-row icon: the same act,
+                                 done to everybody at once. --}}
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                            </svg>
+                            Send payment link to all {{ $remindableCount }}
+                        </button>
+                    </form>
                 @endif
-                <span class="mx-1.5 text-gray-300" aria-hidden="true">|</span>
-                <span class="font-semibold text-blue-700">{{ $openCount }}</span>
-                {{ $isOffline ? 'waiting to be collected' : 'owe a parcel' }}
-            </p>
+            </div>
         </div>
 
         <div class="overflow-x-auto">
@@ -203,31 +246,35 @@
                             </td>
 
                             @if ($isOffline)
-                                <td class="px-5 py-3 text-right whitespace-nowrap">
-                                    @if ($canUpdate && $order->canMoveTo(App\Models\ShopOrder::STATUS_DELIVERED))
-                                        {{-- The counter action, on the row rather than behind the
-                                             order page: handing over a queue of orders is a run of
-                                             single presses on one screen. --}}
-                                        <form action="{{ route('admin.shop.orders.status', $order) }}" method="POST"
-                                              onsubmit="return confirm('Hand order {{ $order->reference }} over to {{ addslashes($order->customer_name) }}?\n\nCheck their identity card first. This records the order as collected.');"
-                                              class="inline">
-                                            @csrf
-                                            @method('PUT')
-                                            <input type="hidden" name="status" value="{{ App\Models\ShopOrder::STATUS_DELIVERED }}">
-                                            <input type="hidden" name="from" value="list">
-                                            <input type="hidden" name="note" value="Handed over at the counter after checking the identity card.">
+                                {{-- What has happened to the goods, and nothing else.
 
-                                            <button type="submit"
-                                                    class="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition shadow-sm"
-                                                    title="Record this order as collected">
-                                                <x-admin.icon name="check" class="w-3.5 h-3.5" />
-                                                Delivered
-                                            </button>
-                                        </form>
-                                    @elseif ($order->isCollected())
+                                     It used to render the hand-over BUTTON here, a
+                                     green tick labelled Delivered, which is the
+                                     destination of the press rather than the state of
+                                     the order. On a paid order waiting for an event two
+                                     weeks away that read as "already delivered" while
+                                     the counter above said one waiting to be collected,
+                                     and the two appeared to contradict each other. The
+                                     state was always right; the cell was describing a
+                                     control. The control now lives in Actions, where
+                                     every other action on this table already is.
+
+                                     data-hand-over so the regression test can assert on
+                                     this cell rather than on the page, which also
+                                     carries the word Delivered in the status filter. --}}
+                                <td class="px-5 py-3 text-right whitespace-nowrap" data-hand-over="{{ $order->reference }}">
+                                    @if ($order->isCollected())
                                         <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-green-700">
                                             <x-admin.icon name="check" class="w-3.5 h-3.5" />
-                                            {{ $order->delivered_at?->format('d M Y') }}
+                                            Collected {{ \App\Support\LocalTime::format($order->delivered_at, 'd M Y', '') }}
+                                        </span>
+                                    @elseif ($order->awaitsCollection())
+                                        {{-- Paid, still with us. The same thing the
+                                             counter at the top of this screen counts. --}}
+                                        <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700"
+                                              title="Paid on {{ \App\Support\LocalTime::format($order->paid_at) }}. Not handed over yet.">
+                                            <x-admin.icon name="archive" class="w-3.5 h-3.5" />
+                                            Awaiting collection
                                         </span>
                                     @else
                                         <span class="text-xs text-gray-400">
@@ -256,7 +303,18 @@
                                          take. A cash on delivery or bank transfer order
                                          is settled by hand, so a link would send the
                                          buyer to a page that refuses itself. --}}
-                                    @if ($canNotify && $order->awaitsGatewayPayment())
+                                    @if ($canNotify && $order->awaitsGatewayPayment() && $order->paymentLinkRemindedRecently())
+                                        {{-- Already chased. The same cooldown the
+                                             server enforces, shown rather than hidden,
+                                             so the answer to "did anybody email this
+                                             one" is on the row instead of behind a
+                                             press that gets refused. --}}
+                                        <span class="inline-flex items-center gap-1 px-1.5 text-xs text-gray-400"
+                                              title="A payment link was queued {{ $order->payment_link_sent_at->diffForHumans() }}. It can be sent again after {{ $order->paymentLinkCooldownEndsAt()?->format('g:i a, d M') }}.">
+                                            <x-admin.icon name="check" class="w-3.5 h-3.5" />
+                                            Sent
+                                        </span>
+                                    @elseif ($canNotify && $order->awaitsGatewayPayment())
                                         <form action="{{ route('admin.shop.orders.payment-link', $order) }}" method="POST"
                                               onsubmit="return confirm('Email a payment link for {{ $order->reference }} to {{ addslashes($order->customer_email) }}?\n\nThey will be asked to pay {{ $order->grandTotalLabel() }} by card or online banking. Nothing is marked paid until the money actually arrives.');">
                                             @csrf
@@ -273,6 +331,26 @@
                                                 </svg>
                                             </button>
                                         </form>
+                                    @endif
+
+                                    {{-- Handing it over at the counter. Offered only on
+                                         an order that is actually ready for it: offline,
+                                         paid, and not already collected, cancelled or
+                                         refunded. awaitsCollection() answers all of
+                                         that, and the route re-asks it server-side.
+
+                                         A dialog rather than confirm(), because this
+                                         one asserts that goods left the building and the
+                                         person pressing it should see which order,
+                                         whose identity card to check and where it is
+                                         being collected before they do. --}}
+                                    @if ($canUpdate && $order->awaitsCollection())
+                                        <button type="button" data-open-dialog="collect-{{ $order->id }}"
+                                                class="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition"
+                                                title="Confirm collection of {{ $order->reference }}"
+                                                aria-label="Confirm collection of {{ $order->reference }}">
+                                            <x-admin.icon name="check" class="w-4 h-4" />
+                                        </button>
                                     @endif
                                 </div>
                             </td>
@@ -318,4 +396,131 @@
         </div>
 
     </x-admin.page-card>
+
+    {{-- ===================== Confirm collection =====================
+
+         One dialog per row that can be handed over, declared outside the table
+         because a div is not valid inside a tbody. Same hand-written pattern as
+         Settings > Users: a hidden div with role=dialog, a backdrop that closes it,
+         and the small script below. No library.
+
+         The form carries nothing but the CSRF token and a note. Which order and which
+         status are decided by the route binding and by the controller, so a body
+         edited in the browser has nothing to aim. --}}
+    @if ($canUpdate)
+        @foreach ($orders as $order)
+            @continue (! $order->awaitsCollection())
+
+            <div id="collect-{{ $order->id }}" class="hidden fixed inset-0 z-50 overflow-y-auto"
+                 role="dialog" aria-modal="true" aria-labelledby="collect-title-{{ $order->id }}">
+                <div class="fixed inset-0 bg-gray-900/50" data-close-dialog></div>
+
+                <div class="relative min-h-full flex items-start justify-center p-4">
+                    <div class="relative w-full max-w-md bg-white rounded-xl shadow-xl my-8">
+                        <div class="flex items-center justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                            <h2 id="collect-title-{{ $order->id }}" class="text-base font-bold text-gray-900">
+                                Confirm Collection
+                            </h2>
+                            <button type="button" data-close-dialog
+                                    class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
+                                    aria-label="Close">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <form action="{{ route('admin.shop.orders.collect', $order) }}" method="POST" class="p-6 space-y-4">
+                            @csrf
+
+                            <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm space-y-1">
+                                <p class="font-semibold text-gray-900 tabular-nums">{{ $order->reference }}</p>
+                                <p class="text-gray-700">{{ $order->customer_name }}</p>
+                                <p class="text-gray-600 tabular-nums">
+                                    IC to check: {{ $order->identity_card ?: 'Not recorded' }}
+                                </p>
+                                <p class="text-gray-600">
+                                    {{ $order->items_count }} {{ Str::plural('item', $order->items_count) }},
+                                    {{ $order->grandTotalLabel() }} paid
+                                </p>
+                                @if (filled($order->collection_location) || filled($order->collection_label))
+                                    <p class="text-gray-600">
+                                        {{ $order->collection_location ?: $order->collection_label }}
+                                    </p>
+                                @endif
+                            </div>
+
+                            <p class="text-sm text-gray-600">
+                                Check the identity card against the number above before you press this.
+                                It records the goods as handed over, against your name, and it cannot be
+                                undone from here.
+                            </p>
+
+                            <div>
+                                <label for="collect-note-{{ $order->id }}" class="block text-sm font-semibold text-gray-700 mb-1.5">
+                                    Note
+                                </label>
+                                <input type="text" id="collect-note-{{ $order->id }}" name="note" maxlength="255"
+                                       placeholder="Who picked it up, if it was not the buyer"
+                                       class="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Optional. Goes on the order history next to your name.
+                                </p>
+                            </div>
+
+                            <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                                <button type="button" data-close-dialog
+                                        class="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                    Cancel
+                                </button>
+                                <button type="submit"
+                                        class="inline-flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-green-700 transition shadow-sm">
+                                    <x-admin.icon name="check" class="w-4 h-4" />
+                                    Collected
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        @endforeach
+    @endif
 @endsection
+
+@push('scripts')
+<script>
+    (function () {
+        function closeAll() {
+            document.querySelectorAll('[role="dialog"]').forEach(function (dialog) {
+                dialog.classList.add('hidden');
+            });
+            document.body.classList.remove('overflow-hidden');
+        }
+
+        document.querySelectorAll('[data-open-dialog]').forEach(function (trigger) {
+            trigger.addEventListener('click', function () {
+                const dialog = document.getElementById(trigger.dataset.openDialog);
+
+                if (!dialog) {
+                    return;
+                }
+
+                closeAll();
+                dialog.classList.remove('hidden');
+                document.body.classList.add('overflow-hidden');
+                dialog.querySelector('input:not([type="hidden"]):not(.sr-only)')?.focus();
+            });
+        });
+
+        document.querySelectorAll('[data-close-dialog]').forEach(function (trigger) {
+            trigger.addEventListener('click', closeAll);
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                closeAll();
+            }
+        });
+    })();
+</script>
+@endpush

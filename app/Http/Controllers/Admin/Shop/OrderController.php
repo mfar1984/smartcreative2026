@@ -6,8 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\ShopOrder;
 use App\Services\AdminLogger;
 use App\Services\Payment\PaymentGatewayManager;
-use App\Services\ShopOrderNotifier;
 use App\Services\ShopOrderWriter;
+use App\Services\ShopPaymentLinkSender;
+use App\Support\LocalTime;
 use App\Support\PaymentFigures;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -20,11 +21,10 @@ class OrderController extends Controller
 
     public function index(Request $request)
     {
-        $search = trim((string) $request->query('q'));
-        $status = trim((string) $request->query('status'));
-        $method = trim((string) $request->query('method'));
-        $tab = $this->resolveTab($request->query('tab'));
+        $filters = $this->filters($request);
+        $tab = $filters['tab'];
         $isOffline = $tab === ShopOrder::FULFILMENT_OFFLINE;
+        $canNotify = $request->user()->hasPermission('shop.orders.notify');
 
         /*
          | The two kinds of order are kept on separate tabs rather than mixed with a
@@ -33,8 +33,8 @@ class OrderController extends Controller
          | a counter, a date and somebody's identity card. One table trying to show
          | both would have half its columns empty on every row.
          */
-        $orders = $this->filtered($search, $status, $method)
-            ->fulfilment($tab)
+        $orders = $this->matching($filters)
+            ->withCount('items')
             ->latest('id')
             ->paginate(self::PER_PAGE)
             ->withQueryString();
@@ -60,10 +60,10 @@ class OrderController extends Controller
             'statuses' => $isOffline ? $this->offlineStatuses() : ShopOrder::STATUSES,
             'methods' => ShopOrder::METHODS,
 
-            'search' => $search,
-            'status' => $status,
-            'method' => $method,
-            'isFiltered' => $search !== '' || $status !== '' || $method !== '',
+            'search' => $filters['q'],
+            'status' => $filters['status'],
+            'method' => $filters['method'],
+            'isFiltered' => $filters['q'] !== '' || $filters['status'] !== '' || $filters['method'] !== '',
 
             /*
              | The figures somebody opening this screen is actually looking for. Counted
@@ -77,10 +77,74 @@ class OrderController extends Controller
             // worth showing when there are some.
             'awaitingReceiptCheck' => ShopOrder::query()->fulfilment($tab)->awaitingReceiptCheck()->count(),
 
+            /*
+             | How many of the orders on screen right now a payment link would actually
+             | go out to. Counted through the same filters, so the figure on the button
+             | is the figure the button will send, and it is 0 — hiding the button —
+             | when everything matching is paid, settled by hand or inside its cooldown.
+             */
+            'remindableCount' => $canNotify
+                ? $this->matching($filters)->remindableForPayment()->count()
+                : 0,
+
             'canUpdate' => $request->user()->hasPermission('shop.orders.update'),
             'canConfirmPayment' => $request->user()->hasPermission('shop.orders.payment'),
-            'canNotify' => $request->user()->hasPermission('shop.orders.notify'),
+            'canNotify' => $canNotify,
         ]);
+    }
+
+    /**
+     * The filters in force, read from the request.
+     *
+     * One reader for both the list and the bulk payment-link action, so the set the
+     * button emails is the set the operator is looking at. input() rather than
+     * query(), because the bulk action posts the same four names in its body.
+     *
+     * @return array{tab: string, q: string, status: string, method: string}
+     */
+    private function filters(Request $request): array
+    {
+        return [
+            'tab' => $this->resolveTab($request->input('tab')),
+            'q' => trim((string) $request->input('q')),
+
+            /*
+             | A status or method that does not exist is dropped rather than passed to
+             | the where clause. It matters because the bulk form posts these values
+             | back: a junk status that silently filtered the table to nothing while
+             | the button sent to everything would be the exact disaster this screen
+             | must not have. Dropped on both sides, the two always agree.
+             */
+            'status' => $this->resolveKey($request->input('status'), ShopOrder::STATUSES),
+            'method' => $this->resolveKey($request->input('method'), ShopOrder::METHODS),
+        ];
+    }
+
+    /**
+     * The value when it is one of the allowed keys, otherwise an empty string.
+     *
+     * @param  array<string, string>  $allowed
+     */
+    private function resolveKey(mixed $value, array $allowed): string
+    {
+        $value = is_string($value) ? trim($value) : '';
+
+        return array_key_exists($value, $allowed) ? $value : '';
+    }
+
+    /**
+     * The orders those filters select, in no particular order.
+     *
+     * The single definition of "what is on this screen". The list paginates it, the
+     * bulk action walks it; neither rebuilds the clauses, so they cannot drift into
+     * emailing a different set than the one being shown.
+     *
+     * @param  array{tab: string, q: string, status: string, method: string}  $filters
+     */
+    private function matching(array $filters): Builder
+    {
+        return $this->filtered($filters['q'], $filters['status'], $filters['method'])
+            ->fulfilment($filters['tab']);
     }
 
     /**
@@ -110,7 +174,6 @@ class OrderController extends Controller
     private function filtered(string $search, string $status, string $method): Builder
     {
         return ShopOrder::query()
-            ->withCount('items')
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
                 $inner->where('reference', 'like', "%{$search}%")
                     ->orWhere('customer_name', 'like', "%{$search}%")
@@ -231,6 +294,90 @@ class OrderController extends Controller
     }
 
     /**
+     * Record that a counter-collected order was actually handed over.
+     *
+     * Its own route rather than a status posted through updateStatus(), and that is
+     * the point of it: nothing in the request says which order moves or where it moves
+     * to. The order comes from the route binding, the destination is a constant in
+     * this method, and the only field read is a note for the history. A stale page or
+     * a crafted body therefore cannot aim this at an unpaid order or at a posted one.
+     *
+     * Paying is not collecting. For a counter order the two are separated by however
+     * long it is until the event, which is why payment leaves the order at paid —
+     * awaiting collection — and this is the only thing that moves it to delivered.
+     *
+     * Gated on shop.orders.update, the permission that already covers moving an order
+     * along, so nothing needs re-seeding to grant it.
+     */
+    public function confirmCollection(Request $request, ShopOrder $order, ShopOrderWriter $writer)
+    {
+        $validated = $request->validate([
+            'note' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        /*
+         | Already handed over. Answered before the eligibility check and answered as
+         | a warning rather than an error, because a double press, a reload or two
+         | people working the same counter queue is the ordinary way to arrive here —
+         | and it must not write a second trail entry or a second activity line.
+         | moveTo() would refuse the move anyway; this is what keeps the refusal from
+         | reading as a fault.
+         */
+        if ($order->isCollected()) {
+            return back()->with('warning', sprintf(
+                'Order %s was already recorded as collected on %s. Nothing was changed.',
+                $order->reference,
+                LocalTime::format($order->delivered_at),
+            ));
+        }
+
+        if (! $order->isOffline()) {
+            return back()->with('warning', sprintf(
+                'Order %s is posted to the buyer, so there is no counter handover to confirm. Use Move This Order Along for a parcel.',
+                $order->reference,
+            ));
+        }
+
+        if (! $order->awaitsCollection()) {
+            return back()->with('warning', sprintf(
+                'Order %s is %s, so it cannot be handed over. Only a paid order can be collected.',
+                $order->reference,
+                strtolower($order->statusLabel()),
+            ));
+        }
+
+        $before = $order->status;
+
+        /*
+         | moveTo() is what stamps delivered_at and writes the trail entry, and the
+         | trail entry is where who-did-it is recorded: ShopOrderWriter::record() puts
+         | the signed-in user's id and label on it. So the answer to "who confirmed
+         | this collection, and when" is on the order's own history, which is the panel
+         | somebody opens when a buyer rings up, rather than only in a log.
+         */
+        $writer->moveTo($order, ShopOrder::STATUS_DELIVERED, $validated['note']
+            ?? 'Handed over at the counter after checking the identity card.');
+
+        AdminLogger::activity('shop.orders.collected', sprintf(
+            'Confirmed collection of order %s by %s at %s.',
+            $order->reference,
+            $order->customer_name,
+            $order->collection_location ?: ($order->collection_label ?: 'the counter'),
+        ));
+
+        AdminLogger::audit($order, 'collected', ['status' => $before], [
+            'status' => $order->status,
+            'delivered_at' => $order->delivered_at?->toDateTimeString(),
+        ]);
+
+        return back()->with('status', sprintf(
+            'Order %s handed over at the counter. Recorded against your name at %s.',
+            $order->reference,
+            LocalTime::format($order->delivered_at),
+        ));
+    }
+
+    /**
      * Say the money arrived.
      *
      * Its own route and permission because cash on delivery and bank transfers settle
@@ -281,29 +428,28 @@ class OrderController extends Controller
      * Email the buyer a link to pay online.
      *
      * Separate from confirmPayment() in every sense: that one asserts money arrived,
-     * this one asks for it. Kept as a per-order press rather than a schedule or a bulk
-     * action, because when to chase somebody is a judgement about that order.
+     * this one asks for it.
      *
      * No Request parameter: nothing is read from the request, and the route's
      * permission middleware is the enforcement. refund() re-checks in its body because
      * it takes money out of the account; queueing an email to a buyer is not in that
      * class.
+     *
+     * The rules about which orders may be chased, the cooldown and the trail entry all
+     * live in ShopPaymentLinkSender, shared with sendAllPaymentLinks() below. Two
+     * copies would be two chances for the bulk button to mail somebody this press
+     * would have refused.
      */
     public function sendPaymentLink(
         ShopOrder $order,
-        ShopOrderNotifier $notifier,
+        ShopPaymentLinkSender $sender,
         PaymentGatewayManager $gateways,
-        // The history note is written here and not inside the notifier, and that is
-        // forced rather than chosen: ShopOrderWriter already depends on the notifier,
-        // so injecting the writer into the notifier would be a constructor cycle the
-        // container cannot resolve.
-        ShopOrderWriter $writer,
     ) {
-        if (! $order->awaitsGatewayPayment()) {
+        if ($reason = $sender->skipReason($order)) {
             return back()->with('warning', sprintf(
                 'No payment link went out for %s: %s.',
                 $order->reference,
-                $this->whyNoLink($order),
+                $this->whyNoLink($order, $reason),
             ));
         }
 
@@ -316,29 +462,12 @@ class OrderController extends Controller
             ));
         }
 
-        $queued = $notifier->paymentLink($order);
-
-        if ($queued === 0) {
+        if (! $sender->send($order)) {
             return back()->with('warning', sprintf(
                 'No payment link went out for %s. Check the buyer has an email address on the order.',
                 $order->reference,
             ));
         }
-
-        /*
-         | The per-order record, on the trail that already renders on the detail page.
-         | "queued" and not "sent": the cron worker is what sends it.
-         |
-         | Str::limit because shop_order_events.note is varchar(255) and
-         | ShopOrderWriter does not truncate, while customer_email is itself a
-         | varchar(255) — so a long address plus this sentence overflows, and MySQL
-         | answers that with an exception rather than a trim.
-         */
-        $writer->note($order, Str::limit(
-            sprintf('Payment link queued to %s.', $order->customer_email),
-            252,
-            '...',
-        ));
 
         AdminLogger::activity('shop.orders.payment-link', sprintf(
             'Queued a payment link for %s (%s to %s).',
@@ -356,23 +485,166 @@ class OrderController extends Controller
     }
 
     /**
-     * Why there is nothing to send, in words the operator can act on.
+     * Email a payment link to everybody on the list as it is currently filtered.
+     *
+     * Twenty-two orders all reading Pending Payment and all paid by card is twenty-two
+     * presses of the envelope, which is what this replaces. It is deliberately not a
+     * schedule and not a cron: somebody with the notify permission decides, and it is
+     * recorded against their name.
+     *
+     * "As currently filtered" is the whole contract. The tab, the status, the method
+     * and the search box come through the form and go into the same matching() the
+     * table itself paginates, because an operator who has narrowed the list to one
+     * event and presses a button labelled "all" means those, not the database.
+     *
+     * Nothing from the request decides what is charged or which orders are eligible.
+     * The amount is the order's own grand_total, the eligibility is the sender's, and
+     * the link is signed and rebuilt server-side per order.
      */
-    private function whyNoLink(ShopOrder $order): string
-    {
-        if ($order->isPaid()) {
-            return 'it is already paid';
+    public function sendAllPaymentLinks(
+        Request $request,
+        ShopPaymentLinkSender $sender,
+        PaymentGatewayManager $gateways,
+    ) {
+        /*
+         | The filters are the only input, and they may only be values that exist.
+         | They can narrow the set or match nothing; a crafted value cannot widen it
+         | past the tab, and it cannot reach an order the sender would refuse.
+         */
+        $request->validate([
+            'tab' => ['nullable', Rule::in(array_keys(ShopOrder::FULFILMENTS))],
+            'status' => ['nullable', Rule::in(array_keys(ShopOrder::STATUSES))],
+            'method' => ['nullable', Rule::in(array_keys(ShopOrder::METHODS))],
+            'q' => ['nullable', 'string', 'max:190'],
+        ]);
+
+        $filters = $this->filters($request);
+
+        if (! $gateways->isUsable()) {
+            return back()->with('warning', 'No payment links went out: the payment gateway is not configured, so the links would not work.');
         }
 
-        if ($order->payment_method !== ShopOrder::METHOD_GATEWAY) {
+        $queued = 0;
+        /** @var array<string, int> $skipped  reason => how many */
+        $skipped = [];
+
+        /*
+         | Walked in id order in chunks rather than loaded at once: this is a live list
+         | that will keep growing, and the memory cost of a 500-order tab is not worth
+         | the convenience. chunkById pages on the primary key, so stamping
+         | payment_link_sent_at inside the loop cannot shuffle the pages underneath it.
+         */
+        $this->matching($filters)
+            ->orderBy('id')
+            ->chunkById(100, function ($orders) use ($sender, &$queued, &$skipped) {
+                foreach ($orders as $order) {
+                    // Asked once and counted, never asked twice: the reason is what
+                    // the operator is told afterwards.
+                    $reason = $sender->skipReason($order);
+
+                    if ($reason === null && $sender->send($order)) {
+                        $queued++;
+
+                        continue;
+                    }
+
+                    // Nothing to skip it for, but the queue would not take it. Rare,
+                    // logged by the notifier, and worth a line of its own so the
+                    // counts still add up to what was on the list.
+                    $reason ??= ShopPaymentLinkSender::SKIP_QUEUE_FAILED;
+
+                    $skipped[$reason] = ($skipped[$reason] ?? 0) + 1;
+                }
+            });
+
+        $passedOver = array_sum($skipped);
+        $breakdown = ShopPaymentLinkSender::breakdown($skipped);
+
+        // One entry for the whole press: who, what was filtered, and the counts. A
+        // bulk outbound action touching real customers has to be answerable for later.
+        AdminLogger::activity('shop.orders.payment-link-all', sprintf(
+            'Queued %d payment %s from the %s orders list (%s). Skipped %d%s.',
+            $queued,
+            Str::plural('link', $queued),
+            strtolower(ShopOrder::FULFILMENTS[$filters['tab']] ?? $filters['tab']),
+            $this->filterLabel($filters),
+            $passedOver,
+            $breakdown === '' ? '' : ': ' . $breakdown,
+        ));
+
+        if ($queued === 0) {
+            return back()->with('warning', $passedOver === 0
+                ? 'Nothing on this list is waiting for an online payment, so no links went out.'
+                : sprintf(
+                    'No payment links went out. All %d %s on this list were passed over: %s.',
+                    $passedOver,
+                    Str::plural('order', $passedOver),
+                    $breakdown,
+                ));
+        }
+
+        return back()->with('status', sprintf(
+            '%d payment %s queued, and %s out as soon as the queue worker runs.%s',
+            $queued,
+            Str::plural('link', $queued),
+            $queued === 1 ? 'goes' : 'go',
+            $passedOver === 0
+                ? ' Nothing was passed over.'
+                : sprintf(
+                    ' %d %s passed over: %s.',
+                    $passedOver,
+                    Str::plural('order', $passedOver),
+                    $breakdown,
+                ),
+        ));
+    }
+
+    /**
+     * Why there is nothing to send, in words the operator can act on.
+     */
+    private function whyNoLink(ShopOrder $order, string $reason): string
+    {
+        if ($reason === ShopPaymentLinkSender::SKIP_COOLDOWN) {
+            return sprintf(
+                'one was already queued %s, so the buyer is being left alone until %s',
+                $order->payment_link_sent_at->diffForHumans(),
+                $order->paymentLinkCooldownEndsAt()?->format('g:i a, d M') ?? 'later',
+            );
+        }
+
+        if ($reason === ShopPaymentLinkSender::SKIP_MANUAL) {
             return sprintf('it is being paid by %s, which is settled by hand', $order->methodLabel());
         }
 
-        if ((float) $order->grand_total <= 0) {
-            return 'there is nothing to pay on it';
+        if ($reason === ShopPaymentLinkSender::SKIP_NOT_AWAITING) {
+            return sprintf('it is %s', strtolower($order->statusLabel()));
         }
 
-        return sprintf('it is %s', strtolower($order->statusLabel()));
+        return ShopPaymentLinkSender::reasons()[$reason] ?? 'it is not waiting for payment';
+    }
+
+    /**
+     * The filters in force, in words, for the activity entry.
+     *
+     * @param  array{tab: string, q: string, status: string, method: string}  $filters
+     */
+    private function filterLabel(array $filters): string
+    {
+        $parts = [];
+
+        if ($filters['status'] !== '') {
+            $parts[] = 'status ' . (ShopOrder::STATUSES[$filters['status']] ?? $filters['status']);
+        }
+
+        if ($filters['method'] !== '') {
+            $parts[] = 'method ' . (ShopOrder::METHODS[$filters['method']] ?? $filters['method']);
+        }
+
+        if ($filters['q'] !== '') {
+            $parts[] = sprintf('search "%s"', $filters['q']);
+        }
+
+        return $parts === [] ? 'no filters' : implode(', ', $parts);
     }
 
     /**

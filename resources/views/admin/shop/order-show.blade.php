@@ -18,8 +18,18 @@
     /*
      | Paid is not offered here. It has its own form and its own permission, because
      | pressing it asserts money was received and takes the stock off.
+     |
+     | Delivered is not offered on a counter-collected order either. There it means
+     | the goods physically left with the buyer, which has its own panel below showing
+     | the identity card to check first; leaving it in this select as well would be two
+     | ways to record the same thing, one of them a bare word in a dropdown. A posted
+     | order keeps it, because there it is the end of a courier journey and nothing
+     | about that flow changes.
      */
-    $moves = collect($transitions)->except(ShopOrder::STATUS_PAID);
+    $moves = collect($transitions)->except(array_filter([
+        ShopOrder::STATUS_PAID,
+        $order->isOffline() ? ShopOrder::STATUS_DELIVERED : null,
+    ]));
 @endphp
 
 @section('title', 'Order ' . $order->reference)
@@ -141,6 +151,64 @@
                         </table>
                     </div>
                 </x-admin.panel>
+
+                {{-- ==================== The counter handover ====================
+
+                     Paid, offline, and still with us. The only thing left to happen to
+                     this order, so it sits above the generic status form rather than
+                     inside it: paying for a counter order and collecting it are weeks
+                     apart, and only this records the second one.
+
+                     Gated on awaitsCollection(), which the route re-asks server-side,
+                     so the panel can never offer a press the controller would refuse. --}}
+                @if ($canUpdate && $order->awaitsCollection())
+                    <x-admin.panel title="Hand Over At The Counter" icon="identification">
+                        <form action="{{ route('admin.shop.orders.collect', $order) }}" method="POST"
+                              onsubmit="return confirm('Hand order {{ $order->reference }} over to {{ addslashes($order->customer_name) }}?\n\nCheck their identity card first. This records the goods as collected, against your name.');"
+                              class="px-5 py-4 space-y-4">
+                            @csrf
+
+                            <p class="text-sm text-gray-600">
+                                This order is paid and waiting to be collected. Check the identity card
+                                below against the document you are shown, then record the handover.
+                            </p>
+
+                            <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm space-y-1">
+                                <p class="text-gray-600">
+                                    Identity card to check:
+                                    <span class="font-semibold text-gray-900 tabular-nums">{{ $order->identity_card ?: 'Not recorded' }}</span>
+                                </p>
+                                <p class="text-gray-600">
+                                    {{ $order->itemCount() }} {{ Str::plural('item', $order->itemCount()) }},
+                                    {{ $order->grandTotalLabel() }} paid on
+                                    {{ \App\Support\LocalTime::format($order->paid_at) }}
+                                </p>
+                                @if (filled($order->collectionSummary()))
+                                    <p class="text-gray-600">{{ $order->collectionSummary() }}</p>
+                                @endif
+                            </div>
+
+                            <div>
+                                <label for="collect_note" class="block text-sm font-semibold text-gray-700 mb-1.5">
+                                    Note
+                                </label>
+                                <input type="text" id="collect_note" name="note" maxlength="255"
+                                       value="{{ old('note') }}"
+                                       placeholder="Who picked it up, if it was not the buyer"
+                                       class="{{ $input }}">
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Optional. Goes on the history below next to your name.
+                                </p>
+                            </div>
+
+                            <button type="submit"
+                                    class="w-full inline-flex items-center justify-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-green-700 transition shadow-sm">
+                                <x-admin.icon name="check" class="w-4 h-4" />
+                                Confirm collection
+                            </button>
+                        </form>
+                    </x-admin.panel>
+                @endif
 
                 {{-- ==================== Moving it along ==================== --}}
                 @if ($canUpdate && $moves->isNotEmpty())
@@ -306,15 +374,28 @@
                                 the order paid; the gateway does that when the money arrives.
                             </p>
 
-                            <form action="{{ route('admin.shop.orders.payment-link', $order) }}" method="POST"
-                                  onsubmit="return confirm('Email a payment link for {{ $order->reference }} to {{ addslashes($order->customer_email) }}?');">
-                                @csrf
-                                <button type="submit"
-                                        class="w-full inline-flex items-center justify-center gap-2 bg-amber-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-amber-700 transition shadow-sm">
-                                    <x-admin.icon name="mail" class="w-4 h-4" />
-                                    Email a payment link
-                                </button>
-                            </form>
+                            @if ($order->paymentLinkRemindedRecently())
+                                {{-- Inside the cooldown the server would refuse the
+                                     press, so it is not offered. The link below stays,
+                                     because reading it out over the phone to somebody
+                                     who asked is not spamming them. --}}
+                                <p role="status" class="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800 leading-relaxed">
+                                    A payment link was queued {{ $order->payment_link_sent_at->diffForHumans() }}.
+                                    The buyer is left alone until
+                                    {{ $order->paymentLinkCooldownEndsAt()?->format('g:i a, d M Y') }},
+                                    so another one cannot be sent yet.
+                                </p>
+                            @else
+                                <form action="{{ route('admin.shop.orders.payment-link', $order) }}" method="POST"
+                                      onsubmit="return confirm('Email a payment link for {{ $order->reference }} to {{ addslashes($order->customer_email) }}?');">
+                                    @csrf
+                                    <button type="submit"
+                                            class="w-full inline-flex items-center justify-center gap-2 bg-amber-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-amber-700 transition shadow-sm">
+                                        <x-admin.icon name="mail" class="w-4 h-4" />
+                                        Email a payment link
+                                    </button>
+                                </form>
+                            @endif
 
                             {{-- The link itself, selectable, for a buyer whose email bounces or
                                  who asks for it over the phone. The GET confirmation page, never
