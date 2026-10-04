@@ -18,9 +18,16 @@ readonly class TotalCorrection
     /**
      * @param  int  $people  how many are named on the entry
      * @param  float  $currentAmount  what the row says today, read from the database
-     * @param  float  $correctedAmount  the fee plus the corrected add-on lines
-     * @param  array<int, array{unit_price: float, line_total: float}>  $lines
+     * @param  float  $correctedAmount  the event's fee now, plus the corrected items
+     * @param  float  $correctedRegistrationFee  the event's fee as it stands today.
+     *         Written over the snapshot on the row, because entries taken while the
+     *         shirt was the event fee carry that RM 40.00 here and charging it again
+     *         on top of the shirt would bill the same money twice.
+     * @param  array<int, array<string, float|int>>  $lines
      *         add-on line id => the figures it should carry
+     * @param  array<int, array<string, mixed>>  $additions
+     *         lines that have to be created, ready for EventRegistrationAddon. Never
+     *         carry a variant: see RegistrationTotalsRecalculator on stock.
      * @param  string|null  $blocked  why this entry cannot be re-priced, when it cannot
      */
     public function __construct(
@@ -29,7 +36,9 @@ readonly class TotalCorrection
         public float $currentAmount,
         public float $correctedAmount,
         public float $correctedAddonsTotal,
+        public float $correctedRegistrationFee,
         public array $lines,
+        public array $additions = [],
         public ?string $blocked = null,
     ) {
     }
@@ -47,7 +56,9 @@ readonly class TotalCorrection
             currentAmount: $amount,
             correctedAmount: $amount,
             correctedAddonsTotal: (float) $registration->addons_total,
+            correctedRegistrationFee: (float) $registration->registration_fee,
             lines: [],
+            additions: [],
             blocked: $reason,
         );
     }
@@ -63,9 +74,9 @@ readonly class TotalCorrection
      * Judged on the total alone, and that is deliberate. A single-participant entry
      * comes out of the arithmetic with the same total and a different split between
      * its lines — the shirt price moving off the group line and onto the one person's
-     * line — and rewriting it would touch a row that is already charging the right
-     * amount. Those are left exactly as they are, which is also what makes a second
-     * run a no-op.
+     * line, or off the event fee and onto it — and rewriting it would touch a row
+     * that is already charging the right amount. Those are left exactly as they are,
+     * which is also what makes a second run a no-op.
      */
     public function changes(): bool
     {
@@ -131,5 +142,17 @@ readonly class TotalCorrection
     public function correctedOutstandingLabel(): string
     {
         return PaymentFigures::money($this->correctedOutstanding());
+    }
+
+    /**
+     * How many lines would be written for people who have none on record.
+     *
+     * Reported on the preview because it is the one part of the correction that adds
+     * rows rather than changing figures, and the operator should know a size was
+     * never captured for those people before the invoice itemises them.
+     */
+    public function additionsCount(): int
+    {
+        return count($this->additions);
     }
 }

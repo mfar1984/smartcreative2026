@@ -41,11 +41,23 @@
         <x-admin.panel title="What this does" icon="clipboard">
             <div class="px-5 py-4 space-y-3">
                 <p class="text-sm text-gray-700 leading-relaxed">
-                    An item's own price used to be one charge for the whole registration, so a
-                    group of six each choosing a RM 40.00 shirt was charged RM 40.00 rather than
-                    RM 240.00. New registrations are priced correctly once the event charges
-                    items per participant. This re-prices the entries that were taken before
-                    that, using the same arithmetic.
+                    An item's own price used to be one charge for the whole registration, and
+                    before that it was the event fee itself. Either way a group of six each
+                    taking a RM 40.00 shirt was charged RM 40.00 rather than RM 240.00. New
+                    registrations are priced correctly once the event charges items per
+                    participant. This re-prices the entries taken before that, using the same
+                    arithmetic.
+                </p>
+
+                <p class="text-sm text-gray-700 leading-relaxed">
+                    What each entry should pay is worked out from the number of people named on
+                    it and this event's items as they stand today: this event's fee of
+                    <span class="font-semibold">{{ \App\Support\PaymentFigures::money($event->registrationAmount()) }}</span>
+                    charged once, plus
+                    one of every required per-person item for everybody on the entry. It is not
+                    read off the lines already stored, because the entries that were charged as
+                    an event fee have no item lines at all, and the fee they carry is the old
+                    one &mdash; counting it again would charge the same money twice.
                 </p>
 
                 <p class="text-sm text-gray-700 leading-relaxed">
@@ -113,7 +125,17 @@
                                         </a>
                                         <span class="block text-xs text-gray-500">{{ $correction->registration->displayName() }}</span>
                                     </td>
-                                    <td class="px-5 py-3 text-center text-gray-600 tabular-nums">{{ $correction->people }}</td>
+                                    <td class="px-5 py-3 text-center text-gray-600 tabular-nums">
+                                        {{ $correction->people }}
+                                        {{-- Said here because it is the one part of the correction
+                                             that adds rows rather than changing figures, and the
+                                             organiser has a size to collect at the counter. --}}
+                                        @if ($correction->additionsCount() > 0)
+                                            <span class="block text-xs text-gray-500">
+                                                {{ $correction->additionsCount() }} with no size on record
+                                            </span>
+                                        @endif
+                                    </td>
                                     <td class="px-5 py-3 text-right text-gray-600 tabular-nums whitespace-nowrap">{{ $correction->currentAmountLabel() }}</td>
                                     <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{{ $correction->correctedAmountLabel() }}</td>
                                     <td class="px-5 py-3 text-right font-semibold text-amber-700 tabular-nums whitespace-nowrap">{{ $correction->differenceLabel() }}</td>
@@ -214,8 +236,14 @@
                             <span class="block text-xs text-gray-600 mt-0.5">
                                 An entry that has already paid the full corrected amount keeps reading
                                 Paid. One that paid the old lower figure becomes Partly Paid with the
-                                balance outstanding, and can then be sent a request for that balance.
-                                One that has paid nothing stays as it is and simply owes more.
+                                balance outstanding, and can then be sent a request for that balance
+                                alone. One that has paid nothing stays as it is and simply owes more.
+                            </span>
+                            <span class="block text-xs text-gray-600 mt-1.5">
+                                Each person is given their own line on the invoice. Where no size was
+                                ever recorded for somebody the line is written without one, because
+                                the charge is owed for a required item and the size is collected at
+                                the counter. No size's stock count is touched.
                             </span>
                         </span>
                     </label>

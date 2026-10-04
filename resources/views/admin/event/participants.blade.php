@@ -171,6 +171,12 @@
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Amount</th>
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Status</th>
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Payment</th>
+                            {{-- Beside Payment rather than inside it. "Partly Paid" says
+                                 that something is missing and not how much, and the
+                                 difference between an entry that is RM 40.00 short and one
+                                 that is RM 240.00 short is the whole of the conversation
+                                 with the registrant. --}}
+                            <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Shortfall</th>
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Submitted</th>
                             <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Actions</th>
                         </tr>
@@ -234,6 +240,22 @@
                                             {{ $registration->outstandingAmountLabel() }} of
                                             {{ $registration->amountLabel() }} outstanding
                                         </span>
+                                    @endif
+                                </td>
+
+                                {{-- How much is missing, worked out here from the charge and
+                                     the receipts on the row. Loud only when there is money to
+                                     chase: a column of amber on a list where most entries are
+                                     settled is a column nobody reads. --}}
+                                <td class="px-5 py-3 whitespace-nowrap text-right tabular-nums">
+                                    @if ($registration->isFree() || $registration->status === EventRegistration::STATUS_CANCELLED)
+                                        <span class="text-xs text-gray-300" aria-hidden="true">&mdash;</span>
+                                    @elseif ($registration->outstandingAmount() > 0.005)
+                                        <span class="text-sm font-semibold text-amber-700">
+                                            {{ $registration->outstandingAmountLabel() }} short
+                                        </span>
+                                    @else
+                                        <span class="text-xs text-gray-400">Correct</span>
                                     @endif
                                 </td>
 
@@ -350,7 +372,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="10" class="px-5 py-12 text-center text-sm text-gray-500">
+                                <td colspan="11" class="px-5 py-12 text-center text-sm text-gray-500">
                                     @if ($isFiltered)
                                         No participants match the current filters.
                                     @else

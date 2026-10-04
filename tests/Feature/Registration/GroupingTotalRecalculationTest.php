@@ -170,6 +170,122 @@ class GroupingTotalRecalculationTest extends TestCase
         return $registration->fresh();
     }
 
+    /* ---------------------------------------------------------------------
+     | The other two shapes the same event has been charged in
+     |
+     | undercharged() above is shape B: the shirt as an item charged once for the
+     | entry. The live table holds two more, because the event's settings changed
+     | twice while people were registering, and the arithmetic has to reach the same
+     | answer from all three.
+     * ------------------------------------------------------------------ */
+
+    /** One person on an entry, with no item line of their own. */
+    private function person(EventRegistration $registration, int $n): EventParticipant
+    {
+        return EventParticipant::create([
+            'event_registration_id' => $registration->id,
+            'role' => ParticipantOptions::ROLE_PARTICIPANT,
+            'full_name' => 'Member ' . $n . ' of ' . $registration->reference,
+            'ic_number' => '9002' . str_pad((string) $registration->id, 4, '0', STR_PAD_LEFT) . str_pad((string) $n, 4, '0', STR_PAD_LEFT),
+            'phone' => '0143000' . str_pad((string) $n, 3, '0', STR_PAD_LEFT),
+            'email' => 'person' . $n . '-' . $registration->id . '@example.test',
+            'gender' => 'male',
+            'race' => 'malay',
+        ]);
+    }
+
+    private function reference(): string
+    {
+        return 'REG-2026-' . str_pad((string) (EventRegistration::query()->count() + 70), 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * SHAPE A — the shirt was the event fee.
+     *
+     * Thirty-two of the thirty-nine live entries look like this. registration_fee
+     * carries the RM 40.00, addons_total is zero, and there is not a single item line
+     * on the entry. Re-pricing the stored lines therefore finds nothing wrong with it,
+     * which is exactly why the corrected figure has to come from the head count.
+     */
+    private function shapeA(Event $event, int $people, array $overrides = []): EventRegistration
+    {
+        $registration = EventRegistration::create($overrides + [
+            'event_id' => $event->id,
+            'reference' => $this->reference(),
+            'mode' => $event->registration_mode,
+            'team_name' => 'Fee-era group of ' . $people,
+            'status' => EventRegistration::STATUS_PENDING,
+            'payment_status' => EventRegistration::PAYMENT_UNPAID,
+            'registration_fee' => 40,
+            'addons_total' => 0,
+            'amount' => 40,
+        ]);
+
+        for ($n = 1; $n <= $people; $n++) {
+            $this->person($registration, $n);
+        }
+
+        return $registration->fresh();
+    }
+
+    /**
+     * SHAPE C — the shirt priced per head, which is what the fixed code writes.
+     *
+     * Each person's own line carries the RM 40.00 and the entry's total is already
+     * right, so this must come out of the preview untouched.
+     */
+    private function shapeC(
+        Event $event,
+        EventAddon $addon,
+        EventAddonVariant $size,
+        int $people,
+    ): EventRegistration {
+        $total = 40 * $people;
+
+        $registration = EventRegistration::create([
+            'event_id' => $event->id,
+            'reference' => $this->reference(),
+            'mode' => $event->registration_mode,
+            'team_name' => 'Per-head group of ' . $people,
+            'status' => EventRegistration::STATUS_PENDING,
+            'payment_status' => EventRegistration::PAYMENT_PENDING,
+            'registration_fee' => 0,
+            'addons_total' => $total,
+            'amount' => $total,
+        ]);
+
+        for ($n = 1; $n <= $people; $n++) {
+            $person = $this->person($registration, $n);
+
+            EventRegistrationAddon::create([
+                'event_registration_id' => $registration->id,
+                'event_participant_id' => $person->id,
+                'event_addon_id' => $addon->id,
+                'event_addon_variant_id' => $size->id,
+                'name' => $addon->name,
+                'variant_label' => $size->label,
+                'unit_price' => 40,
+                'quantity' => 1,
+                'line_total' => 40,
+            ]);
+        }
+
+        // The group line left behind at nothing, the way the live rows carry it.
+        EventRegistrationAddon::create([
+            'event_registration_id' => $registration->id,
+            'event_participant_id' => null,
+            'event_addon_id' => $addon->id,
+            'event_addon_variant_id' => null,
+            'name' => $addon->name,
+            'variant_label' => null,
+            'unit_price' => 0,
+            'quantity' => 1,
+            'line_total' => 0,
+        ]);
+
+        return $registration->fresh();
+    }
+
     /** Money on record against an entry, the way the ledger holds it. */
     private function receipt(EventRegistration $registration, float $amount): void
     {
@@ -769,6 +885,335 @@ class GroupingTotalRecalculationTest extends TestCase
         $response->assertSee('Pay RM 200.00');
         $response->assertSee('Partly Paid');
         $response->assertDontSee('Pay RM 240.00');
+    }
+
+    /* ---------------------------------------------------------------------
+     | Shape A — the entries charged as an event fee, with no item lines
+     |
+     | The reason this action had to be rewritten. These rows are the thirty-two the
+     | owner was looking at, and the old arithmetic reported "No items on this entry,
+     | so there is nothing to re-price" for every one of them.
+     * ------------------------------------------------------------------ */
+
+    public function test_a_fee_era_entry_with_no_item_lines_is_priced_from_its_head_count(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        $registration = $this->shapeA($event, 6);
+
+        $this->assertSame(0, $registration->addonLines()->count());
+
+        $correction = $this->recalculator()->preview($event)[0];
+
+        $this->assertNull($correction->blocked, 'A fee-era entry must not be reported as having nothing to re-price.');
+        $this->assertSame(6, $correction->people);
+        $this->assertSame(40.0, $correction->currentAmount);
+        $this->assertSame(240.0, $correction->correctedAmount);
+        $this->assertSame(200.0, $correction->difference());
+        $this->assertTrue($correction->changes());
+
+        /*
+         | The one arithmetic that would double charge. registration_fee on these rows
+         | still carries the RM 40.00 from when the shirt was the fee, and adding it to
+         | six shirts gives RM 280.00: the organiser would be billing a shirt nobody
+         | takes delivery of.
+         */
+        $this->assertNotSame(280.0, $correction->correctedAmount);
+    }
+
+    public function test_a_three_person_fee_era_entry_is_short_by_eighty(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        // REG-2026-0072 exactly: three people, RM 40.00 arrived against the old figure.
+        $registration = $this->shapeA($event, 3);
+        $this->receipt($registration, 40);
+
+        $correction = $this->recalculator()->preview($event)[0];
+
+        $this->assertSame(120.0, $correction->correctedAmount);
+        $this->assertSame(80.0, $correction->correctedOutstanding());
+        $this->assertSame(EventRegistration::PAYMENT_PARTIAL, $correction->correctedPaymentStatus());
+    }
+
+    public function test_a_one_person_fee_era_entry_is_left_completely_untouched(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        // REG-2026-0047: one person who paid RM 40.00 and owes RM 40.00. The split
+        // between fee and item is wrong on the row, the total is not, and the total is
+        // what this action exists to correct.
+        $registration = $this->shapeA($event, 1);
+        $this->receipt($registration, 40);
+
+        $correction = $this->recalculator()->preview($event)[0];
+
+        $this->assertSame(40.0, $correction->correctedAmount);
+        $this->assertFalse($correction->changes());
+
+        $before = $registration->fresh();
+
+        $this->assertSame([], $this->recalculator()->apply($event));
+
+        $after = $registration->fresh();
+
+        $this->assertEquals($before->updated_at, $after->updated_at);
+        $this->assertSame('40.00', $after->registration_fee);
+        $this->assertSame('40.00', $after->amount);
+        $this->assertSame(0, $after->addonLines()->count());
+        $this->assertSame(EventRegistration::PAYMENT_PAID, $after->payment_status);
+    }
+
+    public function test_the_three_shapes_together_change_only_the_ones_that_are_wrong(): void
+    {
+        $event = $this->event();
+        [$addon, $size] = $this->tee($event);
+
+        // One of each, mirroring the live table.
+        $feeEra = $this->shapeA($event, 6);        // 40.00, should be 240.00
+        $feeEraSingle = $this->shapeA($event, 1);  // 40.00, already right
+        $groupLine = $this->undercharged($event, $addon, $size, 1);
+        $perHead = $this->shapeC($event, $addon, $size, 2);
+
+        $corrections = collect($this->recalculator()->preview($event))
+            ->keyBy(fn ($correction) => $correction->registration->reference);
+
+        $this->assertTrue($corrections[$feeEra->reference]->changes());
+        $this->assertSame(240.0, $corrections[$feeEra->reference]->correctedAmount);
+
+        $this->assertFalse($corrections[$feeEraSingle->reference]->changes());
+        $this->assertFalse($corrections[$groupLine->reference]->changes());
+
+        $this->assertFalse($corrections[$perHead->reference]->changes());
+        $this->assertSame(80.0, $corrections[$perHead->reference]->correctedAmount);
+
+        $applied = $this->recalculator()->apply($event);
+
+        $this->assertCount(1, $applied);
+        $this->assertSame($feeEra->reference, $applied[0]->registration->reference);
+    }
+
+    public function test_confirming_a_fee_era_entry_itemises_it_per_person_and_clears_the_old_fee(): void
+    {
+        $event = $this->event();
+        [$addon] = $this->tee($event);
+
+        $registration = $this->shapeA($event, 6);
+
+        $this->actingAs($this->corrector())
+            ->post(route('admin.event.participants.recalculate.apply', $event), ['confirm' => '1'])
+            ->assertSessionHasNoErrors();
+
+        $after = $registration->fresh();
+
+        $this->assertSame('240.00', $after->amount);
+        $this->assertSame('240.00', $after->addons_total);
+
+        // The fee the shirt used to be charged as, cleared. Left on the row it would
+        // be charged a second time on top of the shirts, and would put a phantom
+        // registration line on the gateway page beside them.
+        $this->assertSame('0.00', $after->registration_fee);
+
+        $lines = $after->addonLines;
+
+        $this->assertCount(6, $lines);
+        $this->assertSame(240.0, round((float) $lines->sum('line_total'), 2));
+        $this->assertSame(6, $lines->whereNotNull('event_participant_id')->count());
+
+        foreach ($lines as $line) {
+            $this->assertSame('40.00', $line->unit_price);
+            $this->assertSame($addon->id, $line->event_addon_id);
+
+            // No size was ever recorded for these people, and none is invented. The
+            // charge is owed because the shirt is required; the size is collected at
+            // the counter.
+            $this->assertNull($line->event_addon_variant_id);
+            $this->assertNull($line->variant_label);
+        }
+    }
+
+    public function test_creating_lines_without_a_size_moves_no_stock(): void
+    {
+        $event = $this->event();
+        [, $size] = $this->tee($event);
+
+        // Stock already consumed by the entries that did record a size.
+        $size->forceFill(['stock_taken' => 3])->save();
+
+        $this->shapeA($event, 6);
+
+        $this->recalculator()->apply($event);
+
+        $this->assertSame(3, $size->fresh()->stock_taken);
+        $this->assertSame(497, $size->fresh()->stockLeft());
+    }
+
+    public function test_confirming_a_fee_era_entry_twice_is_a_no_op(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        $registration = $this->shapeA($event, 6);
+
+        $this->assertCount(1, $this->recalculator()->apply($event));
+
+        $first = $registration->fresh();
+        $firstLines = $first->addonLines->pluck('line_total', 'id')->all();
+
+        $this->assertSame([], $this->recalculator()->apply($event));
+
+        $second = $registration->fresh();
+
+        $this->assertSame('240.00', $second->amount);
+        $this->assertSame('0.00', $second->registration_fee);
+        $this->assertEquals($first->updated_at, $second->updated_at);
+        $this->assertSame($firstLines, $second->addonLines->pluck('line_total', 'id')->all());
+        $this->assertCount(6, $second->addonLines);
+    }
+
+    /* ---------------------------------------------------------------------
+     | How short it is, on the list
+     * ------------------------------------------------------------------ */
+
+    public function test_a_part_paid_entry_shows_its_shortfall_beside_the_payment(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        $registration = $this->shapeA($event, 3);
+        $this->receipt($registration, 40);
+
+        $admin = $this->corrector();
+
+        $this->actingAs($admin)
+            ->post(route('admin.event.participants.recalculate.apply', $event), ['confirm' => '1'])
+            ->assertSessionHasNoErrors();
+
+        $after = $registration->fresh();
+
+        $this->assertSame('120.00', $after->amount);
+        $this->assertSame(EventRegistration::PAYMENT_PARTIAL, $after->payment_status);
+        $this->assertSame(80.0, $after->outstandingAmount());
+
+        $list = $this->actingAs($admin)->get(route('admin.event.participants', ['tab' => 'group']));
+
+        $list->assertOk();
+        $list->assertSee('Shortfall');
+        $list->assertSee('Partly Paid');
+        $list->assertSee('RM 80.00 short');
+
+        // Neither Paid nor Unpaid, which were the two readings the owner was given.
+        $this->assertFalse($after->isPaid());
+        $this->assertTrue($after->isPartlyPaid());
+    }
+
+    public function test_a_covered_entry_reads_paid_with_nothing_short(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        // Somebody who transferred the right money against the wrong invoice.
+        $registration = $this->shapeA($event, 3);
+        $this->receipt($registration, 120);
+
+        $admin = $this->corrector();
+
+        $this->actingAs($admin)
+            ->post(route('admin.event.participants.recalculate.apply', $event), ['confirm' => '1'])
+            ->assertSessionHasNoErrors();
+
+        $after = $registration->fresh();
+
+        $this->assertSame('120.00', $after->amount);
+        $this->assertSame(EventRegistration::PAYMENT_PAID, $after->payment_status);
+        $this->assertSame(EventRegistration::STATUS_CONFIRMED, $after->status);
+
+        $list = $this->actingAs($admin)->get(route('admin.event.participants', ['tab' => 'group']));
+
+        $list->assertOk();
+        $list->assertSee('Correct');
+        $list->assertDontSee('RM 0.00 short');
+        $this->assertSame(0.0, $after->outstandingAmount());
+    }
+
+    public function test_the_amount_column_and_the_tab_totals_follow_the_corrected_figures(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        $six = $this->shapeA($event, 6);
+        $this->receipt($six, 40);
+
+        $this->shapeA($event, 3);
+
+        $admin = $this->corrector();
+
+        $this->actingAs($admin)
+            ->post(route('admin.event.participants.recalculate.apply', $event), ['confirm' => '1'])
+            ->assertSessionHasNoErrors();
+
+        $list = $this->actingAs($admin)->get(route('admin.event.participants', ['tab' => 'group']));
+
+        $list->assertOk();
+        $list->assertSee('RM 240.00');
+        $list->assertSee('RM 120.00');
+        $list->assertSee('RM 320.00');
+
+        $this->assertSame(40.0, \App\Support\PaymentFigures::collected());
+        $this->assertSame(320.0, \App\Support\PaymentFigures::outstanding());
+    }
+
+    public function test_the_preview_of_a_fee_era_entry_writes_nothing(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        $registration = $this->shapeA($event, 6);
+        $before = $registration->fresh();
+
+        $response = $this->actingAs($this->corrector())
+            ->get(route('admin.event.participants.recalculate', $event));
+
+        $response->assertOk();
+        $response->assertSee($registration->reference);
+        $response->assertSee('RM 240.00');
+        $response->assertSee('+RM 200.00');
+        $response->assertSee('6 with no size on record');
+
+        $after = $registration->fresh();
+
+        $this->assertSame($before->amount, $after->amount);
+        $this->assertSame($before->registration_fee, $after->registration_fee);
+        $this->assertSame($before->addons_total, $after->addons_total);
+        $this->assertEquals($before->updated_at, $after->updated_at);
+        $this->assertSame(0, $after->addonLines()->count());
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    /* ---------------------------------------------------------------------
+     | Asking for the balance only
+     * ------------------------------------------------------------------ */
+
+    public function test_the_balance_link_on_a_fee_era_entry_charges_the_shortfall_only(): void
+    {
+        $event = $this->event();
+        $this->tee($event);
+
+        $registration = $this->shapeA($event, 3);
+        $this->receipt($registration, 40);
+
+        $this->recalculator()->apply($event);
+
+        $charge = app(RegistrationBalanceCharge::class)->build($registration->fresh());
+
+        // RM 80.00, which is what is missing. Not RM 120.00, which is the whole charge.
+        $this->assertSame(8000, $charge->amountCents);
+        $this->assertNotSame(12000, $charge->amountCents);
+        $this->assertSame(8000, $charge->products[0]['price']);
+        $this->assertCount(1, $charge->products);
     }
 
     /** CHIP configured enough for a checkout to be opened against the fake. */

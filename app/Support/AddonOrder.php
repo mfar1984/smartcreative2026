@@ -58,6 +58,37 @@ class AddonOrder
     }
 
     /**
+     * What one unit of a per-person add-on costs on somebody's own line.
+     *
+     * The whole of the per-head rule in one expression, so there is exactly one
+     * place that answers "what does this person owe for this item".
+     *
+     * With sizes, it is the add-on's own price folded in per head — zero unless the
+     * event charges per participant, see perParticipantUnitBase() — plus whatever
+     * that size adds. Without sizes there is nothing to fold: the quantity path has
+     * always charged the add-on price per unit, so that is the figure.
+     *
+     * A null variant is a line with no size recorded against it, and it costs the
+     * same as one with an ordinary size. The money is owed for the item, not for the
+     * choice; a required shirt nobody picked a size for is still a shirt owed.
+     *
+     * Public because the admin recalculation has to reach the same figure this
+     * builder would. Two copies of this rule is how the screen and the invoice start
+     * disagreeing about money again.
+     */
+    public static function perParticipantUnitPrice(Event $event, EventAddon $addon, ?EventAddonVariant $variant = null): float
+    {
+        if (! $addon->hasVariants()) {
+            return round($addon->unitPrice(), 2);
+        }
+
+        return round(
+            self::perParticipantUnitBase($event, $addon) + ($variant?->unitPrice() ?? 0.0),
+            2,
+        );
+    }
+
+    /**
      * Whether a per-person add-on also carries one charge for the registration.
      *
      * With variants, the add-on's own price remains one charge for the entry and the
