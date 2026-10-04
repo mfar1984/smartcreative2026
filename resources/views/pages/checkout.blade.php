@@ -188,6 +188,15 @@
                                                 <span class="block text-sm text-gray-600 mt-0.5">
                                                     Paid now on our gateway's own page. We never see your card number.
                                                 </span>
+
+                                                @if ($isOffline)
+                                                    {{-- Said plainly, so a counter buyer is not confused by
+                                                         paying online: how it is paid for and how it reaches
+                                                         them are two separate things. --}}
+                                                    <span class="block text-sm text-gray-600 mt-0.5">
+                                                        You still collect in person; only the payment happens online.
+                                                    </span>
+                                                @endif
                                             @elseif ($slug === App\Models\ShopOrder::METHOD_BANK_TRANSFER)
                                                 <span class="block text-sm text-gray-600 mt-0.5">
                                                     {{ $bankNote ?: 'Transfer to our account and send us the receipt. Your order is released once the payment shows.' }}

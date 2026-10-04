@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Http\Controllers\Payment\ShopOrderPaymentController;
 use App\Mail\ShopOrderBankTransferInstructions;
 use App\Mail\ShopOrderCollectionReady;
+use App\Mail\ShopOrderPaymentLink;
 use App\Models\ShopOrder;
 use App\Support\PaymentSettings;
 use Illuminate\Support\Facades\Log;
@@ -61,6 +63,33 @@ class ShopOrderNotifier
     }
 
     /**
+     * Email the buyer a link to pay on the gateway.
+     *
+     * Returns how many messages were queued, so the caller can say plainly that
+     * nothing went out — the same contract as EventNotifier::paymentReminder().
+     *
+     * The guard is duplicated between the admin controller and here on purpose: the
+     * controller's copy produces a useful message for the operator, this one means no
+     * other caller can send a link for a paid or manually-settled order.
+     */
+    public function paymentLink(ShopOrder $order): int
+    {
+        if (! $order->awaitsGatewayPayment() || blank($order->customer_email)) {
+            return 0;
+        }
+
+        return $this->queue($order, 'payment link', fn () => new ShopOrderPaymentLink(
+            order: $order,
+
+            // The confirmation page, never shop.order.pay: that route is POST only,
+            // and a mail client or a scanner following a POST URL gets a 405. The Pay
+            // Now button on the page it lands on is the only thing that posts.
+            orderUrl: ShopOrderPaymentController::urlFor($order),
+            collectionSummary: $order->collectionSummary(),
+        ));
+    }
+
+    /**
      * The buyer's link for uploading proof of a transfer.
      *
      * Signed, for the same reason the confirmation page is: references run in
@@ -87,6 +116,33 @@ class ShopOrderNotifier
                 'email' => $what,
                 'error' => $exception->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Queued rather than sent inline, because this one is pressed from a table row in
+     * the admin and must not make an operator wait on SMTP.
+     *
+     * The two existing shop emails stay on send(): converting them is a separate
+     * change, and this method is additive.
+     *
+     * @param  callable(): \Illuminate\Mail\Mailable  $build
+     * @return int  1 when queued, 0 when it could not be
+     */
+    private function queue(ShopOrder $order, string $what, callable $build): int
+    {
+        try {
+            Mail::to($order->customer_email, $order->customer_name)->queue($build());
+
+            return 1;
+        } catch (Throwable $exception) {
+            Log::error('Shop order email could not be queued.', [
+                'reference' => $order->reference,
+                'email' => $what,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return 0;
         }
     }
 }

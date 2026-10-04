@@ -101,12 +101,17 @@ class ShopController extends Controller
             'enquiryNote' => ShopSettings::enquiryNote(),
 
             /*
-             | Whether there is any way to take money at all. With nothing configured
-             | the page falls back to the enquiry note, because an Add to Basket button
-             | that leads to a checkout with no payment method would waste the sale at
-             | the last step.
+             | Whether there is any way to take money for THIS product. With nothing
+             | configured the page falls back to the enquiry note, because an Add to
+             | Basket button that leads to a checkout with no payment method would
+             | waste the sale at the last step.
+             |
+             | Judged per product, not shop-wide: a product that accepts only the
+             | gateway on a shop with only cash on delivery switched on would
+             | otherwise show Add to Basket and then die at checkout. This narrows an
+             | impossible button; it never widens one.
              */
-            'canBuy' => PaymentSettings::hasAnyMethod(),
+            'canBuy' => $product->payablePaymentMethods() !== [],
         ]);
     }
 

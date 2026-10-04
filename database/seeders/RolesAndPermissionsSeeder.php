@@ -253,6 +253,11 @@ class RolesAndPermissionsSeeder extends Seeder
             'Orders' => [
                 'view' => ['shop.orders.view', 'View orders'],
                 'update' => ['shop.orders.update', 'Move orders along'],
+                // Separate from update for the same reason participants.notify is:
+                // this one puts mail in the inbox of somebody outside the
+                // organisation. Asking for money is also the opposite of asserting it
+                // arrived, which is what shop.orders.payment does.
+                'notify' => ['shop.orders.notify', 'Send order payment links'],
                 'send' => ['shop.orders.payment', 'Confirm order payment received'],
                 // Kept apart from payments.refund: being trusted with the shop is not
                 // the same as being trusted with registration fees.
@@ -458,6 +463,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'shop.products.delete',
                 'shop.orders.view',
                 'shop.orders.update',
+                'shop.orders.notify',
                 'shop.orders.payment',
                 'shop.orders.refund',
                 'shop.categories.view',
@@ -572,6 +578,25 @@ class RolesAndPermissionsSeeder extends Seeder
     ];
 
     /**
+     * Permissions a later release has to reach roles that already exist.
+     *
+     * run() writes a role once, at creation, and deliberately so: syncing on every run
+     * used to undo every box ticked in Roles Management. The cost is that a slug added
+     * with a new feature lands in the catalogue granted to nobody, and the control it
+     * guards is invisible to every role but super-admin. This is the narrow exception —
+     * named slugs, named roles, one release at a time.
+     *
+     * syncWithoutDetaching, never sync: nothing ticked by hand is removed. Leaving a
+     * slug here after it has shipped is harmless; it re-grants a permission the role
+     * already holds. Removing one later is also harmless, because the pivot row stays.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private const BACKFILL = [
+        'administrator' => ['shop.orders.notify'],
+    ];
+
+    /**
      * Install the permission catalogue, and the roles that do not exist yet.
      *
      * The lists above are a starting point, not a standing instruction. This used to
@@ -608,6 +633,17 @@ class RolesAndPermissionsSeeder extends Seeder
                 if ($definition['is_protected'] && ! $role->is_protected) {
                     $role->forceFill(['is_protected' => true])->save();
                 }
+
+                /*
+                 | A role that predates this release still needs the slugs a release
+                 | adds. Only the ones named in BACKFILL, and only added, never
+                 | removed — array_intersect_key against the catalogue means a slug
+                 | typed in here that does not exist is skipped rather than throwing.
+                 */
+                $role->permissions()->syncWithoutDetaching(array_values(array_intersect_key(
+                    $permissionIds,
+                    array_flip(self::BACKFILL[$slug] ?? []),
+                )));
 
                 continue;
             }

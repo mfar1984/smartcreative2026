@@ -2,7 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Payment\ShopOrderPaymentController;
 use App\Models\ShopOrder;
+use App\Services\Payment\PaymentGatewayException;
+use App\Services\Payment\PaymentGatewayManager;
+use App\Services\Payment\ShopCheckoutStarter;
 use App\Services\ShopOrderNotifier;
 use App\Services\ShopOrderWriter;
 use App\Support\Cart;
@@ -12,6 +16,7 @@ use App\Support\ShippingSettings;
 use App\Support\ShopSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rule;
 
@@ -94,7 +99,7 @@ class CheckoutController extends Controller
         ]);
     }
 
-    public function place(Request $request, ShopOrderWriter $writer)
+    public function place(Request $request, ShopOrderWriter $writer, ShopCheckoutStarter $starter)
     {
         $lines = Cart::lines();
 
@@ -162,13 +167,44 @@ class CheckoutController extends Controller
         $this->notifier->bankTransferInstructions($order);
 
         /*
+         | A gateway order is charged now. The buyer pressed Place Order expecting a
+         | payment page, and the checkout screen promises one, so they are sent straight
+         | there rather than waiting for an email.
+         |
+         | Cash on delivery and bank transfer fall past this and keep the manual flow
+         | they have always had: nothing reaches the gateway, no checkout row is
+         | written, and the redirect below is unchanged.
+         */
+        if ($order->payment_method === ShopOrder::METHOD_GATEWAY) {
+            try {
+                return redirect()->away(
+                    $starter->start($order, ShopOrderPaymentController::returnUrls($order))
+                );
+            } catch (PaymentGatewayException $e) {
+                /*
+                 | The order is placed and correct; only the hand-off failed. The buyer
+                 | goes to their confirmation page, which carries a Pay Now button they
+                 | can press again, rather than losing the order.
+                 */
+                Log::warning('Shop checkout could not open a gateway payment.', [
+                    'reference' => $order->reference,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return redirect()
+                    ->to(URL::signedRoute('shop.order', ['reference' => $order->reference]))
+                    ->withErrors(['payment' => $e->publicMessage()]);
+            }
+        }
+
+        /*
          | Signed, because references run in sequence and an unsigned link would let
          | anybody count upwards through other people's names and addresses.
          */
         return redirect()->to(URL::signedRoute('shop.order', ['reference' => $order->reference]));
     }
 
-    public function confirmation(string $reference)
+    public function confirmation(string $reference, PaymentGatewayManager $gateways)
     {
         $order = $this->findOrder($reference);
 
@@ -178,6 +214,15 @@ class CheckoutController extends Controller
             'bankAccount' => PaymentSettings::bankAccount(),
             'bankNote' => PaymentSettings::bankTransferNote(),
             'codNote' => PaymentSettings::codNote(),
+
+            // POST only, and only ever the action of the Pay Now form on this page.
+            'payUrl' => ShopOrderPaymentController::payUrl($order),
+
+            // Decides whether a Pay Now button is shown at all. Offering one that
+            // cannot work would be worse than saying so plainly.
+            'gatewayReady' => $gateways->isUsable(),
+
+            'paymentOutcome' => session('payment_outcome'),
         ]);
     }
 

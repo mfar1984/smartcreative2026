@@ -6,10 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\ShopOrder;
 use App\Services\AdminLogger;
 use App\Services\Payment\PaymentGatewayManager;
+use App\Services\ShopOrderNotifier;
 use App\Services\ShopOrderWriter;
 use App\Support\PaymentFigures;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
@@ -77,6 +79,7 @@ class OrderController extends Controller
 
             'canUpdate' => $request->user()->hasPermission('shop.orders.update'),
             'canConfirmPayment' => $request->user()->hasPermission('shop.orders.payment'),
+            'canNotify' => $request->user()->hasPermission('shop.orders.notify'),
         ]);
     }
 
@@ -137,6 +140,7 @@ class OrderController extends Controller
             'canUpdate' => $request->user()->hasPermission('shop.orders.update'),
             'canConfirmPayment' => $request->user()->hasPermission('shop.orders.payment'),
             'canRefund' => $request->user()->hasPermission('shop.orders.refund'),
+            'canNotify' => $request->user()->hasPermission('shop.orders.notify'),
         ]);
     }
 
@@ -271,6 +275,104 @@ class OrderController extends Controller
         return redirect()
             ->route('admin.shop.orders.show', $order)
             ->with('status', sprintf('Order %s marked paid. Stock has been taken off.', $order->reference));
+    }
+
+    /**
+     * Email the buyer a link to pay online.
+     *
+     * Separate from confirmPayment() in every sense: that one asserts money arrived,
+     * this one asks for it. Kept as a per-order press rather than a schedule or a bulk
+     * action, because when to chase somebody is a judgement about that order.
+     *
+     * No Request parameter: nothing is read from the request, and the route's
+     * permission middleware is the enforcement. refund() re-checks in its body because
+     * it takes money out of the account; queueing an email to a buyer is not in that
+     * class.
+     */
+    public function sendPaymentLink(
+        ShopOrder $order,
+        ShopOrderNotifier $notifier,
+        PaymentGatewayManager $gateways,
+        // The history note is written here and not inside the notifier, and that is
+        // forced rather than chosen: ShopOrderWriter already depends on the notifier,
+        // so injecting the writer into the notifier would be a constructor cycle the
+        // container cannot resolve.
+        ShopOrderWriter $writer,
+    ) {
+        if (! $order->awaitsGatewayPayment()) {
+            return back()->with('warning', sprintf(
+                'No payment link went out for %s: %s.',
+                $order->reference,
+                $this->whyNoLink($order),
+            ));
+        }
+
+        // Offering a link to a gateway that cannot answer wastes the buyer's time and
+        // teaches them to ignore our emails.
+        if (! $gateways->isUsable()) {
+            return back()->with('warning', sprintf(
+                'No payment link went out for %s: the payment gateway is not configured, so the link would not work.',
+                $order->reference,
+            ));
+        }
+
+        $queued = $notifier->paymentLink($order);
+
+        if ($queued === 0) {
+            return back()->with('warning', sprintf(
+                'No payment link went out for %s. Check the buyer has an email address on the order.',
+                $order->reference,
+            ));
+        }
+
+        /*
+         | The per-order record, on the trail that already renders on the detail page.
+         | "queued" and not "sent": the cron worker is what sends it.
+         |
+         | Str::limit because shop_order_events.note is varchar(255) and
+         | ShopOrderWriter does not truncate, while customer_email is itself a
+         | varchar(255) — so a long address plus this sentence overflows, and MySQL
+         | answers that with an exception rather than a trim.
+         */
+        $writer->note($order, Str::limit(
+            sprintf('Payment link queued to %s.', $order->customer_email),
+            252,
+            '...',
+        ));
+
+        AdminLogger::activity('shop.orders.payment-link', sprintf(
+            'Queued a payment link for %s (%s to %s).',
+            $order->reference,
+            $order->grandTotalLabel(),
+            $order->customer_email,
+        ));
+
+        return back()->with('status', sprintf(
+            'Payment link queued for %s: %s to %s. It leaves as soon as the queue worker runs.',
+            $order->reference,
+            $order->grandTotalLabel(),
+            $order->customer_email,
+        ));
+    }
+
+    /**
+     * Why there is nothing to send, in words the operator can act on.
+     */
+    private function whyNoLink(ShopOrder $order): string
+    {
+        if ($order->isPaid()) {
+            return 'it is already paid';
+        }
+
+        if ($order->payment_method !== ShopOrder::METHOD_GATEWAY) {
+            return sprintf('it is being paid by %s, which is settled by hand', $order->methodLabel());
+        }
+
+        if ((float) $order->grand_total <= 0) {
+            return 'there is nothing to pay on it';
+        }
+
+        return sprintf('it is %s', strtolower($order->statusLabel()));
     }
 
     /**

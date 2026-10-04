@@ -649,6 +649,17 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('orders.payment');
 
             /*
+            | Email the buyer a payment link.
+            |
+            | Separate from orders.payment: that one asserts money arrived, this one
+            | asks for it. Per order, from a press on the row — never in bulk, because
+            | deciding to chase somebody is a judgement about that order.
+            */
+            Route::post('orders/{order}/payment-link', [ShopOrderController::class, 'sendPaymentLink'])
+                ->middleware(['permission:shop.orders.notify', 'throttle:20,1'])
+                ->name('orders.payment-link');
+
+            /*
             | Sending money back. Its own permission again, and separate from the event
             | refund: somebody trusted with the shop is not automatically trusted with
             | registration fees.

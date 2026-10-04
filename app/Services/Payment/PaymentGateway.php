@@ -22,6 +22,18 @@ interface PaymentGateway
     public function createCheckout(EventRegistration $registration, CheckoutUrls $urls): CheckoutSession;
 
     /**
+     * Open a checkout for a charge that is not a registration.
+     *
+     * Deliberately separate from createCheckout(): that one is typed to
+     * EventRegistration and is the live registration money path. Widening it would
+     * have meant editing working code that takes money, on a live system, for an
+     * aesthetic gain.
+     *
+     * @throws PaymentGatewayException when the gateway refuses or cannot be reached
+     */
+    public function createCharge(GatewayCharge $charge, CheckoutUrls $urls): CheckoutSession;
+
+    /**
      * Ask the gateway what became of a payment it already knows about.
      *
      * Needed because a webhook can be delayed or, on a machine the gateway

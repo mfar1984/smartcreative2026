@@ -12,6 +12,7 @@ use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\Payment\ChipWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\Payment\RegistrationPaymentController;
+use App\Http\Controllers\Payment\ShopOrderPaymentController;
 use App\Http\Controllers\Public\PlayerMessageController;
 use App\Http\Controllers\Public\TournamentPublicController;
 use App\Http\Controllers\RegistrationController;
@@ -272,6 +273,28 @@ Route::get('/order/{reference}/receipt', [CheckoutController::class, 'receiptFor
 Route::post('/order/{reference}/receipt', [CheckoutController::class, 'storeReceipt'])
     ->middleware(['signed', 'throttle:10,1'])
     ->name('shop.order.receipt.store');
+
+/*
+| Paying a shop order on the gateway.
+|
+| POST rather than GET for the same reason the delivery confirmation is: mail clients
+| and threat scanners prefetch links, and a GET that opened a purchase would create
+| one at the gateway for every preview.
+|
+| Signed, so no amount, order or status can be tampered in. Neither appears in the URL
+| at all: the figure is recomputed from the database on every request.
+*/
+Route::post('/order/{reference}/pay', [ShopOrderPaymentController::class, 'pay'])
+    ->middleware(['signed', 'throttle:10,1'])
+    ->name('shop.order.pay');
+
+/*
+| Where the gateway sends the buyer back. The outcome in the URL is a hint only; the
+| status comes from the signed webhook or from a direct read of the purchase.
+*/
+Route::get('/order/{reference}/payment/{outcome}', [ShopOrderPaymentController::class, 'handleReturn'])
+    ->middleware('signed')
+    ->name('shop.order.payment.return');
 
 
 

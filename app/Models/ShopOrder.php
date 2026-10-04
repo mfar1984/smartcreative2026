@@ -106,7 +106,9 @@ class ShopOrder extends Model
         'fulfilment',
         'payment_method',
         'payment_reference',
+        'paid_purchase_id',
         'payment_details',
+        'payment_synced_at',
         'payment_receipt_path',
         'payment_receipt_uploaded_at',
         'paid_at',
@@ -146,6 +148,7 @@ class ShopOrder extends Model
     {
         return [
             'payment_details' => 'array',
+            'payment_synced_at' => 'datetime',
             'payment_receipt_uploaded_at' => 'datetime',
             'collection_at' => 'datetime',
             'paid_at' => 'datetime',
@@ -187,6 +190,12 @@ class ShopOrder extends Model
         return $this->hasMany(ShopOrderEvent::class)->orderBy('id');
     }
 
+    /** Every checkout ever opened at the gateway for this order, newest first. */
+    public function checkouts(): HasMany
+    {
+        return $this->hasMany(ShopOrderCheckout::class)->latest('id');
+    }
+
     /* ---------------------------------------------------------------------
      | Status
      * ------------------------------------------------------------------ */
@@ -221,6 +230,114 @@ class ShopOrder extends Model
     {
         return $this->isPendingPayment()
             && in_array($this->payment_method, [self::METHOD_COD, self::METHOD_BANK_TRANSFER], true);
+    }
+
+    /**
+     * Whether this order is waiting for money the gateway can collect.
+     *
+     * Keyed on the payment method and the amount, never on fulfilment — a counter
+     * collection paid by card is exactly the case this exists for. The mirror image
+     * of awaitsManualPayment(), which answers the same question for cod and
+     * bank_transfer.
+     */
+    public function awaitsGatewayPayment(): bool
+    {
+        return $this->isPendingPayment()
+            && $this->payment_method === self::METHOD_GATEWAY
+            && (float) $this->grand_total > 0;
+    }
+
+    /**
+     * Whether this order was settled by this gateway purchase.
+     *
+     * The question behind it is "is this arriving purchase.paid a replay, or has a
+     * second purchase collected money for an order that is already paid?", and it is
+     * asked in two places that must not answer it differently: the webhook's decision
+     * whether to re-point payment_reference, and applyPaid()'s decision whether a
+     * refused move is an incident.
+     *
+     * It reads paid_purchase_id and nothing else. payment_reference holds the latest
+     * attempt and an administrator can type into it; membership of
+     * shop_order_checkouts is true from the moment a purchase was opened, which is
+     * before any money moved. Both are true for the double-collection shape, so
+     * either of them as the test would file a double charge as a harmless replay.
+     */
+    public function wasSettledBy(string $purchaseId): bool
+    {
+        return filled($this->paid_purchase_id) && $this->paid_purchase_id === $purchaseId;
+    }
+
+    /**
+     * What the gateway says it collected, in cents, or null when the figure cannot
+     * be trusted.
+     *
+     * Corroborated against the purchase's own total before it is believed. CHIP is
+     * sent our line items and chargePayload() refuses a cent-level mismatch, so if
+     * purchase.total does not come back equal to what we asked for, we are reading a
+     * field we have misunderstood — a different unit, or a different meaning — rather
+     * than watching an underpayment. Returning null in that case makes the caller
+     * fall through to "pay it and log that we could not check", because the expensive
+     * mistake here is refusing money that really arrived.
+     *
+     * @param  array<string, mixed>  $payment  the purchase payload, as stored or as received
+     * @param  int  $expectedCents  grand_total in cents, computed from the row
+     */
+    public static function collectedCents(array $payment, int $expectedCents): ?int
+    {
+        $collected = data_get($payment, 'payment.amount');
+        $total = data_get($payment, 'purchase.total');
+
+        if (! is_numeric($collected)) {
+            return null;
+        }
+
+        // purchase.total agreeing with our own figure is what proves the unit.
+        if (! is_numeric($total) || (int) $total !== $expectedCents) {
+            return null;
+        }
+
+        return (int) $collected;
+    }
+
+    /**
+     * How far short of the charge the stored gateway record is, in cents, or null
+     * when there is nothing to answer: no stored payload, nothing to trust, or the
+     * full amount collected.
+     *
+     * Read by the admin Payment panel so a refused payment is visible on the order
+     * rather than only in a log nobody opens.
+     */
+    public function gatewayShortfallCents(): ?int
+    {
+        /*
+         | A paid order is not short of anything.
+         |
+         | The recovery path after a refused short collection is Confirm Payment with
+         | a note, and neither confirmPayment() nor ShopOrderWriter::moveTo() clears
+         | payment_details — so without this guard the order would read Paid at the
+         | top of the Payment panel and "has not been marked paid" three lines below,
+         | pointing at a Confirm Payment panel that no longer renders. The figures are
+         | not lost: they stay in the order history and in the activity log.
+         |
+         | isPaid() is paid_at !== null, so this also covers a paid order later
+         | refunded — which is right: that one is a refund story, not a shortfall.
+         */
+        if ($this->isPaid()) {
+            return null;
+        }
+
+        $payment = $this->payment_details;
+
+        if (! is_array($payment) || $payment === []) {
+            return null;
+        }
+
+        $expected = (int) round((float) $this->grand_total * 100);
+        $collected = self::collectedCents($payment, $expected);
+
+        return $collected !== null && $collected < $expected
+            ? $expected - $collected
+            : null;
     }
 
     /* ---------------------------------------------------------------------

@@ -134,6 +134,7 @@
                         @if ($isOffline)
                             <th scope="col" class="{{ $head }} text-right">Hand Over</th>
                         @endif
+                        <th scope="col" class="{{ $head }} text-center">Actions</th>
                     </tr>
                 </thead>
 
@@ -208,7 +209,7 @@
                                              order page: handing over a queue of orders is a run of
                                              single presses on one screen. --}}
                                         <form action="{{ route('admin.shop.orders.status', $order) }}" method="POST"
-                                              onsubmit="return confirm('Hand order {{ $order->reference }} over to {{ $order->customer_name }}?\n\nCheck their identity card first. This records the order as collected.');"
+                                              onsubmit="return confirm('Hand order {{ $order->reference }} over to {{ addslashes($order->customer_name) }}?\n\nCheck their identity card first. This records the order as collected.');"
                                               class="inline">
                                             @csrf
                                             @method('PUT')
@@ -235,10 +236,50 @@
                                     @endif
                                 </td>
                             @endif
+
+                            {{-- Actions. On both tabs, deliberately: restricting the
+                                 payment link to Offline would re-introduce the
+                                 fulfilment-drives-payment coupling this change exists
+                                 to remove. A posted order paid by card gets stuck in
+                                 exactly the same way.
+
+                                 Escaping rule, the one the participants screen already
+                                 uses: values a buyer typed go through addslashes(),
+                                 values this application generated are interpolated
+                                 directly. A confirm() that throws does not return
+                                 false, so an apostrophe in a name would submit the form
+                                 with no confirmation at all. --}}
+                            <td class="px-5 py-3 whitespace-nowrap">
+                                <div class="flex items-center justify-center gap-0.5">
+                                    {{-- Only while there is something to collect, and
+                                         only for the method the gateway can actually
+                                         take. A cash on delivery or bank transfer order
+                                         is settled by hand, so a link would send the
+                                         buyer to a page that refuses itself. --}}
+                                    @if ($canNotify && $order->awaitsGatewayPayment())
+                                        <form action="{{ route('admin.shop.orders.payment-link', $order) }}" method="POST"
+                                              onsubmit="return confirm('Email a payment link for {{ $order->reference }} to {{ addslashes($order->customer_email) }}?\n\nThey will be asked to pay {{ $order->grandTotalLabel() }} by card or online banking. Nothing is marked paid until the money actually arrives.');">
+                                            @csrf
+                                            <button type="submit"
+                                                    class="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition"
+                                                    title="Send a payment link for {{ $order->reference }}"
+                                                    aria-label="Send a payment link for {{ $order->reference }}">
+                                                {{-- The same envelope and the same amber
+                                                     as the participant payment reminder:
+                                                     the same act should look the same in
+                                                     both modules. --}}
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                                                </svg>
+                                            </button>
+                                        </form>
+                                    @endif
+                                </div>
+                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="{{ $isOffline ? 9 : 8 }}" class="px-5 py-12 text-center">
+                            <td colspan="{{ $isOffline ? 10 : 9 }}" class="px-5 py-12 text-center">
                                 <x-admin.icon name="bag" class="w-10 h-10 mx-auto text-gray-300" />
 
                                 <p class="text-sm font-semibold text-gray-700 mt-3">

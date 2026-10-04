@@ -163,7 +163,7 @@
             <x-admin.panel title="Payment Methods" icon="credit-card">
                 <x-admin.field-row
                     label="How It Can Be Paid For"
-                    help="At least one. Whatever is ticked here is narrowed by what the shop itself can take, so this list can never be wider than Settings &gt; Integration &gt; Payments allows."
+                    help="At least one. Whatever is ticked here is narrowed by what the shop itself can take, so this list can never be wider than Settings &gt; Integration &gt; Payments allows. Independent of how it reaches the buyer: a product collected at a counter can still be paid by card or online banking."
                     :required="true"
                     error="payment_methods">
 
@@ -406,7 +406,9 @@
                                         @else
                                             Bought here and collected at a counter. No postage is charged and no
                                             courier is involved, so the shipping settings do not apply. The buyer is
-                                            asked for an identity card, which is what the counter checks.
+                                            asked for an identity card, which is what the counter checks. How it is
+                                            paid for is set separately under Payment Methods above, so a collected
+                                            product can still be paid online.
                                         @endif
                                     </span>
                                 </span>

@@ -292,6 +292,46 @@
                     </x-admin.panel>
                 @endif
 
+                {{--
+                    Asking for the money, above the panel that asserts it arrived.
+                    Nothing here marks anything paid; the gateway does that when the
+                    buyer actually pays.
+                --}}
+                @if ($canNotify && $order->awaitsGatewayPayment())
+                    <x-admin.panel title="Payment Link" icon="credit-card">
+                        <div class="px-5 py-4 space-y-4">
+                            <p class="text-sm text-gray-600">
+                                Emails {{ $order->customer_email }} a link to pay {{ $order->grandTotalLabel() }}
+                                by card or online banking. The link is valid for 30 days. Nothing here marks
+                                the order paid; the gateway does that when the money arrives.
+                            </p>
+
+                            <form action="{{ route('admin.shop.orders.payment-link', $order) }}" method="POST"
+                                  onsubmit="return confirm('Email a payment link for {{ $order->reference }} to {{ addslashes($order->customer_email) }}?');">
+                                @csrf
+                                <button type="submit"
+                                        class="w-full inline-flex items-center justify-center gap-2 bg-amber-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-amber-700 transition shadow-sm">
+                                    <x-admin.icon name="mail" class="w-4 h-4" />
+                                    Email a payment link
+                                </button>
+                            </form>
+
+                            {{-- The link itself, selectable, for a buyer whose email bounces or
+                                 who asks for it over the phone. The GET confirmation page, never
+                                 the POST pay route: that one is a 405 if followed by hand. --}}
+                            <div>
+                                <label for="payment-link" class="block text-xs font-semibold text-gray-700 mb-1.5">
+                                    The link, if you need to send it another way
+                                </label>
+                                <input type="text" id="payment-link" readonly
+                                       value="{{ \App\Http\Controllers\Payment\ShopOrderPaymentController::urlFor($order) }}"
+                                       class="{{ $input }} text-xs font-mono"
+                                       onclick="this.select();">
+                            </div>
+                        </div>
+                    </x-admin.panel>
+                @endif
+
                 @if ($canConfirmPayment && $order->canMoveTo(ShopOrder::STATUS_PAID))
                     <x-admin.panel title="Confirm Payment" icon="cash">
                         <form action="{{ route('admin.shop.orders.payment', $order) }}" method="POST"
@@ -317,6 +357,30 @@
                                        placeholder="Transfer reference or receipt number"
                                        class="{{ $input }}">
                                 <p class="text-xs text-gray-500 mt-1">Optional, but worth keeping for a bank transfer.</p>
+                            </div>
+
+                            {{-- confirmPayment() has always validated a note and fallen back to
+                                 "Payment confirmed by hand", but the form never rendered the
+                                 field, so that default was the only note a hand confirmation
+                                 could get. For a short gateway collection that would be a false
+                                 record of how the money arrived.
+
+                                 id="payment_note" rather than id="note": the status form above
+                                 already uses that id, and duplicates are invalid markup and a
+                                 screen-reader hazard. The name stays "note", which is what the
+                                 controller reads. --}}
+                            <div>
+                                <label for="payment_note" class="block text-sm font-semibold text-gray-700 mb-1.5">
+                                    Note
+                                </label>
+                                <input type="text" id="payment_note" name="note" maxlength="255"
+                                       value="{{ old('note') }}"
+                                       placeholder="How the money arrived, if it was not a plain transfer"
+                                       class="{{ $input }}">
+                                <p class="text-xs text-gray-500 mt-1">
+                                    Goes on the order history. Worth filling in when the gateway collected a
+                                    different amount from the one charged.
+                                </p>
                             </div>
 
                             <button type="submit"
@@ -527,6 +591,64 @@
 
                         @if (filled($order->payment_reference))
                             <p class="text-xs text-gray-500 tabular-nums pt-1">{{ $order->payment_reference }}</p>
+                        @endif
+
+                        @if ($order->payment_synced_at)
+                            {{-- LocalTime, not ->format(): this is new output, so it reads +8
+                                 from the start. --}}
+                            <p class="text-xs text-gray-500 pt-1">
+                                Gateway record last read {{ \App\Support\LocalTime::format($order->payment_synced_at) }}
+                            </p>
+                        @endif
+
+                        {{-- A payment the gateway took but that fell short of the charge. The
+                             order is deliberately still unpaid, so it has to be visible here
+                             and not only in the activity log.
+
+                             gatewayShortfallCents() returns null for a paid order, so this line
+                             cannot survive the recovery it recommends: the moment Confirm
+                             Payment settles the order, the banner goes and the panel above
+                             reads Paid.
+
+                             What is tested here is whether the sentence's own instruction is
+                             reachable. The Confirm Payment panel is gated on exactly this
+                             expression, and a cancelled order carrying a refused short payload
+                             is a real shape — so without the split the banner would point at a
+                             control that is not on the page. --}}
+                        @php($shortfall = $order->gatewayShortfallCents())
+                        @php($canSettleHere = $canConfirmPayment && $order->canMoveTo(ShopOrder::STATUS_PAID))
+
+                        @if ($shortfall !== null)
+                            <p role="alert" class="mt-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-800 leading-relaxed">
+                                The gateway reported {{ App\Support\PaymentFigures::money($shortfall / 100) }} less than
+                                the {{ $order->grandTotalLabel() }} charged, so this order has not been marked paid.
+                                @if ($canSettleHere)
+                                    Check the purchase at CHIP, then either refund it there or confirm the
+                                    payment below with a note saying what was actually collected.
+                                @else
+                                    Check the purchase at CHIP and refund it there if the money was taken.
+                                    This order cannot be settled from this page.
+                                @endif
+                            </p>
+                        @endif
+
+                        {{-- Money taken for an order the lifecycle refused to move. The updater
+                             writes an error-level activity entry and a trail note for this, but
+                             neither is on the screen somebody opens when a buyer rings up.
+
+                             The ! isPaid() is what keeps this from crying wolf: a normally
+                             refunded order, and an order cancelled after it was paid, both
+                             legitimately hold a gateway payload and both have paid_at set. What
+                             is left is the one shape that should never exist. --}}
+                        @if ($order->isClosed() && ! $order->isPaid() && filled($order->payment_details))
+                            <p role="alert" class="mt-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-800 leading-relaxed">
+                                A gateway payment is on record against this order, which is
+                                {{ strtolower($order->statusLabel()) }}, so it was never applied. Check the
+                                purchase at CHIP and refund it there if the money was taken.
+                                @if ($order->payment_synced_at)
+                                    Last read {{ \App\Support\LocalTime::format($order->payment_synced_at) }}.
+                                @endif
+                            </p>
                         @endif
                     </div>
                 </x-admin.panel>

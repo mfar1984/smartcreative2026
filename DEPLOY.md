@@ -268,10 +268,11 @@ arrived.
 
 It expects to be run on every deployment. Two things it does are worth knowing:
 
-- It resets the permissions of the four roles it declares (`super-admin`,
-  `administrator`, `viewer`, `referee`) to the set in the seeder. If you granted one
-  of them something extra by hand on the roles matrix, that grant is reverted. Roles
-  you created yourself are never touched.
+- It writes a role's permissions **when it creates that role**. A role that already
+  exists keeps the permissions it has, including anything granted by hand on the roles
+  matrix. A release that adds a permission an existing role needs names it in the
+  seeder's `BACKFILL`, which adds that one slug and removes nothing. Roles you created
+  yourself are never touched.
 - It deletes permissions no longer declared in the seeder, so a withdrawn permission
   stops appearing on the matrix as a checkbox that grants nothing.
 

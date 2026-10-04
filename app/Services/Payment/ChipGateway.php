@@ -73,8 +73,37 @@ class ChipGateway implements PaymentGateway
             throw PaymentGatewayException::notConfigured($this->label());
         }
 
-        $payload = $this->payload($registration, $urls);
+        return $this->postPurchase($this->payload($registration, $urls), $registration->reference);
+    }
 
+    /**
+     * Open a checkout for anything that is not a registration.
+     *
+     * Shares postPurchase() and acceptableCallback() with the registration path
+     * rather than duplicating them. Two copies of the callback guard — the one that
+     * refuses to let a live site take payments it cannot be told about — is how one
+     * of them ends up forgotten.
+     */
+    public function createCharge(GatewayCharge $charge, CheckoutUrls $urls): CheckoutSession
+    {
+        if (! $this->isConfigured()) {
+            throw PaymentGatewayException::notConfigured($this->label());
+        }
+
+        return $this->postPurchase($this->chargePayload($charge, $urls), $charge->reference);
+    }
+
+    /**
+     * POST a purchase and read the answer.
+     *
+     * Held here rather than inline in createCheckout() so the two callers above
+     * cannot drift apart on error handling.
+     *
+     * @param  array<string, mixed>  $payload
+     * @param  string  $context  our own reference, for the log and the messages
+     */
+    private function postPurchase(array $payload, string $context): CheckoutSession
+    {
         try {
             $response = Http::withToken(PaymentSettings::chipApiKey())
                 ->acceptJson()
@@ -88,7 +117,7 @@ class ChipGateway implements PaymentGateway
         if ($response->failed()) {
             // Logged rather than shown: the body can quote ids and settings.
             Log::warning('CHIP purchase creation failed.', [
-                'registration' => $registration->reference,
+                'reference' => $context,
                 'status' => $response->status(),
                 'body' => $response->body(),
             ]);
@@ -96,7 +125,7 @@ class ChipGateway implements PaymentGateway
             throw new PaymentGatewayException(sprintf(
                 'CHIP returned HTTP %d creating a purchase for %s.',
                 $response->status(),
-                $registration->reference,
+                $context,
             ));
         }
 
@@ -105,7 +134,7 @@ class ChipGateway implements PaymentGateway
 
         if (! is_string($id) || $id === '' || ! is_string($checkoutUrl) || $checkoutUrl === '') {
             throw new PaymentGatewayException(
-                'CHIP accepted the purchase but returned no id or checkout URL for ' . $registration->reference . '.'
+                'CHIP accepted the purchase but returned no id or checkout URL for ' . $context . '.'
             );
         }
 
@@ -394,13 +423,57 @@ class ChipGateway implements PaymentGateway
             // The webhook is what actually settles the payment; the redirects
             // above only decide what the payer sees. Omitted when CHIP would
             // refuse it, see acceptableCallback().
-            'success_callback' => $this->acceptableCallback($urls->callback, $registration),
+            'success_callback' => $this->acceptableCallback($urls->callback, $registration->reference),
         ];
 
         // The official SDK drops empty values before sending (Purchase and
         // Product both jsonSerialize through array_filter), so an absent
         // callback has to be absent rather than null.
         return array_filter($payload, fn ($value) => $value !== null && $value !== '');
+    }
+
+    /**
+     * The same body, built from a neutral charge rather than a registration.
+     *
+     * Carries the identical to-the-cent guard, because CHIP totals the product lines
+     * itself: a mismatch here would quote the buyer an amount the order never showed.
+     *
+     * @return array<string, mixed>
+     */
+    private function chargePayload(GatewayCharge $charge, CheckoutUrls $urls): array
+    {
+        $lineTotal = array_sum(array_map(
+            fn (array $product) => $product['price'] * (int) $product['quantity'],
+            $charge->products,
+        ));
+
+        if ($lineTotal !== $charge->amountCents) {
+            throw new PaymentGatewayException(sprintf(
+                'Line items for %s total %d cents but the charge is %d cents.',
+                $charge->reference,
+                $lineTotal,
+                $charge->amountCents,
+            ));
+        }
+
+        return array_filter([
+            'brand_id' => PaymentSettings::chipBrandId(),
+            'reference' => $charge->reference,
+
+            'client' => $charge->client,
+
+            'purchase' => [
+                'currency' => PaymentSettings::currency(),
+                'language' => self::LANGUAGE,
+                'products' => $charge->products,
+            ],
+
+            'success_redirect' => $urls->success,
+            'failure_redirect' => $urls->failure,
+            'cancel_redirect' => $urls->cancel,
+
+            'success_callback' => $this->acceptableCallback($urls->callback, $charge->reference),
+        ], fn ($value) => $value !== null && $value !== '');
     }
 
     /**
@@ -420,7 +493,7 @@ class ChipGateway implements PaymentGateway
      * payer who closes the tab would leave a paid registration sitting unpaid.
      * So a live site refuses to proceed rather than run blind.
      */
-    private function acceptableCallback(string $url, EventRegistration $registration): ?string
+    private function acceptableCallback(string $url, string $reference): ?string
     {
         $parts = parse_url($url);
         $scheme = $parts['scheme'] ?? '';
@@ -442,7 +515,7 @@ class ChipGateway implements PaymentGateway
         }
 
         Log::warning('CHIP callback dropped: the URL uses a port CHIP refuses to call.', [
-            'reference' => $registration->reference,
+            'reference' => $reference,
             'url' => $url,
             'note' => 'Payment status will be read back from CHIP on return instead of pushed by webhook.',
         ]);

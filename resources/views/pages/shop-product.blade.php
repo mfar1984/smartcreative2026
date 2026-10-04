@@ -237,10 +237,38 @@
                         <div class="rounded-lg border border-blue-200 bg-blue-50 p-5 mb-6">
                             <p class="text-sm font-bold text-blue-900">Collected in person, not posted</p>
 
-                            <p class="text-sm text-blue-900 mt-2">
-                                Pay here and collect at our counter. There is no delivery charge and
-                                nothing is sent to you.
-                            </p>
+                            @php
+                                /*
+                                 | Payable, not merely allowed.
+                                 |
+                                 | paymentMethodLabels() maps allowedPaymentMethods(), which is not
+                                 | intersected with the shop's switches and falls back to all three
+                                 | methods on a blank column — so it would advertise routes checkout
+                                 | will refuse. payablePaymentMethods() is the one that intersects
+                                 | with what the shop can actually take, and it returns slug => label
+                                 | so except() filters on the slug.
+                                 |
+                                 | Cash on delivery is dropped: nothing is delivered, so the phrase is
+                                 | incoherent on this panel even when the method is genuinely on
+                                 | offer. Checkout still offers it if the product allows it — this is
+                                 | a sentence about collection, not a narrowing of the routes.
+                                 */
+                                $routes = collect($product->payablePaymentMethods())
+                                    ->except(App\Models\ShopOrder::METHOD_COD)
+                                    ->values();
+                            @endphp
+
+                            @if ($routes->isNotEmpty())
+                                <p class="text-sm text-blue-900 mt-2">
+                                    Pay here by {{ $routes->join(', ', ' or ') }}, then collect at our counter.
+                                    There is no delivery charge and nothing is sent to you.
+                                </p>
+                            @else
+                                <p class="text-sm text-blue-900 mt-2">
+                                    Collect at our counter. There is no delivery charge and nothing is sent
+                                    to you.
+                                </p>
+                            @endif
 
                             <dl class="mt-3 pt-3 border-t border-blue-200 space-y-1 text-sm">
                                 @if (filled($point['location']))
