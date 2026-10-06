@@ -186,41 +186,45 @@
                     Shop
                 </a>
                 
-                {{-- Results: a non-clickable heading groups the items so the connection to
-                     the desktop "Results ▼" dropdown is clear on mobile. The items stay
-                     flat (no second collapsible) to keep the tap count low, but the
-                     parent label now gives them context. --}}
+                {{-- Results: same collapsible pattern as Services. --}}
                 @unless (App\Support\PublicResults::isEmpty())
                     <div>
-                        <p class="text-xs font-bold uppercase tracking-widest text-gray-400 px-1 mb-1" aria-hidden="true">Results</p>
+                        <button id="mobile-results-toggle" data-nav-link
+                                class="w-full text-left text-white hover:text-blue-300 font-medium transition flex items-center justify-between {{ request()->routeIs('hall-of-fame') || request()->routeIs('archive') || request()->routeIs('events.ranking') ? 'text-blue-300' : '' }}">
+                            Results
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </button>
+                        <div id="mobile-results-submenu" class="hidden pl-4 mt-2 space-y-2">
+                            @foreach (App\Support\PublicResults::live() as $liveTournament)
+                                <a href="{{ route('events.ranking', $liveTournament->event->slug) }}" data-nav-link
+                                   class="flex items-start gap-2 text-gray-200 hover:text-blue-300 transition">
+                                    <span class="relative flex w-2 h-2 mt-1.5 shrink-0" aria-hidden="true">
+                                        <span class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                                        <span class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
+                                    </span>
+                                    <span class="min-w-0">
+                                        <span class="block text-xs font-bold uppercase tracking-wide text-red-400">Live</span>
+                                        <span class="block leading-snug">{{ $liveTournament->event->title }}</span>
+                                    </span>
+                                </a>
+                            @endforeach
 
-                        @foreach (App\Support\PublicResults::live() as $liveTournament)
-                            <a href="{{ route('events.ranking', $liveTournament->event->slug) }}" data-nav-link
-                               class="flex items-start gap-2.5 text-white hover:text-blue-300 font-medium transition pl-3">
-                                <span class="relative flex w-2 h-2 mt-2 shrink-0" aria-hidden="true">
-                                    <span class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
-                                    <span class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
-                                </span>
-                                <span class="min-w-0">
-                                    <span class="block text-xs font-bold uppercase tracking-wide text-red-400">Live standings</span>
-                                    <span class="block leading-snug">{{ $liveTournament->event->title }}</span>
-                                </span>
-                            </a>
-                        @endforeach
+                            @if (App\Support\PublicResults::hasHallOfFame())
+                                <a href="{{ route('hall-of-fame') }}" data-nav-link
+                                   class="block text-gray-200 hover:text-blue-300 transition {{ request()->routeIs('hall-of-fame') ? 'text-blue-300' : '' }}">
+                                    Hall of Fame
+                                </a>
+                            @endif
 
-                        @if (App\Support\PublicResults::hasHallOfFame())
-                            <a href="{{ route('hall-of-fame') }}" data-nav-link
-                               class="block pl-3 text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('hall-of-fame') ? 'text-blue-300' : '' }}">
-                                Hall of Fame
-                            </a>
-                        @endif
-
-                        @if (App\Support\PublicResults::hasArchive())
-                            <a href="{{ route('archive') }}" data-nav-link
-                               class="block pl-3 text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('archive') ? 'text-blue-300' : '' }}">
-                                Archive
-                            </a>
-                        @endif
+                            @if (App\Support\PublicResults::hasArchive())
+                                <a href="{{ route('archive') }}" data-nav-link
+                                   class="block text-gray-200 hover:text-blue-300 transition {{ request()->routeIs('archive') ? 'text-blue-300' : '' }}">
+                                    Archive
+                                </a>
+                            @endif
+                        </div>
                     </div>
                 @endunless
 
@@ -258,6 +262,16 @@ document.getElementById('mobile-services-toggle').addEventListener('click', func
     const submenu = document.getElementById('mobile-services-submenu');
     submenu.classList.toggle('hidden');
 });
+
+// Mobile results submenu toggle
+(function() {
+    const btn = document.getElementById('mobile-results-toggle');
+    if (btn) {
+        btn.addEventListener('click', function() {
+            document.getElementById('mobile-results-submenu').classList.toggle('hidden');
+        });
+    }
+})();
 
 // Change header background on scroll
 (function() {
