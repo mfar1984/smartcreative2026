@@ -43,7 +43,7 @@ class OrderController extends Controller
             ->withCount('items')
             // Eager loaded so the Hand Over cell can say a handover went out without
             // a verified code. One extra query for the page rather than one per row.
-            ->with('handover')
+            ->with(['handover', 'items'])
             ->latest('id')
             ->paginate(self::PER_PAGE)
             ->withQueryString();
@@ -931,7 +931,7 @@ class OrderController extends Controller
             'Email',
             'Collect At',
             'Collect Date/Time',
-            'Items',
+            'Items & Sizes',
             'Total',
             'Method',
             'Status',
@@ -952,8 +952,7 @@ class OrderController extends Controller
             fputcsv($handle, $header);
 
             $this->matching($filters)
-                ->withCount('items')
-                ->with('handover')
+                ->with(['items', 'handover'])
                 ->orderBy('id')
                 ->chunk(50, function ($orders) use ($handle) {
                     foreach ($orders as $order) {
@@ -983,6 +982,30 @@ class OrderController extends Controller
             $handOver = $order->isPendingPayment() ? 'Not paid yet' : '';
         }
 
+        /*
+         | Items & Sizes: one cell listing every line.
+         |
+         | Format: "Event Tee (L), Tote Bag" — the variant in parentheses when it
+         | exists, nothing when the item has no variant. Counter staff glance at this
+         | column to pick the right size from the pile before calling the buyer's name.
+         |
+         | Combined into one column rather than one column per item because the number
+         | of items per order is not fixed, and a ragged column layout (Item1, Size1,
+         | Item2, Size2…) is harder to scan in Excel than a single cell.
+         */
+        $itemsLabel = $order->items
+            ->map(function ($item) {
+                $cell = (string) $item->name;
+                if (filled($item->variant_label)) {
+                    $cell .= ' (' . $item->variant_label . ')';
+                }
+                if ($item->quantity > 1) {
+                    $cell .= ' x' . $item->quantity;
+                }
+                return $cell;
+            })
+            ->implode(', ');
+
         return [
             $order->reference,
             (string) ($order->customer_name ?? ''),
@@ -991,7 +1014,7 @@ class OrderController extends Controller
             (string) ($order->customer_email ?? ''),
             (string) ($order->collection_location ?: ($order->collection_label ?: '')),
             $order->collection_at ? $order->collection_at->format('d M Y, g:i a') : '',
-            (string) ($order->items_count ?? ''),
+            $itemsLabel,
             (string) ($order->grand_total ?? ''),
             $order->methodLabel(),
             $order->statusLabel(),

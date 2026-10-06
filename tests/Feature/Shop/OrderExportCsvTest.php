@@ -292,4 +292,87 @@ class OrderExportCsvTest extends ShopPaymentTestCase
             ->post(route('admin.shop.orders.export', ['tab' => ShopOrder::FULFILMENT_OFFLINE]))
             ->assertStatus(405);
     }
+
+    /* ------------------------------------------------------------------
+     | Items & Sizes column
+     * ----------------------------------------------------------------- */
+
+    /**
+     * Create an order whose single item carries the given variant label.
+     */
+    private function orderWithItem(string $itemName, ?string $variantLabel): ShopOrder
+    {
+        $order = $this->paidOfflineOrder();
+
+        // Replace the item created by paidOfflineOrder() → order()
+        $order->items()->delete();
+        $order->items()->create([
+            'name' => $itemName,
+            'variant_label' => $variantLabel,
+            'unit_price' => 25.00,
+            'quantity' => 1,
+            'line_total' => 25.00,
+        ]);
+
+        return $order->fresh(['items']);
+    }
+
+    public function test_csv_includes_variant_label_for_item_with_variant(): void
+    {
+        $order = $this->orderWithItem('HSN Event Tee', 'L');
+
+        $response = $this->export(['tab' => ShopOrder::FULFILMENT_OFFLINE]);
+
+        $response->assertOk();
+        $content = $response->streamedContent();
+
+        $this->assertStringContainsString($order->reference, $content);
+        // The cell must contain the name and the size in parentheses.
+        $this->assertStringContainsString('HSN Event Tee (L)', $content);
+    }
+
+    public function test_csv_includes_both_variants_for_order_with_two_items(): void
+    {
+        $order = $this->paidOfflineOrder();
+
+        $order->items()->delete();
+        $order->items()->create([
+            'name' => 'HSN Event Tee',
+            'variant_label' => 'XL',
+            'unit_price' => 25.00,
+            'quantity' => 1,
+            'line_total' => 25.00,
+        ]);
+        $order->items()->create([
+            'name' => 'Tote Bag',
+            'variant_label' => 'Blue',
+            'unit_price' => 10.00,
+            'quantity' => 1,
+            'line_total' => 10.00,
+        ]);
+
+        $response = $this->export(['tab' => ShopOrder::FULFILMENT_OFFLINE]);
+
+        $response->assertOk();
+        $content = $response->streamedContent();
+
+        $this->assertStringContainsString($order->reference, $content);
+        $this->assertStringContainsString('HSN Event Tee (XL)', $content);
+        $this->assertStringContainsString('Tote Bag (Blue)', $content);
+    }
+
+    public function test_csv_shows_item_name_alone_when_no_variant(): void
+    {
+        $order = $this->orderWithItem('Event Programme', null);
+
+        $response = $this->export(['tab' => ShopOrder::FULFILMENT_OFFLINE]);
+
+        $response->assertOk();
+        $content = $response->streamedContent();
+
+        $this->assertStringContainsString($order->reference, $content);
+        $this->assertStringContainsString('Event Programme', $content);
+        // Must not have empty parentheses next to the name.
+        $this->assertStringNotContainsString('Event Programme ()', $content);
+    }
 }

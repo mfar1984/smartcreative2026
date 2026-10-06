@@ -237,6 +237,15 @@
 
                             <td class="px-5 py-3 text-center tabular-nums text-gray-600">
                                 {{ $order->items_count }}
+                                {{-- Show what was ordered so counter staff can grab the
+                                     right size from the pile without opening the order.
+                                     Only meaningful when items are loaded; items_count
+                                     comes from withCount() so it is always present. --}}
+                                @if ($isOffline && $order->relationLoaded('items') && $order->items->isNotEmpty())
+                                    <span class="block text-xs text-gray-400 mt-0.5 font-normal">
+                                        {{ $order->items->map(fn($i) => filled($i->variant_label) ? $i->name . ' (' . $i->variant_label . ')' : $i->name)->implode(', ') }}
+                                    </span>
+                                @endif
                             </td>
 
                             <td class="px-5 py-3 text-right whitespace-nowrap tabular-nums font-semibold text-gray-900">
