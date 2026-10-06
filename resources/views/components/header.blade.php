@@ -148,7 +148,7 @@
         </div>
         
         <!-- Mobile Navigation Menu -->
-        <div id="mobile-menu" class="hidden md:hidden pb-4">
+        <div id="mobile-menu" class="hidden md:hidden pb-4 bg-gray-900/95 backdrop-blur-sm rounded-b-xl mx-0 px-4 pt-3 shadow-xl">
             <div class="flex flex-col space-y-3">
                 <a href="{{ route('home') }}" data-nav-link class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('home') ? 'text-blue-300' : '' }}">
                     Home
@@ -186,37 +186,42 @@
                     Shop
                 </a>
                 
-                {{-- Results, listed flat rather than behind another toggle. There are
-                     rarely more than two of these, and a second collapsible on a phone
-                     is one more tap between somebody and the table they came for. --}}
+                {{-- Results: a non-clickable heading groups the items so the connection to
+                     the desktop "Results ▼" dropdown is clear on mobile. The items stay
+                     flat (no second collapsible) to keep the tap count low, but the
+                     parent label now gives them context. --}}
                 @unless (App\Support\PublicResults::isEmpty())
-                    @foreach (App\Support\PublicResults::live() as $liveTournament)
-                        <a href="{{ route('events.ranking', $liveTournament->event->slug) }}" data-nav-link
-                           class="flex items-start gap-2.5 text-white hover:text-blue-300 font-medium transition">
-                            <span class="relative flex w-2 h-2 mt-2 shrink-0" aria-hidden="true">
-                                <span class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
-                                <span class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
-                            </span>
-                            <span class="min-w-0">
-                                <span class="block text-xs font-bold uppercase tracking-wide text-red-400">Live standings</span>
-                                <span class="block leading-snug">{{ $liveTournament->event->title }}</span>
-                            </span>
-                        </a>
-                    @endforeach
+                    <div>
+                        <p class="text-xs font-bold uppercase tracking-widest text-gray-400 px-1 mb-1" aria-hidden="true">Results</p>
 
-                    @if (App\Support\PublicResults::hasHallOfFame())
-                        <a href="{{ route('hall-of-fame') }}" data-nav-link
-                           class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('hall-of-fame') ? 'text-blue-300' : '' }}">
-                            Hall of Fame
-                        </a>
-                    @endif
+                        @foreach (App\Support\PublicResults::live() as $liveTournament)
+                            <a href="{{ route('events.ranking', $liveTournament->event->slug) }}" data-nav-link
+                               class="flex items-start gap-2.5 text-white hover:text-blue-300 font-medium transition pl-3">
+                                <span class="relative flex w-2 h-2 mt-2 shrink-0" aria-hidden="true">
+                                    <span class="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+                                    <span class="relative inline-flex w-2 h-2 rounded-full bg-red-500"></span>
+                                </span>
+                                <span class="min-w-0">
+                                    <span class="block text-xs font-bold uppercase tracking-wide text-red-400">Live standings</span>
+                                    <span class="block leading-snug">{{ $liveTournament->event->title }}</span>
+                                </span>
+                            </a>
+                        @endforeach
 
-                    @if (App\Support\PublicResults::hasArchive())
-                        <a href="{{ route('archive') }}" data-nav-link
-                           class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('archive') ? 'text-blue-300' : '' }}">
-                            Archive
-                        </a>
-                    @endif
+                        @if (App\Support\PublicResults::hasHallOfFame())
+                            <a href="{{ route('hall-of-fame') }}" data-nav-link
+                               class="block pl-3 text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('hall-of-fame') ? 'text-blue-300' : '' }}">
+                                Hall of Fame
+                            </a>
+                        @endif
+
+                        @if (App\Support\PublicResults::hasArchive())
+                            <a href="{{ route('archive') }}" data-nav-link
+                               class="block pl-3 text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('archive') ? 'text-blue-300' : '' }}">
+                                Archive
+                            </a>
+                        @endif
+                    </div>
                 @endunless
 
                 <a href="{{ route('contact') }}" data-nav-link class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('contact') ? 'text-blue-300' : '' }}">
