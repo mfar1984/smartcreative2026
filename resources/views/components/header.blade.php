@@ -1,4 +1,4 @@
-<header id="main-header" class="absolute top-0 left-0 right-0 z-50 transition-all duration-300">
+<header id="main-header" class="absolute top-0 left-0 right-0 z-50 transition-all duration-300 bg-transparent">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between items-center py-2">
             <!-- Logo Section -->
@@ -146,10 +146,11 @@
                 <span class="block w-6 h-0.5 bg-white transition-all duration-300"></span>
             </button>
         </div>
-        
-        <!-- Mobile Navigation Menu -->
-        <div id="mobile-menu" class="hidden md:hidden pb-4 bg-gray-900 px-4 pt-3 shadow-2xl">
-            <div class="flex flex-col space-y-3">
+    </div>
+
+    <!-- Mobile Navigation Menu — outside the container so it spans full width -->
+    <div id="mobile-menu" class="hidden md:hidden bg-gray-900 border-t border-gray-800 shadow-2xl">
+        <div class="px-4 pt-3 pb-6 flex flex-col space-y-3">
                 <a href="{{ route('home') }}" data-nav-link class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('home') ? 'text-blue-300' : '' }}">
                     Home
                 </a>
@@ -246,7 +247,6 @@
                 @endunless
             </div>
         </div>
-    </div>
 </header>
 
 @push('scripts')
