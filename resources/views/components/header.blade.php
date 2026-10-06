@@ -1,4 +1,4 @@
-<header id="main-header" class="absolute top-0 left-0 right-0 z-40 transition-all duration-300">
+<header id="main-header" class="absolute top-0 left-0 right-0 z-50 transition-all duration-300">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between items-center py-2">
             <!-- Logo Section -->
@@ -148,7 +148,7 @@
         </div>
         
         <!-- Mobile Navigation Menu -->
-        <div id="mobile-menu" class="hidden md:hidden pb-4 bg-gray-900/95 backdrop-blur-sm rounded-b-xl mx-0 px-4 pt-3 shadow-xl">
+        <div id="mobile-menu" class="hidden md:hidden pb-4 bg-gray-900 px-4 pt-3 shadow-2xl">
             <div class="flex flex-col space-y-3">
                 <a href="{{ route('home') }}" data-nav-link class="text-white hover:text-blue-300 font-medium transition {{ request()->routeIs('home') ? 'text-blue-300' : '' }}">
                     Home
