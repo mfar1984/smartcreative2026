@@ -99,6 +99,7 @@ class OrderController extends Controller
             'canUpdate' => $request->user()->hasPermission('shop.orders.update'),
             'canConfirmPayment' => $request->user()->hasPermission('shop.orders.payment'),
             'canNotify' => $canNotify,
+            'canExport' => $request->user()->hasPermission('shop.orders.view'),
         ]);
     }
 
@@ -898,6 +899,110 @@ class OrderController extends Controller
         }
 
         return ShopPaymentLinkSender::reasons()[$reason] ?? 'it is not waiting for payment';
+    }
+
+    /**
+     * Stream every order that matches the current filters as a UTF-8 CSV.
+     *
+     * One row per order. Carries the same filters the list uses so the file is
+     * exactly the set on screen, no more and no less. Gated on shop.orders.view:
+     * the same permission the list itself requires.
+     *
+     * GET only. Chunked to avoid loading a large tab into memory at once.
+     */
+    public function exportCsv(Request $request)
+    {
+        $filters = $this->filters($request);
+
+        AdminLogger::activity(
+            'shop.orders.export',
+            sprintf(
+                'Exported the %s orders list (%s) as CSV.',
+                strtolower(ShopOrder::FULFILMENTS[$filters['tab']] ?? $filters['tab']),
+                $this->filterLabel($filters),
+            ),
+        );
+
+        $header = [
+            'Reference',
+            'Customer Name',
+            'Identity Card',
+            'Phone',
+            'Email',
+            'Collect At',
+            'Collect Date/Time',
+            'Items',
+            'Total',
+            'Method',
+            'Status',
+            'Payment',
+            'Hand Over',
+            'Date Placed',
+            'Collected At',
+            'Collector IC',
+            'Collector Name',
+        ];
+
+        return response()->streamDownload(function () use ($filters, $header) {
+            $handle = fopen('php://output', 'wb');
+
+            // BOM so Excel opens Malaysian names without mojibake.
+            fwrite($handle, "\xEF\xBB\xBF");
+
+            fputcsv($handle, $header);
+
+            $this->matching($filters)
+                ->withCount('items')
+                ->with('handover')
+                ->orderBy('id')
+                ->chunk(50, function ($orders) use ($handle) {
+                    foreach ($orders as $order) {
+                        fputcsv($handle, $this->exportRow($order));
+                    }
+                });
+
+            fclose($handle);
+        }, sprintf('orders-%s-%s.csv', $filters['tab'], now()->format('Ymd-His')), [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    /**
+     * One order as a row of cells, in the same order as the CSV header.
+     *
+     * @return array<int, string>
+     */
+    private function exportRow(ShopOrder $order): array
+    {
+        // Hand Over column: what happened to the goods.
+        if ($order->isCollected()) {
+            $handOver = 'Collected';
+        } elseif ($order->awaitsCollection()) {
+            $handOver = 'Awaiting collection';
+        } else {
+            $handOver = $order->isPendingPayment() ? 'Not paid yet' : '';
+        }
+
+        return [
+            $order->reference,
+            (string) ($order->customer_name ?? ''),
+            (string) ($order->identity_card ?? ''),
+            (string) ($order->customer_phone ?? ''),
+            (string) ($order->customer_email ?? ''),
+            (string) ($order->collection_location ?: ($order->collection_label ?: '')),
+            $order->collection_at ? $order->collection_at->format('d M Y, g:i a') : '',
+            (string) ($order->items_count ?? ''),
+            (string) ($order->grand_total ?? ''),
+            $order->methodLabel(),
+            $order->statusLabel(),
+            $order->isPaid() ? 'Paid' : 'Unpaid',
+            $handOver,
+            $order->created_at ? LocalTime::format($order->created_at, 'Y-m-d H:i') : '',
+            $order->delivered_at ? LocalTime::format($order->delivered_at, 'Y-m-d H:i') : '',
+            // Collector IC: only when somebody else collected (third-party handover).
+            ($order->handover && $order->handover->byThirdParty()) ? (string) ($order->handover->collector_ic ?? '') : '',
+            ($order->handover && $order->handover->byThirdParty()) ? (string) ($order->handover->collector_name ?? '') : '',
+        ];
     }
 
     /**

@@ -99,6 +99,17 @@
                     <option value="{{ $slug }}" @selected($method === $slug)>{{ $text }}</option>
                 @endforeach
             </select>
+
+            @if ($canExport)
+                <x-slot:actions>
+                    <a href="{{ route('admin.shop.orders.export', request()->only('tab', 'status', 'method', 'q')) }}"
+                       title="One row per order, matching the filters."
+                       class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3.5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                        <x-admin.icon name="archive" class="w-4 h-4" />
+                        Export CSV
+                    </a>
+                </x-slot:actions>
+            @endif
         </x-admin.filter-bar>
 
         {{-- The two figures somebody opening this screen is looking for, and the one

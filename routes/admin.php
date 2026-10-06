@@ -789,6 +789,9 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('orders', [ShopOrderController::class, 'index'])
                 ->middleware('permission:shop.orders.view')
                 ->name('orders');
+            Route::get('orders/export', [ShopOrderController::class, 'exportCsv'])
+                ->middleware('permission:shop.orders.view')
+                ->name('orders.export');
             Route::get('orders/{order}', [ShopOrderController::class, 'show'])
                 ->middleware('permission:shop.orders.view')
                 ->name('orders.show');
