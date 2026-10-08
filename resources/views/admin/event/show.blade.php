@@ -177,7 +177,7 @@
                                 @endif
 
                                 @if ($wifi['expires_on'])
-                                    <span class="text-gray-500">Logins die after {{ $wifi['expires_on']->format('d M Y') }}</span>
+                                    <span class="text-gray-500">Logins die after {{ \App\Support\LocalTime::dateWallClock($wifi['expires_on']) }}</span>
                                 @endif
                             </div>
 
@@ -279,9 +279,9 @@
 
                     <x-admin.field-row label="Dates">
                         <p class="md:pt-2.5 text-sm text-gray-900">
-                            {{ $event->starts_at->format('d M Y') }}
+                            {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
                             @unless ($event->starts_at->isSameDay($event->ends_at))
-                                &ndash; {{ $event->ends_at->format('d M Y') }}
+                                &ndash; {{ \App\Support\LocalTime::dateWallClock($event->ends_at) }}
                             @endunless
                             @if ($event->time)
                                 <span class="block text-xs text-gray-500">{{ $event->time }}</span>
@@ -348,9 +348,9 @@
 
                     <x-admin.field-row label="Registration Window">
                         <p class="md:pt-2.5 text-sm text-gray-900">
-                            {{ $event->registration_opens_at?->format('d M Y') ?? 'Open now' }}
+                            {{ \App\Support\LocalTime::dateWallClock($event->registration_opens_at, 'Open now') }}
                             &ndash;
-                            {{ $event->registration_closes_at?->format('d M Y') ?? 'until the event ends' }}
+                            {{ \App\Support\LocalTime::dateWallClock($event->registration_closes_at, 'until the event ends') }}
                         </p>
                     </x-admin.field-row>
 

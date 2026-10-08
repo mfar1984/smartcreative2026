@@ -164,7 +164,7 @@
 
                                         @if ($collectionPoint['at'])
                                             <p class="text-xs font-semibold text-blue-900 mt-0.5">
-                                                {{ $collectionPoint['at']->format('d M Y, g:i a') }}
+                                                {{ \App\Support\LocalTime::formatWallClock($collectionPoint['at']) }}
                                             </p>
                                         @endif
 

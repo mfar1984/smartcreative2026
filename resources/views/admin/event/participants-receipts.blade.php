@@ -123,8 +123,8 @@
                                                  and no slip), so received_at here is the gateway's
                                                  own UTC instant and must read on the office clock
                                                  like the participants list beside it. --}}
-                                            {{ \App\Support\LocalTime::format($receipt->payment->received_at, 'd M Y', '') }}
-                                            <span class="block text-xs text-gray-400">{{ \App\Support\LocalTime::format($receipt->payment->received_at, 'g:i a', '') }}</span>
+                                            {{ \App\Support\LocalTime::date($receipt->payment->received_at, '') }}
+                                            <span class="block text-xs text-gray-400">{{ \App\Support\LocalTime::time($receipt->payment->received_at, '') }}</span>
                                         </td>
 
                                         <td class="px-5 py-3 text-right text-gray-900 tabular-nums whitespace-nowrap">{{ $receipt->reportedLabel() }}</td>

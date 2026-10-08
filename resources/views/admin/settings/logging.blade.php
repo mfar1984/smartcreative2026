@@ -138,7 +138,7 @@
                             @forelse ($activityEntries as $entry)
                                 <tr class="hover:bg-blue-50/40">
                                     <td class="px-5 py-3 text-xs text-gray-600 whitespace-nowrap">
-                                        {{ \App\Support\LocalTime::format($entry->created_at, 'd M Y', '') }}
+                                        {{ \App\Support\LocalTime::date($entry->created_at, '') }}
                                         <span class="block text-gray-400">{{ \App\Support\LocalTime::format($entry->created_at, 'g:i:s a', '') }}</span>
                                     </td>
                                     <td class="px-5 py-3 whitespace-nowrap">
@@ -278,7 +278,7 @@
                             @forelse ($auditEntries as $entry)
                                 <tr class="hover:bg-blue-50/40 align-top">
                                     <td class="px-5 py-3 text-xs text-gray-600 whitespace-nowrap">
-                                        {{ \App\Support\LocalTime::format($entry->created_at, 'd M Y', '') }}
+                                        {{ \App\Support\LocalTime::date($entry->created_at, '') }}
                                         <span class="block text-gray-400">{{ \App\Support\LocalTime::format($entry->created_at, 'g:i:s a', '') }}</span>
                                     </td>
                                     <td class="px-5 py-3 whitespace-nowrap">

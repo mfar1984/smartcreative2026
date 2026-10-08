@@ -29,18 +29,10 @@
             }
 
             if (! $to || $from->isSameDay($to)) {
-                return $from->format('d M Y');
+                return \App\Support\LocalTime::dateWallClock($from);
             }
 
-            if ($from->format('Y-m') === $to->format('Y-m')) {
-                return $from->format('d') . '-' . $to->format('d M Y');
-            }
-
-            if ($from->format('Y') === $to->format('Y')) {
-                return $from->format('d M') . ' - ' . $to->format('d M Y');
-            }
-
-            return $from->format('d M Y') . ' - ' . $to->format('d M Y');
+            return \App\Support\LocalTime::dateWallClock($from) . ' - ' . \App\Support\LocalTime::dateWallClock($to);
         };
     @endphp
 

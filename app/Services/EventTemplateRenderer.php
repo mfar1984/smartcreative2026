@@ -152,7 +152,7 @@ class EventTemplateRenderer
             // checkout it was never given or a size form it has no business sending.
             'size_link' => $sizeLink ?? '',
 
-            'paid_on' => LocalTime::format($payment?->paidOn(), LocalTime::DATE_TIME, ''),
+            'paid_on' => LocalTime::format($payment?->paidOn(), LocalTime::chosenDateTimeFormat(), ''),
             'payment_method' => $payment?->paymentMethod() ?? '',
             'payment_reference' => $registration->payment_reference ?? '',
         ];
@@ -377,10 +377,10 @@ class EventTemplateRenderer
         }
 
         if ($event->ends_at === null || $event->starts_at->isSameDay($event->ends_at)) {
-            return $event->starts_at->format('d M Y');
+            return LocalTime::dateWallClock($event->starts_at);
         }
 
-        return $event->starts_at->format('d M Y') . ' – ' . $event->ends_at->format('d M Y');
+        return LocalTime::dateWallClock($event->starts_at) . ' – ' . LocalTime::dateWallClock($event->ends_at);
     }
 
     /**

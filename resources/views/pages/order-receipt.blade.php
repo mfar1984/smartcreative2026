@@ -74,7 +74,7 @@
                     <div class="mt-6 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3.5">
                         <p class="text-sm font-semibold text-gray-900">Receipt received</p>
                         <p class="text-sm text-gray-600 mt-0.5">
-                            Uploaded {{ \App\Support\LocalTime::format($order->payment_receipt_uploaded_at, \App\Support\LocalTime::DATE_TIME, '') }}.
+                            Uploaded {{ \App\Support\LocalTime::format($order->payment_receipt_uploaded_at, \App\Support\LocalTime::chosenDateTimeFormat(), '') }}.
                             <a href="{{ $order->paymentReceiptUrl() }}" target="_blank" rel="noopener"
                                class="font-semibold text-blue-600 hover:underline">View what you sent</a>
                         </p>

@@ -44,7 +44,7 @@
                 @endif
 
                 <span class="text-xs font-semibold uppercase tracking-widest text-gray-400">
-                    {{ $event->starts_at?->format('d M Y') }}
+                    {{ \App\Support\LocalTime::dateWallClock($event->starts_at, '') }}
                     @if ($event->location)
                         &middot; {{ $event->location }}
                     @endif
@@ -184,7 +184,7 @@
                                             on {{ $board['next_fixture']->map }}
                                         @endif
                                         @if ($board['next_fixture']->scheduled_at)
-                                            &middot; {{ $board['next_fixture']->scheduled_at->format('d M, g:i a') }}
+                                            &middot; {{ \App\Support\LocalTime::formatWallClock($board['next_fixture']->scheduled_at) }}
                                         @endif
                                     </p>
                                 @endif

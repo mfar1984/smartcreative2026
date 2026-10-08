@@ -107,7 +107,7 @@
                     {{ $event?->title ?? $award->tournament?->name }}
                 </span>
                 <span class="block truncate text-[10px] text-slate-500">
-                    {{ collect([$match?->map, $playedAt?->format('d M Y')])->filter()->implode(' · ') }}
+                    {{ collect([$match?->map, $playedAt ? \App\Support\LocalTime::dateWallClock($playedAt) : null])->filter()->implode(' · ') }}
                 </span>
             </span>
         </div>

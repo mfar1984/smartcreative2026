@@ -185,7 +185,7 @@
                                         <span class="block text-gray-900">{{ $event->title }}</span>
                                         <span class="block text-xs text-gray-400">{{ $event->category }}</span>
                                     </td>
-                                    <td class="px-5 py-3 text-xs text-gray-600 whitespace-nowrap">{{ $event->starts_at->format('d M Y') }}</td>
+                                    <td class="px-5 py-3 text-xs text-gray-600 whitespace-nowrap">{{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}</td>
                                     <td class="px-5 py-3 whitespace-nowrap">
                                         <x-admin.badge :tone="$lifecycleTones[$event->lifecycle()] ?? 'gray'" :dot="true">
                                             {{ ucfirst($event->lifecycle()) }}

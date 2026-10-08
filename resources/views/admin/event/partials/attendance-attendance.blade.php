@@ -226,7 +226,7 @@
                                          typed. Converting it would read back a 2:30 pm slip as
                                          10:30 pm. The gateway's own instants are the ones that get
                                          converted, on admin/event/participants-receipts. --}}
-                                    {{ $receipt->received_at?->format('d M Y, g:i a') }}
+                                    {{ \App\Support\LocalTime::formatWallClock($receipt->received_at, \App\Support\LocalTime::chosenDateTimeFormat(), '') }}
                                 </span>
                             </div>
 

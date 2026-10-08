@@ -136,9 +136,9 @@
                             {{ $event?->title ?? '—' }}
                             @if ($event)
                                 <span class="block text-xs text-gray-500 mt-0.5">
-                                    {{ $event->starts_at->format('d M Y') }}
+                                    {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
                                     @unless ($event->starts_at->isSameDay($event->ends_at))
-                                        &ndash; {{ $event->ends_at->format('d M Y') }}
+                                        &ndash; {{ \App\Support\LocalTime::dateWallClock($event->ends_at) }}
                                     @endunless
                                     &middot; {{ $event->location }}
                                 </span>
@@ -458,8 +458,8 @@
                                          gateway-only screen (participants-receipts) does convert,
                                          because every row on it is provably the gateway's own. --}}
                                     <td class="px-5 py-3 whitespace-nowrap text-gray-700">
-                                        {{ $receipt->received_at?->format('d M Y') }}
-                                        <span class="block text-xs text-gray-400">{{ $receipt->received_at?->format('g:i a') }}</span>
+                                        {{ \App\Support\LocalTime::dateWallClock($receipt->received_at, '') }}
+                                        <span class="block text-xs text-gray-400">{{ \App\Support\LocalTime::timeWallClock($receipt->received_at, '') }}</span>
                                     </td>
 
                                     <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">
@@ -659,7 +659,7 @@
                             <th scope="row" class="{{ $label }} text-left">Date of Birth</th>
                             <td class="{{ $value }}">
                                 @if ($participant->date_of_birth)
-                                    {{ $participant->date_of_birth->format('d M Y') }}
+                                    {{ \App\Support\LocalTime::dateWallClock($participant->date_of_birth) }}
                                     <span class="text-gray-400">({{ $participant->age() }} years)</span>
                                 @else
                                     —
@@ -735,7 +735,7 @@
                                     @if ($answer->answered)
                                         <x-admin.badge tone="green">Yes</x-admin.badge>
                                         @if ($answer->answered_at)
-                                            <span class="text-xs text-gray-400 ml-1">{{ \App\Support\LocalTime::format($answer->answered_at, 'd M Y, g:ia') }}</span>
+                                            <span class="text-xs text-gray-400 ml-1">{{ \App\Support\LocalTime::format($answer->answered_at) }}</span>
                                         @endif
                                     @else
                                         <x-admin.badge tone="gray">No</x-admin.badge>

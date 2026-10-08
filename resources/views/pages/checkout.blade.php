@@ -106,7 +106,7 @@
 
                                         @if ($collectionPoint['at'])
                                             <p class="text-sm font-semibold text-blue-900 mt-1">
-                                                {{ $collectionPoint['at']->format('l, d F Y') }} at {{ $collectionPoint['at']->format('g:i a') }}
+                                                {{ $collectionPoint['at']->format('l') }}, {{ \App\Support\LocalTime::dateWallClock($collectionPoint['at']) }} at {{ \App\Support\LocalTime::timeWallClock($collectionPoint['at']) }}
                                             </p>
                                         @endif
                                     @endif

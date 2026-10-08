@@ -85,7 +85,7 @@
                 <x-admin.icon name="lock" class="w-5 h-5 mt-0.5 shrink-0 text-amber-600" />
                 <p class="text-sm text-amber-800">
                     This fixture already has a result, entered
-                    {{ \App\Support\LocalTime::format($match->scored_at, \App\Support\LocalTime::DATE_TIME, '') }}
+                    {{ \App\Support\LocalTime::format($match->scored_at, \App\Support\LocalTime::chosenDateTimeFormat(), '') }}
                     @if ($match->scorer) by {{ $match->scorer->name }} @endif.
                     Saving again corrects it and works the standings out afresh.
                 </p>

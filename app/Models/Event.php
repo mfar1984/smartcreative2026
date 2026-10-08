@@ -783,11 +783,11 @@ class Event extends Model
         $today = now()->startOfDay();
 
         if ($this->registration_opens_at && $this->registration_opens_at->gt($today)) {
-            return 'Registration opens on ' . $this->registration_opens_at->format('d M Y') . '.';
+            return 'Registration opens on ' . \App\Support\LocalTime::dateWallClock($this->registration_opens_at) . '.';
         }
 
         if ($this->registration_closes_at && $this->registration_closes_at->lt($today)) {
-            return 'Registration closed on ' . $this->registration_closes_at->format('d M Y') . '.';
+            return 'Registration closed on ' . \App\Support\LocalTime::dateWallClock($this->registration_closes_at) . '.';
         }
 
         if ($this->seats_total > 0 && $this->seatsLeft() <= 0) {

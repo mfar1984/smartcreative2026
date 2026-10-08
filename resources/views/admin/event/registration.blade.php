@@ -118,9 +118,9 @@
                                 <td class="px-5 py-3 whitespace-nowrap text-gray-700">{{ $event->category }}</td>
 
                                 <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-600">
-                                    {{ $event->starts_at->format('d M Y') }}
+                                    {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
                                     @unless ($event->starts_at->isSameDay($event->ends_at))
-                                        <span class="block text-gray-400">to {{ $event->ends_at->format('d M Y') }}</span>
+                                        <span class="block text-gray-400">to {{ \App\Support\LocalTime::dateWallClock($event->ends_at) }}</span>
                                     @endunless
                                     @if ($event->time)
                                         <span class="block text-gray-400">{{ $event->time }}</span>

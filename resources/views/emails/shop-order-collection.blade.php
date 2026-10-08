@@ -9,7 +9,7 @@
 
         <h1 style="margin:0 0 4px;font-size:20px;color:#111827;">Your order is ready to collect</h1>
         <p style="margin:0 0 20px;font-size:13px;color:#6b7280;">
-            Order {{ $order->reference }} &middot; paid {{ \App\Support\LocalTime::format($order->paid_at, \App\Support\LocalTime::DATE_TIME, '') }}
+            Order {{ $order->reference }} &middot; paid {{ \App\Support\LocalTime::format($order->paid_at, \App\Support\LocalTime::chosenDateTimeFormat(), '') }}
         </p>
 
         <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151;">
@@ -38,8 +38,8 @@
                              it would move the appointment by eight hours. --}}
                         <p style="margin:10px 0 0;font-size:13px;color:#1e40af;">On</p>
                         <p style="margin:0;font-size:16px;font-weight:bold;color:#1e3a8a;">
-                            {{ $order->collection_at->format('l, d F Y') }}<br>
-                            {{ $order->collection_at->format('g:i a') }}
+                            {{ $order->collection_at->format('l') }}, {{ \App\Support\LocalTime::dateWallClock($order->collection_at) }}<br>
+                            {{ \App\Support\LocalTime::timeWallClock($order->collection_at) }}
                         </p>
                     @endif
                 </td>

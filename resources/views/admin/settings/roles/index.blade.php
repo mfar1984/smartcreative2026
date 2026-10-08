@@ -108,7 +108,7 @@
                             </td>
 
                             <td class="px-6 py-3 text-xs text-gray-500 whitespace-nowrap">
-                                {{ \App\Support\LocalTime::format($role->created_at, 'd/m/Y') }}
+                                {{ \App\Support\LocalTime::date($role->created_at) }}
                             </td>
 
                             <td class="px-6 py-3 whitespace-nowrap">

@@ -82,8 +82,15 @@ class DisplayTimezoneSweepTest extends TestCase
     /** The collection appointment as a member of staff typed it into the form. */
     private const TYPED_COLLECTION = '2026-10-10 09:30:00';
 
-    /** Read back as typed, which is the only reading that is right. */
-    private const TYPED_COLLECTION_DAY = 'Saturday, 10 October 2026';
+    /**
+     * Read back as typed, which is the only reading that is right.
+     *
+     * Part B routes the collection date through the chosen date format (default
+     * 'd M Y'), so the month now reads "Oct" rather than the old hardcoded "October"
+     * — but the weekday prefix, the day (10), and no-shift are what this sweep
+     * guards, and those are unchanged.
+     */
+    private const TYPED_COLLECTION_DAY = 'Saturday, 10 Oct 2026';
 
     private const TYPED_COLLECTION_TIME = '9:30 am';
 

@@ -72,9 +72,9 @@
                             <h2 class="text-xl font-bold text-gray-900 mt-0.5">{{ $event?->title }}</h2>
                             @if ($event?->starts_at)
                                 <p class="text-sm text-gray-600 mt-1">
-                                    {{ $event->starts_at->format('d M Y') }}
+                                    {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
                                     @if ($event->ends_at && ! $event->starts_at->isSameDay($event->ends_at))
-                                        &ndash; {{ $event->ends_at->format('d M Y') }}
+                                        &ndash; {{ \App\Support\LocalTime::dateWallClock($event->ends_at) }}
                                     @endif
                                     @if (filled($event->location))
                                         &middot; {{ $event->location }}

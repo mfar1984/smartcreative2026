@@ -447,7 +447,7 @@ class ShopProduct extends Model
 
         return collect([
             $point['location'],
-            $point['at']?->format('d M Y, g:i a'),
+            $point['at'] ? \App\Support\LocalTime::formatWallClock($point['at']) : null,
         ])->filter()->join(', ') ?: $point['label'];
     }
 

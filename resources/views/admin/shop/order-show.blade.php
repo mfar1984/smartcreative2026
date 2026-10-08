@@ -387,7 +387,7 @@
                         <div class="px-5 py-4">
                             @if ($order->hasPaymentReceipt())
                                 <p class="text-xs text-gray-500">
-                                    Sent by the buyer {{ \App\Support\LocalTime::format($order->payment_receipt_uploaded_at, \App\Support\LocalTime::DATE_TIME, '') }}
+                                    Sent by the buyer {{ \App\Support\LocalTime::format($order->payment_receipt_uploaded_at, \App\Support\LocalTime::chosenDateTimeFormat(), '') }}
                                 </p>
 
                                 @if ($order->paymentReceiptIsImage())
@@ -656,7 +656,7 @@
                                      datetime-local input and stored as written, so it is
                                      already the counter's clock. --}}
                                 <p class="text-gray-700">
-                                    {{ $order->collection_at->format('l, d M Y') }} at {{ $order->collection_at->format('g:i a') }}
+                                    {{ $order->collection_at->format('l') }}, {{ \App\Support\LocalTime::dateWallClock($order->collection_at) }} at {{ \App\Support\LocalTime::timeWallClock($order->collection_at) }}
                                 </p>
                             @endif
 

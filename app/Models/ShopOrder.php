@@ -431,7 +431,7 @@ class ShopOrder extends Model
 
         return collect([
             $this->collection_location,
-            $this->collection_at?->format('d M Y, g:i a'),
+            $this->collection_at ? \App\Support\LocalTime::formatWallClock($this->collection_at) : null,
         ])->filter()->join(', ') ?: $this->collection_label;
     }
 

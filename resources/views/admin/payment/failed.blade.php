@@ -118,7 +118,7 @@
 
                             <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
                                 {{ $registration->updated_at?->diffForHumans() }}
-                                <span class="block text-gray-400">{{ \App\Support\LocalTime::format($registration->updated_at, \App\Support\LocalTime::DATE_TIME, '') }}</span>
+                                <span class="block text-gray-400">{{ \App\Support\LocalTime::format($registration->updated_at, \App\Support\LocalTime::chosenDateTimeFormat(), '') }}</span>
                             </td>
 
                             <td class="px-5 py-3 text-center">

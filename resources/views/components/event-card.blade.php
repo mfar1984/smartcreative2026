@@ -32,11 +32,9 @@
     $endsAt = $event->ends_at;
 
     if ($startsAt->isSameDay($endsAt)) {
-        $dateRange = $startsAt->format('d M Y');
-    } elseif ($startsAt->isSameMonth($endsAt) && $startsAt->isSameYear($endsAt)) {
-        $dateRange = $startsAt->format('d') . ' - ' . $endsAt->format('d M Y');
+        $dateRange = \App\Support\LocalTime::dateWallClock($startsAt);
     } else {
-        $dateRange = $startsAt->format('d M') . ' - ' . $endsAt->format('d M Y');
+        $dateRange = \App\Support\LocalTime::dateWallClock($startsAt) . ' - ' . \App\Support\LocalTime::dateWallClock($endsAt);
     }
 
     $blocked = $event->registrationBlockedReason();

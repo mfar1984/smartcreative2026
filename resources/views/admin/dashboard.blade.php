@@ -220,7 +220,7 @@
                                     </td>
 
                                     <td class="px-5 py-3 whitespace-nowrap text-gray-600">
-                                        {{ $event['starts_at']?->format('d M Y') ?? '—' }}
+                                        {{ \App\Support\LocalTime::dateWallClock($event['starts_at']) }}
                                     </td>
 
                                     <td class="px-5 py-3 whitespace-nowrap">

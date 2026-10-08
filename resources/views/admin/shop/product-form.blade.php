@@ -463,7 +463,7 @@
                                     @foreach ($collectableEvents as $event)
                                         <option value="{{ $event->id }}"
                                                 @selected((int) old('collection_event_id', $product->collection_event_id) === $event->id)>
-                                            {{ $event->title }} &middot; {{ $event->starts_at?->format('d M Y') }}@if (filled($event->location)) &middot; {{ $event->location }}@endif
+                                            {{ $event->title }} &middot; {{ \App\Support\LocalTime::dateWallClock($event->starts_at, '') }}@if (filled($event->location)) &middot; {{ $event->location }}@endif
                                         </option>
                                     @endforeach
                                 </select>

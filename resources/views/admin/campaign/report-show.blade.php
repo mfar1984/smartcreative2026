@@ -26,7 +26,7 @@
 
     <x-admin.page-card
         :title="$campaign->name"
-        :description="$campaign->channelLabel() . ' · ' . $campaign->audienceLabel() . ' · sent ' . \App\Support\LocalTime::format($campaign->started_at, \App\Support\LocalTime::DATE_TIME, 'unknown')"
+        :description="$campaign->channelLabel() . ' · ' . $campaign->audienceLabel() . ' · sent ' . \App\Support\LocalTime::format($campaign->started_at, \App\Support\LocalTime::chosenDateTimeFormat(), 'unknown')"
         :back="route('admin.campaigns.reports')">
 
         <x-slot:actions>

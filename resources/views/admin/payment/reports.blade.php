@@ -127,7 +127,7 @@
                             @foreach ($days as $day)
                                 <tr class="hover:bg-gray-50">
                                     <td class="px-5 py-3 whitespace-nowrap text-gray-900">
-                                        {{ \Illuminate\Support\Carbon::parse($day['date'])->format('d M Y') }}
+                                        {{ \App\Support\LocalTime::dateWallClock(\Illuminate\Support\Carbon::parse($day['date'])) }}
                                     </td>
                                     <td class="px-5 py-3 text-right tabular-nums text-gray-600">{{ $day['count'] }}</td>
                                     <td class="px-5 py-3 text-right tabular-nums font-semibold text-green-700">{{ PaymentFigures::money($day['total']) }}</td>

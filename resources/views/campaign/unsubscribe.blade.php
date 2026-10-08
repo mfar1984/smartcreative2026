@@ -27,7 +27,7 @@
                 <p class="text-sm text-gray-600">
                     We stopped sending marketing messages to
                     <strong class="break-all">{{ $contact?->email ?: $contact?->phone }}</strong>
-                    on {{ \App\Support\LocalTime::format($contact?->unsubscribed_at, 'd M Y', '') }}. There is nothing more to do.
+                    on {{ \App\Support\LocalTime::date($contact?->unsubscribed_at, '') }}. There is nothing more to do.
                 </p>
             @else
                 <h1 class="text-lg font-bold text-gray-900 mb-2">Stop receiving these messages?</h1>

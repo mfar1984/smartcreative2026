@@ -177,7 +177,7 @@
 
                                         @if ($order->shipped_at)
                                             <span class="block text-xs text-gray-400">
-                                                Sent {{ \App\Support\LocalTime::format($order->shipped_at, 'd M Y') }}
+                                                Sent {{ \App\Support\LocalTime::date($order->shipped_at) }}
                                             </span>
                                         @endif
 
@@ -194,7 +194,7 @@
                                         @if ($order->isReceiptConfirmed())
                                             <x-admin.badge tone="green" :dot="true">Confirmed</x-admin.badge>
                                             <span class="block text-xs text-gray-400 mt-1">
-                                                {{ \App\Support\LocalTime::format($order->received_confirmed_at, 'd M Y') }}
+                                                {{ \App\Support\LocalTime::date($order->received_confirmed_at) }}
                                             </span>
                                         @else
                                             <x-admin.badge tone="gray">Not yet</x-admin.badge>

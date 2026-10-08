@@ -78,7 +78,7 @@
                         <tr class="hover:bg-green-50/40">
                             <td class="px-5 py-3 whitespace-nowrap">
                                 <span class="font-semibold text-gray-900">
-                                    {{ \Illuminate\Support\Carbon::parse($day['date'])->format('d M Y') }}
+                                    {{ \App\Support\LocalTime::dateWallClock(\Illuminate\Support\Carbon::parse($day['date'])) }}
                                 </span>
                                 <span class="block text-xs text-gray-400">
                                     {{ \Illuminate\Support\Carbon::parse($day['date'])->format('l') }}

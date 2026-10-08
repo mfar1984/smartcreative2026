@@ -156,7 +156,7 @@
             <p class="muted">
                 {{ $total }} slip{{ $total === 1 ? '' : 's' }}
                 @if ($event->ends_at)
-                    &middot; valid until {{ $event->ends_at->format('d M Y') }}
+                    &middot; valid until {{ \App\Support\LocalTime::dateWallClock($event->ends_at) }}
                 @endif
             </p>
         </div>

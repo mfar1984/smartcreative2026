@@ -32,7 +32,7 @@ class IssuedCode
         return sprintf(
             'Code texted to %s. It can be used until %s. The gateway reports: %s.',
             $this->sms->destination,
-            LocalTime::format($this->verification->expires_at, 'g:i a'),
+            LocalTime::time($this->verification->expires_at),
             $this->sms->description,
         );
     }

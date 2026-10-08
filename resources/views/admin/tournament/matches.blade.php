@@ -177,7 +177,7 @@
                                          and stored as written. Converting it would move the
                                          fixture by eight hours. --}}
                                     <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                        {{ $match->scheduled_at?->format('d M, g:i a') ?? '—' }}
+                                        {{ \App\Support\LocalTime::formatWallClock($match->scheduled_at) }}
                                     </td>
 
                                     <td class="px-5 py-3 text-center whitespace-nowrap">

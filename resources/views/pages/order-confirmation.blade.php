@@ -216,7 +216,7 @@
                             {{-- ->format() directly, not through LocalTime: this is entered
                                  through a datetime-local input and stored as wall-clock, so
                                  converting it would shift it by a further eight hours. --}}
-                            <p>{{ $order->collection_at->format('d M Y, g:i a') }}</p>
+                            <p>{{ \App\Support\LocalTime::formatWallClock($order->collection_at) }}</p>
                         @endif
 
                         <p class="mt-2 text-sm text-gray-500">

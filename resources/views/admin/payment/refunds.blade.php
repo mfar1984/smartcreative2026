@@ -98,7 +98,7 @@
                             </td>
 
                             <td class="px-5 py-3 whitespace-nowrap text-xs text-gray-500">
-                                {{ \App\Support\LocalTime::format($registration->updated_at, \App\Support\LocalTime::DATE_TIME, '') }}
+                                {{ \App\Support\LocalTime::format($registration->updated_at, \App\Support\LocalTime::chosenDateTimeFormat(), '') }}
                             </td>
                         </tr>
                     @empty

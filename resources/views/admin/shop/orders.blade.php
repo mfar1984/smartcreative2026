@@ -226,7 +226,7 @@
                                         {{-- ->format() directly, not through LocalTime: typed
                                              into a datetime-local input and stored as written. --}}
                                         <span class="block text-xs text-gray-500">
-                                            {{ $order->collection_at->format('d M Y, g:i a') }}
+                                            {{ \App\Support\LocalTime::formatWallClock($order->collection_at) }}
                                         </span>
                                     @endif
                                 @else
@@ -263,8 +263,8 @@
                             </td>
 
                             <td class="px-5 py-3 whitespace-nowrap text-gray-600">
-                                {{ \App\Support\LocalTime::format($order->created_at, 'd M Y') }}
-                                <span class="block text-xs text-gray-400">{{ \App\Support\LocalTime::format($order->created_at, 'g:i a') }}</span>
+                                {{ \App\Support\LocalTime::date($order->created_at) }}
+                                <span class="block text-xs text-gray-400">{{ \App\Support\LocalTime::time($order->created_at) }}</span>
                             </td>
 
                             @if ($isOffline)
@@ -288,7 +288,7 @@
                                     @if ($order->isCollected())
                                         <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-green-700">
                                             <x-admin.icon name="check" class="w-3.5 h-3.5" />
-                                            Collected {{ \App\Support\LocalTime::format($order->delivered_at, 'd M Y', '') }}
+                                            Collected {{ \App\Support\LocalTime::date($order->delivered_at, '') }}
                                         </span>
 
                                         {{-- Said out loud on the row, not buried in the

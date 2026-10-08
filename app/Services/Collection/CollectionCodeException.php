@@ -33,7 +33,7 @@ class CollectionCodeException extends RuntimeException
             sprintf('A code was sent less than %d minutes ago.', $minutes),
             sprintf(
                 'A code was already texted for this collection. Another can be sent from %s. Use the override below if the first one never arrived.',
-                LocalTime::format($retryAt, 'g:i a'),
+                LocalTime::time($retryAt),
             ),
             $retryAt,
         );

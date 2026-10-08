@@ -282,7 +282,7 @@
                                     <div>
                                         <dt class="text-xs text-blue-800">When</dt>
                                         <dd class="font-semibold text-blue-900">
-                                            {{ $point['at']->format('l, d F Y') }} at {{ $point['at']->format('g:i a') }}
+                                            {{ $point['at']->format('l') }}, {{ \App\Support\LocalTime::dateWallClock($point['at']) }} at {{ \App\Support\LocalTime::timeWallClock($point['at']) }}
                                         </dd>
                                     </div>
                                 @endif

@@ -144,9 +144,9 @@
                             <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Registration</p>
                             <h2 class="text-xl font-bold text-gray-900 mt-0.5">{{ $event->title }}</h2>
                             <p class="text-sm text-gray-600 mt-1">
-                                {{ $event->starts_at->format('d M Y') }}
+                                {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
                                 @unless ($event->starts_at->isSameDay($event->ends_at))
-                                    &ndash; {{ $event->ends_at->format('d M Y') }}
+                                    &ndash; {{ \App\Support\LocalTime::dateWallClock($event->ends_at) }}
                                 @endunless
                                 &middot; {{ $event->location }}
                             </p>

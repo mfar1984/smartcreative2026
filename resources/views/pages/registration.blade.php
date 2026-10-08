@@ -275,9 +275,9 @@
                                 Register for {{ $event->title }}
                             </h2>
                             <p class="text-xs text-gray-500 mt-0.5">
-                                {{ $event->starts_at->format('d M Y') }}
+                                {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
                                 @unless ($event->starts_at->isSameDay($event->ends_at))
-                                    &ndash; {{ $event->ends_at->format('d M Y') }}
+                                    &ndash; {{ \App\Support\LocalTime::dateWallClock($event->ends_at) }}
                                 @endunless
                                 &middot; {{ $event->location }}
                                 &middot; {{ $event->feeLabel() }}@unless ($event->isFree()) {{ $event->feeBasisLabel() }} @endunless

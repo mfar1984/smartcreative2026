@@ -161,7 +161,7 @@
                                             <p class="text-sm text-gray-500 mt-1">
                                                 {{ $event->title }}
                                                 @if ($event->starts_at)
-                                                    &middot; {{ $event->starts_at->format('d M Y') }}
+                                                    &middot; {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
                                                 @endif
                                             </p>
                                         @endif
@@ -170,7 +170,7 @@
                                     <div class="text-right shrink-0">
                                         <span class="block text-xs text-gray-400">Published</span>
                                         <span class="block text-sm font-semibold text-gray-600">
-                                            {{ \App\Support\LocalTime::format($tournament?->published_at, 'd M Y') }}
+                                            {{ \App\Support\LocalTime::date($tournament?->published_at) }}
                                         </span>
                                     </div>
                                 </div>

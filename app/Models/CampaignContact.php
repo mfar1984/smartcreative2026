@@ -89,7 +89,7 @@ class CampaignContact extends Model
     public function suppressionReason(): ?string
     {
         if ($this->unsubscribed_at !== null) {
-            return 'Unsubscribed ' . LocalTime::format($this->unsubscribed_at, 'd M Y');
+            return 'Unsubscribed ' . LocalTime::date($this->unsubscribed_at);
         }
 
         if ($this->bounced_at !== null) {
@@ -97,7 +97,7 @@ class CampaignContact extends Model
         }
 
         if ($this->complained_at !== null) {
-            return 'Marked as a complaint ' . LocalTime::format($this->complained_at, 'd M Y');
+            return 'Marked as a complaint ' . LocalTime::date($this->complained_at);
         }
 
         return null;

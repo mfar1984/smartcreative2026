@@ -59,7 +59,7 @@
         {{-- Said plainly rather than buried in small print. Somebody who knows the login
              dies tonight will not spend tomorrow morning wondering why it stopped. --}}
         <p style="margin:24px 0 0;padding:12px 16px;background-color:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:13px;line-height:1.6;color:#92400e;">
-            This login stops working after {{ $credential->expires_on->format('d M Y') }}.
+            This login stops working after {{ \App\Support\LocalTime::dateWallClock($credential->expires_on) }}.
             It is only for the event, so there is no need to keep it afterwards.
         </p>
 
