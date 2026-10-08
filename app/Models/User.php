@@ -25,6 +25,7 @@ class User extends Authenticatable
         'password',
         'role_id',
         'is_active',
+        'is_handler',
     ];
 
     /**
@@ -48,6 +49,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'is_handler' => 'boolean',
             'last_login_at' => 'datetime',
         ];
     }
@@ -55,6 +57,18 @@ class User extends Authenticatable
     public function role(): BelongsTo
     {
         return $this->belongsTo(Role::class);
+    }
+
+    /**
+     * Whether this user is a tournament handler.
+     *
+     * A handler is a users row carrying the handler role with this flag set. The
+     * flag is what the post-login landing and a later Handler Management screen
+     * ask, so neither has to read role logic to tell a handler apart.
+     */
+    public function isHandler(): bool
+    {
+        return $this->is_handler === true;
     }
 
     /**

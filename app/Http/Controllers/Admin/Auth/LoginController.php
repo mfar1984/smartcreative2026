@@ -54,7 +54,16 @@ class LoginController extends Controller
 
         AdminLogger::activity('auth.login', 'Signed in to the admin area.');
 
-        return redirect()->intended(route('admin.dashboard'));
+        // A handler holds only the Tournament permissions, so the dashboard would
+        // open near-empty for them. Land them on the tournaments list instead, the
+        // one screen their navigation leads with. Every other role keeps landing on
+        // the dashboard exactly as before. Branched here because this is the single
+        // place the post-login destination is chosen.
+        $landing = $user->isHandler()
+            ? route('admin.tournaments.index')
+            : route('admin.dashboard');
+
+        return redirect()->intended($landing);
     }
 
     public function destroy(Request $request)

@@ -519,6 +519,38 @@ class RolesAndPermissionsSeeder extends Seeder
             ],
         ],
 
+        /*
+        | Runs the tournaments assigned to them. Logs in at the same /admin/login
+        | and, once in, the navigation shows the Tournament group and nothing else.
+        |
+        | Wider than a referee: a handler can generate the draw and publish a
+        | podium, and reads Point Rules and the Hall of Fame. Still cannot create a
+        | tournament, edit a point rule, or touch tournament settings — those stay
+        | with the administrator, because they are decisions that affect every
+        | tournament rather than the running of one.
+        |
+        | A system role, so is_protected is true the same way the others are: it is
+        | what the login path depends on, and it must not be deleted by accident.
+        */
+        'handler' => [
+            'name' => 'Tournament Handler',
+            'description' => 'Runs the tournaments assigned to them.',
+            'is_protected' => true,
+            'permissions' => [
+                'admin.access',
+                'dashboard.view',
+                'tournaments.view',
+                'tournaments.matches.view',
+                'tournaments.matches.score',
+                'tournaments.matches.generate',
+                'tournaments.standings.view',
+                'tournaments.standings.export',
+                'tournaments.rules.view',
+                'tournaments.halloffame.view',
+                'tournaments.halloffame.publish',
+            ],
+        ],
+
         'viewer' => [
             'name' => 'Viewer',
             'description' => 'Read only access to the admin area.',
