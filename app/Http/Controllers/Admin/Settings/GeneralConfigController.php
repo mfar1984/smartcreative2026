@@ -73,6 +73,8 @@ class GeneralConfigController extends Controller
             'maintenance' => $this->maintenanceValues(),
             'backup' => $this->backupOverview(),
             'timezones' => \DateTimeZone::listIdentifiers(),
+            'dateFormats' => array_keys(GeneralSettings::DATE_FORMATS),
+            'timeFormats' => array_keys(GeneralSettings::TIME_FORMATS),
             'branding' => $this->brandingCards(),
             'canUpdateGeneral' => $request->user()->hasPermission('settings.general.update'),
             'canUpdateMaintenance' => $request->user()->hasPermission('settings.maintenance.update'),

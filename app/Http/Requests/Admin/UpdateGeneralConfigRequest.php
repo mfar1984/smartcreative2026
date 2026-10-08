@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Support\GeneralSettings;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateGeneralConfigRequest extends FormRequest
 {
@@ -26,6 +28,16 @@ class UpdateGeneralConfigRequest extends FormRequest
             'registration_no' => ['nullable', 'string', 'max:100'],
             'address' => ['nullable', 'string', 'max:500'],
             'timezone' => ['required', 'string', 'timezone'],
+
+            /*
+             | Display formats. Blank is allowed and means "use the current default",
+             | so an installation that never touches these keeps today's appearance.
+             | Only a key from the fixed list is accepted: the controller stores the
+             | key, and GeneralSettings maps it to the real date() string, so an
+             | arbitrary format string from the request can never reach the formatter.
+             */
+            'date_format' => ['nullable', 'string', Rule::in(array_keys(GeneralSettings::DATE_FORMATS))],
+            'time_format' => ['nullable', 'string', Rule::in(array_keys(GeneralSettings::TIME_FORMATS))],
 
             /*
              | Branding uploads. Every one is optional: saving the form without

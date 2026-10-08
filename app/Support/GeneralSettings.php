@@ -26,6 +26,63 @@ final class GeneralSettings
     private const GROUP = 'general';
 
     /**
+     * The six time formats the owner may choose, stored key => PHP date() string.
+     *
+     * The key is a stable identifier saved to the settings row; the sample shown in
+     * the dropdown lives in the view. Only a key from this list is ever stored, and
+     * only the string on the right is ever handed to date(), so a request can never
+     * push an arbitrary format string through to the formatter.
+     *
+     * The first two are the owner's unusual request — 24-hour hour with an AM/PM
+     * suffix — kept literally as asked. 'A' is uppercase AM/PM, 'a' is lowercase.
+     *
+     * @var array<string, string>
+     */
+    public const TIME_FORMATS = [
+        '13:00 PM' => 'H:i A',
+        '13:00:00 PM' => 'H:i:s A',
+        '1:00:00 PM' => 'g:i:s A',
+        '1:00 PM' => 'g:i A',
+        '13:00' => 'H:i',
+        '13:00:00' => 'H:i:s',
+    ];
+
+    /**
+     * The nine date formats the owner may choose, stored key => PHP date() string.
+     *
+     * Same contract as TIME_FORMATS: the key is stored, the value is the only thing
+     * ever handed to date().
+     *
+     * @var array<string, string>
+     */
+    public const DATE_FORMATS = [
+        '13 September 2026' => 'j F Y',
+        '13 Sep 2026' => 'j M Y',
+        '13-Sep-2026' => 'j-M-Y',
+        '13-Sep-26' => 'j-M-y',
+        '13/09/2026' => 'd/m/Y',
+        '13-09-2026' => 'd-m-Y',
+        '13-09-26' => 'd-m-y',
+        '13.09.2026' => 'd.m.Y',
+        '13.09.26' => 'd.m.y',
+    ];
+
+    /**
+     * The format strings used when nothing has been chosen.
+     *
+     * These are LocalTime's historical literals — date 'd M Y' and time 'g:i a' —
+     * so an installation with an empty settings table formats exactly as it did
+     * before this screen gained the two fields. None of the dropdown choices maps
+     * to these strings exactly: the closest date choice is 'j M Y' (leading-zero
+     * difference, d vs j) and the closest time choice is 'g:i A' (uppercase AM/PM).
+     * The fallback is kept as the literals rather than a dropdown choice precisely
+     * so first-deploy output does not move.
+     */
+    public const DEFAULT_DATE_FORMAT = 'd M Y';
+
+    public const DEFAULT_TIME_FORMAT = 'g:i a';
+
+    /**
      * Key => the value used when nothing has been saved.
      *
      * These are the literals the public site carried before it read anything, so an
@@ -112,6 +169,13 @@ final class GeneralSettings
             $values[$key] = (string) self::get($key);
         }
 
+        // The two display-format keys are deliberately kept out of DEFAULTS: their
+        // "not chosen" state is an empty <select> that means "use the historical
+        // default", not a company fact that renders to a visitor. The form still
+        // needs their stored key (or '' for not chosen) to pre-select the dropdown.
+        $values['date_format'] = self::dateFormatKey();
+        $values['time_format'] = self::timeFormatKey();
+
         return $values;
     }
 
@@ -193,6 +257,48 @@ final class GeneralSettings
         }
 
         return self::$timezone = $zone;
+    }
+
+    /**
+     * The stored date_format key, or '' when nothing valid is chosen.
+     *
+     * Only a key present in DATE_FORMATS counts as chosen; anything else (blank, or
+     * a stray value edited in by another tool) is treated as "not chosen" so the
+     * caller falls back to the historical literal rather than to garbage.
+     */
+    public static function dateFormatKey(): string
+    {
+        $key = (string) (self::all()['date_format'] ?? '');
+
+        return array_key_exists($key, self::DATE_FORMATS) ? $key : '';
+    }
+
+    /** The stored time_format key, or '' when nothing valid is chosen. */
+    public static function timeFormatKey(): string
+    {
+        $key = (string) (self::all()['time_format'] ?? '');
+
+        return array_key_exists($key, self::TIME_FORMATS) ? $key : '';
+    }
+
+    /**
+     * The PHP date() string for the chosen date format, or the historical literal.
+     *
+     * Read off the memoised group, so this is not a database read per row.
+     */
+    public static function dateFormat(): string
+    {
+        $key = self::dateFormatKey();
+
+        return $key === '' ? self::DEFAULT_DATE_FORMAT : self::DATE_FORMATS[$key];
+    }
+
+    /** The PHP date() string for the chosen time format, or the historical literal. */
+    public static function timeFormat(): string
+    {
+        $key = self::timeFormatKey();
+
+        return $key === '' ? self::DEFAULT_TIME_FORMAT : self::TIME_FORMATS[$key];
     }
 
     /* ---------------------------------------------------------------------

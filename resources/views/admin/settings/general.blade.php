@@ -193,6 +193,24 @@
                             @endforeach
                         </select>
                     </x-admin.field-row>
+
+                    <x-admin.field-row label="Date Format" help="How dates are shown across the site. Leave on the default to keep the current look." for="date_format" error="date_format">
+                        <select id="date_format" name="date_format" @disabled(! $canUpdateGeneral) class="{{ $input }} bg-white">
+                            <option value="" @selected(old('date_format', $general['date_format']) === '')>Use current default (13 Oct 2026)</option>
+                            @foreach ($dateFormats as $sample)
+                                <option value="{{ $sample }}" @selected(old('date_format', $general['date_format']) === $sample)>{{ $sample }}</option>
+                            @endforeach
+                        </select>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Time Format" help="How times are shown across the site. Leave on the default to keep the current look." for="time_format" error="time_format">
+                        <select id="time_format" name="time_format" @disabled(! $canUpdateGeneral) class="{{ $input }} bg-white">
+                            <option value="" @selected(old('time_format', $general['time_format']) === '')>Use current default (1:00 pm)</option>
+                            @foreach ($timeFormats as $sample)
+                                <option value="{{ $sample }}" @selected(old('time_format', $general['time_format']) === $sample)>{{ $sample }}</option>
+                            @endforeach
+                        </select>
+                    </x-admin.field-row>
                 </x-admin.panel>
 
                 <div class="flex items-center justify-between gap-4 bg-white rounded-lg border border-gray-200 px-5 py-4 mt-5">
