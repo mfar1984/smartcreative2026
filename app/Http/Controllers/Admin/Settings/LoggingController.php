@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ActivityLog;
 use App\Models\AuditLog;
 use App\Services\AdminLogger;
+use App\Support\LocalTime;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -85,10 +86,46 @@ class LoggingController extends Controller
         }
 
         try {
+            // Normalised to a bare Y-m-d. The day it names is a local day; which
+            // UTC instants that day covers is decided later, in the display zone,
+            // not here. A malformed value is rejected so a bad string cannot widen
+            // the range to something nobody asked for.
             return Carbon::parse($value)->toDateString();
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * The UTC instant a local 'from' day begins at.
+     *
+     * The user picks a date on the office clock (App\Support\LocalTime::zone()),
+     * but created_at is stored in UTC. So 'from' means the start of that day in
+     * the display zone, converted to the UTC instant the column is compared on.
+     */
+    private function fromInstant(?string $date): ?Carbon
+    {
+        if ($date === null) {
+            return null;
+        }
+
+        return Carbon::parse($date, LocalTime::zone())->startOfDay()->utc();
+    }
+
+    /**
+     * The UTC instant a local 'to' day ends at.
+     *
+     * End of that day in the display zone, converted to UTC, so an inclusive
+     * range catches an entry made at any point of the local day — including one
+     * written near local midnight that lands on a different UTC calendar day.
+     */
+    private function toInstant(?string $date): ?Carbon
+    {
+        if ($date === null) {
+            return null;
+        }
+
+        return Carbon::parse($date, LocalTime::zone())->endOfDay()->utc();
     }
 
     /**
@@ -103,11 +140,11 @@ class LoggingController extends Controller
                     ->orWhere('actor_label', 'like', "%{$term}%")
                     ->orWhere('ip_address', 'like', "%{$term}%");
             }))
-            ->when($applyLevel && $filters['level'], fn ($query, $level) => $query->where('level', $level))
+            ->when($applyLevel ? $filters['level'] : null, fn ($query, $level) => $query->where('level', $level))
             ->when($filters['category'], fn ($query, $category) => $query->where('category', $category))
             ->when($filters['actor'], fn ($query, $actor) => $query->where('actor_label', $actor))
-            ->when($filters['from'], fn ($query, $from) => $query->whereDate('created_at', '>=', $from))
-            ->when($filters['to'], fn ($query, $to) => $query->whereDate('created_at', '<=', $to))
+            ->when($this->fromInstant($filters['from']), fn ($query, $from) => $query->where('created_at', '>=', $from))
+            ->when($this->toInstant($filters['to']), fn ($query, $to) => $query->where('created_at', '<=', $to))
             ->latest('created_at');
     }
 
@@ -123,10 +160,10 @@ class LoggingController extends Controller
                     ->orWhere('actor_label', 'like', "%{$term}%")
                     ->orWhere('ip_address', 'like', "%{$term}%");
             }))
-            ->when($applyEvent && $filters['event'], fn ($query, $event) => $query->where('event', $event))
+            ->when($applyEvent ? $filters['event'] : null, fn ($query, $event) => $query->where('event', $event))
             ->when($filters['actor'], fn ($query, $actor) => $query->where('actor_label', $actor))
-            ->when($filters['from'], fn ($query, $from) => $query->whereDate('created_at', '>=', $from))
-            ->when($filters['to'], fn ($query, $to) => $query->whereDate('created_at', '<=', $to))
+            ->when($this->fromInstant($filters['from']), fn ($query, $from) => $query->where('created_at', '>=', $from))
+            ->when($this->toInstant($filters['to']), fn ($query, $to) => $query->where('created_at', '<=', $to))
             ->latest('created_at');
     }
 
