@@ -24,7 +24,7 @@ class UserController extends Controller
         $roleId = is_numeric($roleId) ? (int) $roleId : null;
 
         $users = User::query()
-            ->with('role:id,name,slug')
+            ->with('role:id,name,slug,is_active')
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('name', 'like', "%{$search}%")
