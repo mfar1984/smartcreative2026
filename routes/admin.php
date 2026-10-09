@@ -64,8 +64,10 @@ Route::prefix('admin')->name('admin.')->group(function () {
         ->name('logout');
 
     // Everything below requires an authenticated account that still holds
-    // admin access, plus the specific permission for that screen.
-    Route::middleware(['auth', 'admin'])->group(function () {
+    // admin access, plus the specific permission for that screen. session.timeout
+    // runs after admin so the user is resolved before the inactivity check reads
+    // the session.
+    Route::middleware(['auth', 'admin', 'session.timeout'])->group(function () {
 
         Route::get('/', DashboardController::class)
             ->middleware('permission:dashboard.view')
@@ -959,6 +961,9 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::put('maintenance', [GeneralConfigController::class, 'updateMaintenance'])
                 ->middleware('permission:settings.maintenance.update')
                 ->name('maintenance.update');
+            Route::put('security', [GeneralConfigController::class, 'updateSecurity'])
+                ->middleware('permission:settings.security.update')
+                ->name('security.update');
 
             // Integration - tabs: Email, API & Webhook, Payments, SMS, Telegram
             Route::get('integration', [IntegrationController::class, 'index'])
