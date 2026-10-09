@@ -1121,9 +1121,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:roles.delete')
                 ->name('roles.destroy');
 
-            // User Management
+            /*
+             | User Management - tabs: Users, Handler
+             |
+             | One screen, two lists, two sets of permissions. The index takes
+             | either, because the screen draws only the tabs the role holds; the
+             | write endpoints take one each, so handler management can be granted
+             | without administrator management.
+             */
             Route::get('users', [UserController::class, 'index'])
-                ->middleware('permission:users.view')
+                ->middleware('permission:users.view|handlers.view')
                 ->name('users');
             Route::post('users', [UserController::class, 'store'])
                 ->middleware('permission:users.create')
@@ -1134,6 +1141,18 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::delete('users/{user}', [UserController::class, 'destroy'])
                 ->middleware('permission:users.delete')
                 ->name('users.destroy');
+
+            // Handler accounts. Assignment to a tournament stays on the
+            // tournament's own form; these only manage the accounts.
+            Route::post('users/handlers', [UserController::class, 'storeHandler'])
+                ->middleware('permission:handlers.create')
+                ->name('users.handlers.store');
+            Route::put('users/handlers/{user}', [UserController::class, 'updateHandler'])
+                ->middleware('permission:handlers.update')
+                ->name('users.handlers.update');
+            Route::delete('users/handlers/{user}', [UserController::class, 'destroyHandler'])
+                ->middleware('permission:handlers.delete')
+                ->name('users.handlers.destroy');
 
             // Logging - tabs: Activity Log, Audit Log
             Route::get('logging', [LoggingController::class, 'index'])

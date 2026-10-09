@@ -14,6 +14,12 @@ class Role extends Model
      */
     public const SUPER_ADMIN = 'super-admin';
 
+    /**
+     * The tournament handler role. A system role, so the slug is fixed: the
+     * Handler tab assigns it server side and never reads one from a form.
+     */
+    public const HANDLER = 'handler';
+
     protected $fillable = [
         'slug',
         'name',

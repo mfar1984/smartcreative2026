@@ -14,8 +14,13 @@ class EnsurePermission
      *
      * Usage: ->middleware('permission:users.view')
      *        ->middleware('permission:users.create,users.update')
+     *        ->middleware('permission:users.view|handlers.view')
      *
-     * All listed permissions must be held.
+     * Every comma separated permission must be held. A pipe inside one of them
+     * means any one of that set is enough, which is what a screen whose tabs sit
+     * behind different permissions needs: User Management opens for a role that
+     * may read either list, and the screen itself draws only the tabs that role
+     * holds.
      */
     public function handle(Request $request, Closure $next, string ...$permissions): Response
     {
@@ -26,11 +31,17 @@ class EnsurePermission
         }
 
         foreach ($permissions as $permission) {
-            if (! $user->hasPermission($permission)) {
-                throw new AccessDeniedHttpException(
-                    sprintf('Missing the "%s" permission.', $permission)
-                );
+            $alternatives = explode('|', $permission);
+
+            foreach ($alternatives as $alternative) {
+                if ($user->hasPermission($alternative)) {
+                    continue 2;
+                }
             }
+
+            throw new AccessDeniedHttpException(
+                sprintf('Missing the "%s" permission.', implode('" or "', $alternatives))
+            );
         }
 
         return $next($request);

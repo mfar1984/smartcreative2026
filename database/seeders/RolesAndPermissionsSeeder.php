@@ -364,6 +364,25 @@ class RolesAndPermissionsSeeder extends Seeder
                 'update' => ['users.update', 'Update users'],
                 'delete' => ['users.delete', 'Delete users'],
             ],
+            /*
+            | The Handler tab on the same screen: the accounts that run a
+            | tournament on the day.
+            |
+            | Its own four slugs rather than reusing users.*, and that separation
+            | is the point. Somebody trusted to open an account for the referee at
+            | the desk has no business editing an administrator, and the two lists
+            | are kept apart in the controller for the same reason.
+            |
+            | Granted to no role here, which leaves it with super admin only. A
+            | handler must not manage handlers, so the handler role deliberately
+            | holds none of these.
+            */
+            'Handler' => [
+                'view' => ['handlers.view', 'View handler accounts'],
+                'create' => ['handlers.create', 'Create handler accounts'],
+                'update' => ['handlers.update', 'Update handler accounts'],
+                'delete' => ['handlers.delete', 'Delete handler accounts'],
+            ],
         ],
 
         'Logging' => [
