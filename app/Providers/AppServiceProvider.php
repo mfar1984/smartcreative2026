@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\Backup\DatabaseDumper;
+use App\Services\Backup\MysqlDumper;
 use App\Support\MailSettings;
 use App\Support\SecuritySettings;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -40,7 +42,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        /*
+         | The database dump, behind an interface with one implementation.
+         |
+         | Not an abstraction for its own sake: the test database is sqlite in
+         | memory, which mysqldump cannot read, so the tests bind a fake here and
+         | assert on the archive instead. Resolved lazily, so a request that takes
+         | no backup never builds it.
+         */
+        $this->app->bind(DatabaseDumper::class, fn () => MysqlDumper::forDefaultConnection());
     }
 
     /**

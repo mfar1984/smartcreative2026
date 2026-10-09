@@ -530,18 +530,35 @@
                     </p>
                 </x-admin.panel>
             @else
+                {{-- Taking a backup is live. Reading one back is not, and will not be
+                     until it has its own confirmation path: a restore overwrites data
+                     that cannot be recovered afterwards. --}}
+                <div role="note" class="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-4 mb-5">
+                    <svg class="w-5 h-5 shrink-0 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <div class="text-sm text-blue-800">
+                        <p class="font-semibold mb-1">Backups run. Restore comes later.</p>
+                        <p>
+                            Each archive holds the whole database and everything uploaded. An automatic
+                            backup is taken daily at {{ $backup['daily_at'] }}
+                            ({{ \App\Support\LocalTime::zone() }}) and the newest {{ $backup['keep'] }} are kept;
+                            backups you take by hand are never removed automatically. Reading an archive
+                            back overwrites live data and cannot be undone, so it is deliberately not a
+                            button here yet.
+                        </p>
+                    </div>
+                </div>
+
                 <div role="alert" class="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4 mb-5">
                     <svg class="w-5 h-5 shrink-0 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                     </svg>
-                    <div class="text-sm text-amber-800">
-                        <p class="font-semibold mb-1">Backup and restore actions are not enabled yet.</p>
-                        <p>
-                            A restore overwrites live data and cannot be undone, so it needs an agreed
-                            strategy before being switched on. This tab currently shows the database
-                            status and any backup files already on disk.
-                        </p>
-                    </div>
+                    <p class="text-sm text-amber-800">
+                        An archive carries every participant's identity card number and every password
+                        hash. It is kept outside the website's reach and can only be fetched through the
+                        button below, which records who did it. Treat a downloaded copy the same way.
+                    </p>
                 </div>
 
                 <x-admin.panel title="Database" icon="database">
@@ -558,10 +575,35 @@
                     @endforeach
                 </x-admin.panel>
 
+                {{-- Back up now. A POST of its own, outside any other form, and it
+                     only queues the work: zipping the uploads folder takes longer
+                     than a web request may live, so the cron worker does it and the
+                     archive turns up in the list below. --}}
                 <x-admin.panel title="Backup Files" icon="archive" :flush="true">
+                    @if ($canCreateBackup)
+                        <x-slot:actions>
+                            <form action="{{ route('admin.settings.backup.run') }}" method="POST"
+                                  onsubmit="return confirm('Take a backup now?\n\nIt runs in the background and appears in this list within a few minutes.');">
+                                @csrf
+                                <button type="submit"
+                                        class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 transition">
+                                    <x-admin.icon name="database" class="w-4 h-4" />
+                                    Back up now
+                                </button>
+                            </form>
+                        </x-slot:actions>
+                    @endif
+
+                    @if ($backup['pending'])
+                        <p class="px-5 py-3 text-xs text-blue-800 bg-blue-50 border-b border-blue-200">
+                            A backup is queued. It will appear here within a few minutes, once the
+                            background worker has picked it up.
+                        </p>
+                    @endif
+
                     @if (count($backup['files']) === 0)
                         <p class="px-5 py-10 text-sm text-gray-500 text-center">
-                            No backup files found in <code class="text-xs">{{ $backup['path'] }}</code>.
+                            No backups yet. Nothing has been written to <code class="text-xs">{{ $backup['path'] }}</code>.
                         </p>
                     @else
                         <div class="overflow-x-auto">
@@ -569,20 +611,71 @@
                                 <thead class="bg-gray-50 text-left">
                                     <tr>
                                         <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">File</th>
-                                        <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Size</th>
+                                        <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Type</th>
                                         <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Created</th>
+                                        <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Size</th>
+                                        <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Dump</th>
+                                        @if ($canDownloadBackup || $canDeleteBackup)
+                                            <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Actions</th>
+                                        @endif
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-100">
                                     @foreach ($backup['files'] as $file)
                                         <tr>
-                                            <td class="px-5 py-3 text-gray-900 break-all">{{ $file['name'] }}</td>
-                                            <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ number_format($file['size'] / 1024, 1) }} KB</td>
-                                            <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ \App\Support\LocalTime::format(\Illuminate\Support\Carbon::createFromTimestamp($file['modified'])) }}</td>
+                                            <td class="px-5 py-3 text-gray-900 break-all font-mono text-xs">{{ $file['name'] }}</td>
+                                            <td class="px-5 py-3 whitespace-nowrap">
+                                                <x-admin.badge :tone="$file['type'] === 'auto' ? 'blue' : 'purple'">
+                                                    {{ $file['type'] === 'auto' ? 'Automatic' : 'Manual' }}
+                                                </x-admin.badge>
+                                            </td>
+                                            <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ \App\Support\LocalTime::format($file['created_at']) }}</td>
+                                            <td class="px-5 py-3 text-gray-600 whitespace-nowrap tabular-nums">{{ \App\Services\Backup\BackupStore::humanBytes($file['bytes']) }}</td>
+                                            <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ $file['method'] ?? '—' }}</td>
+                                            @if ($canDownloadBackup || $canDeleteBackup)
+                                                <td class="px-5 py-3 text-center whitespace-nowrap">
+                                                    <div class="inline-flex items-center gap-0.5">
+                                                        @if ($canDownloadBackup)
+                                                            <a href="{{ route('admin.settings.backup.download', $file['name']) }}"
+                                                               class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 transition"
+                                                               aria-label="Download {{ $file['name'] }}">
+                                                                <x-admin.icon name="archive" class="w-4 h-4" />
+                                                                Download
+                                                            </a>
+                                                        @endif
+
+                                                        @if ($canDeleteBackup)
+                                                            <form action="{{ route('admin.settings.backup.destroy', $file['name']) }}" method="POST"
+                                                                  onsubmit="return confirm('Delete {{ $file['name'] }}?\n\nThis removes the archive from the server. If it is your only copy, it cannot be recovered.');">
+                                                                @csrf
+                                                                @method('DELETE')
+                                                                <button type="submit"
+                                                                        class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition"
+                                                                        aria-label="Delete {{ $file['name'] }}">
+                                                                    <x-admin.icon name="trash" class="w-4 h-4" />
+                                                                    Delete
+                                                                </button>
+                                                            </form>
+                                                        @endif
+                                                    </div>
+                                                </td>
+                                            @endif
                                         </tr>
                                     @endforeach
                                 </tbody>
                             </table>
+                        </div>
+
+                        {{-- The total matters on shared hosting: the account has a disk
+                             quota, and seven full archives add up quietly. --}}
+                        <div class="flex items-center justify-between gap-4 px-5 py-3 bg-gray-50 border-t border-gray-200">
+                            <p class="text-xs text-gray-500">
+                                {{ count($backup['files']) }} {{ count($backup['files']) === 1 ? 'archive' : 'archives' }}
+                                in <code class="text-xs">{{ $backup['path'] }}</code>
+                            </p>
+                            <p class="text-xs font-semibold text-gray-700 tabular-nums">
+                                Total {{ \App\Services\Backup\BackupStore::humanBytes($backup['total_bytes']) }}
+                            </p>
                         </div>
                     @endif
                 </x-admin.panel>

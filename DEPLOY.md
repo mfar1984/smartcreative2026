@@ -233,6 +233,102 @@ tail -20 storage/logs/queue.log
 Jobs in the table do not expire, so messages stranded before the cron existed go out
 on its first run without anyone pressing Send Again.
 
+## Backups
+
+One archive holds the whole database and everything uploaded:
+
+```
+backup-2026-10-09-030000-auto.zip
+  database.sql.gz   the database, dumped consistently and gzipped
+  files/public/     storage/app/public
+  files/private/    storage/app/private, minus the backups folder itself
+  manifest.json     what this archive is: when, which database, row counts per table
+```
+
+They are written to `storage/app/private/backups`, which is outside `public/` and has
+no route serving it, so an archive is never fetchable over HTTP. The folder is
+git-ignored, so one can never be committed. Download them from General Config,
+**Backup & Restore**, which records who did it: an archive carries every
+participant's identity card number and every password hash in the system.
+
+Taking a backup works. **Restoring from one is not built yet**, deliberately.
+
+```bash
+cd ~/public_html
+php artisan backup:run                  # a manual archive, kept until you delete it
+php artisan backup:run --type=auto      # what the scheduler runs, pruned to the last 7
+```
+
+Both print the file name, its size and which method dumped it. Over SSH this needs
+no browser and no sign in, which is the way to take an archive before doing anything
+you are nervous about.
+
+### mysqldump
+
+The dump is taken by `mysqldump`, and the password is never put on its command line:
+on shared hosting every other account can read the process list. It goes into a
+temporary option file at 0600, named with `--defaults-extra-file`, deleted as soon as
+the dump ends.
+
+Cron does not run with the same `PATH` as your shell, so resolve the binary and name
+it absolutely, the same way the queue worker's PHP binary is:
+
+```bash
+command -v mysqldump
+```
+
+On the current deployment that resolved to `/bin/mysqldump`, giving:
+
+```
+BACKUP_MYSQLDUMP=/bin/mysqldump
+```
+
+Run `php artisan config:clear` before editing `.env` and `php artisan config:cache`
+after, for the reason the Caches section above gives: a cached config ignores `.env`
+entirely, so an added line appears to do nothing.
+
+If `mysqldump` cannot be found or cannot run, the backup fails loudly, says why in
+`storage/logs` and in the activity log, and leaves no file behind. A half-written
+archive is worse than none, because it looks like a backup.
+
+### The nightly backup
+
+An automatic backup at 03:00 Malaysian time needs a **second** cron job. The queue
+worker's line does not run the scheduler, and without this line the nightly backup
+never happens — no error, no empty file, nothing to suggest it was expected.
+
+cPanel, **Advanced**, **Cron Jobs**, **Once Per Minute** (`* * * * *`):
+
+```bash
+* * * * * /usr/local/bin/php /home/smartcre/public_html/artisan schedule:run >> /home/smartcre/public_html/storage/logs/schedule.log 2>&1
+```
+
+Once a minute is correct and is not a typo: `schedule:run` wakes up, sees nothing is
+due and exits. Redirecting the output is not optional, for the same reason the queue
+line redirects its own.
+
+Check it took:
+
+```bash
+php artisan schedule:list      # shows backup:run --type=auto and its next run time
+tail -20 storage/logs/backup.log
+```
+
+The hour is read on the display clock from General Config, Timezone, not UTC.
+`config/app.php` is hardcoded to UTC, so a schedule without that conversion would
+fire at 11:00 in Malaysia, in the middle of the working day, with a long read running
+against a live database while people are registering.
+
+The newest 7 automatic archives are kept and older ones are pruned by the same run.
+Archives you take by hand are never pruned.
+
+### A backup on the same server is not a backup
+
+It is on the same disk, in the same account, under the same quota. A host failure, a
+suspension or a mistaken `rm` takes the archives with the site. Download a copy
+regularly and keep it somewhere else. Seven full archives also add up, and the tab
+shows the running total for exactly that reason.
+
 ## Upgrading
 
 ```bash

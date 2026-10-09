@@ -991,6 +991,40 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:settings.security.update')
                 ->name('security.bans.destroy');
 
+            /*
+            | Backups on the Backup & Restore tab. Three permissions rather than one,
+            | because they are three different risks.
+            |
+            | Taking one writes a file. Deleting one throws away a safety net. But
+            | downloading one hands over every participant's identity card number and
+            | every password hash in the system in a single file, which is the most
+            | sensitive act available anywhere in this admin, so it has a permission of
+            | its own and in practice only a super admin holds it.
+            |
+            | Running is a POST and throttled: each press queues a job that reads the
+            | whole database and zips the uploads folder, and a stuck finger on the
+            | button must not queue twenty of them. Deleting is a DELETE, so a prefetch
+            | or a pasted link can never remove an archive.
+            |
+            | The file name is a route parameter, so it is constrained here as well as
+            | resolved against the backups folder in BackupStore: the pattern refuses a
+            | slash outright, which means "../../.env" never reaches the controller.
+            | Nothing is restored by any of these.
+            */
+            Route::post('backup', [GeneralConfigController::class, 'runBackup'])
+                ->middleware(['permission:settings.backup.create', 'throttle:6,1'])
+                ->name('backup.run');
+
+            Route::get('backup/{file}', [GeneralConfigController::class, 'downloadBackup'])
+                ->middleware(['permission:settings.backup.download', 'throttle:20,1'])
+                ->where('file', '[A-Za-z0-9._-]+')
+                ->name('backup.download');
+
+            Route::delete('backup/{file}', [GeneralConfigController::class, 'destroyBackup'])
+                ->middleware('permission:settings.backup.delete')
+                ->where('file', '[A-Za-z0-9._-]+')
+                ->name('backup.destroy');
+
             // Integration - tabs: Email, API & Webhook, Payments, SMS, Telegram
             Route::get('integration', [IntegrationController::class, 'index'])
                 ->middleware('permission:settings.integration.view')

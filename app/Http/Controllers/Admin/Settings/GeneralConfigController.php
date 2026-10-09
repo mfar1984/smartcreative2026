@@ -6,14 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateGeneralConfigRequest;
 use App\Http\Requests\Admin\UpdateMaintenanceRequest;
 use App\Http\Requests\Admin\UpdateSecurityConfigRequest;
+use App\Jobs\RunBackup;
 use App\Models\BannedIp;
 use App\Models\Setting;
 use App\Services\AdminLogger;
+use App\Services\Backup\BackupStore;
 use App\Services\Security\LoginBanService;
 use App\Support\BrandingSettings;
 use App\Support\GeneralSettings;
 use App\Support\SecuritySettings;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
@@ -94,6 +97,9 @@ class GeneralConfigController extends Controller
             'canUpdateSecurity' => $request->user()->hasPermission('settings.security.update'),
             'canUpdateMaintenance' => $request->user()->hasPermission('settings.maintenance.update'),
             'canViewBackup' => $request->user()->hasPermission('settings.backup.view'),
+            'canCreateBackup' => $request->user()->hasPermission('settings.backup.create'),
+            'canDownloadBackup' => $request->user()->hasPermission('settings.backup.download'),
+            'canDeleteBackup' => $request->user()->hasPermission('settings.backup.delete'),
         ]);
     }
 
@@ -359,31 +365,93 @@ class GeneralConfigController extends Controller
     }
 
     /**
-     * Read-only picture of the database and any backup files on disk.
+     * Queue a backup. The job does the work, not this request.
      *
-     * Creating and restoring backups is not wired up: a restore overwrites live
-     * data and needs an explicit decision on strategy first.
+     * Zipping the uploads folder on shared hosting takes longer than a web request
+     * may live, so pressing the button writes a job and returns. The cron worker
+     * picks it up within the minute.
+     */
+    public function runBackup(Request $request)
+    {
+        Cache::put(RunBackup::PENDING_KEY, true, RunBackup::PENDING_TTL);
+
+        RunBackup::dispatch($request->user()->id, $request->user()->logLabel());
+
+        AdminLogger::activity('settings.backup.queue', 'Queued a manual backup.');
+
+        return redirect()
+            ->route('admin.settings.general', ['tab' => 'backup'])
+            ->with('status', 'Backup queued. It will appear in the list here within a few minutes.');
+    }
+
+    /**
+     * Send one archive to the browser.
+     *
+     * The record is written before the file is, and deliberately so: an archive
+     * holds every participant's identity card number and every password hash in
+     * the system, so who asked for it is logged whether or not the transfer
+     * finishes.
+     *
+     * The name goes through BackupStore::resolve(), which refuses anything that is
+     * not an archive sitting in the backups folder. A name that is not one is a 404
+     * rather than an error page naming the path it looked in.
+     */
+    public function downloadBackup(string $file, BackupStore $store)
+    {
+        $path = $store->resolve($file);
+
+        abort_if($path === null, 404);
+
+        $name = basename($path);
+
+        AdminLogger::activity(
+            'settings.backup.download',
+            sprintf('Downloaded the backup %s.', $name),
+            null,
+            null,
+            AdminLogger::LEVEL_WARN,
+        );
+
+        return response()->download($path, $name, [
+            'Content-Type' => 'application/zip',
+        ]);
+    }
+
+    public function destroyBackup(string $file, BackupStore $store)
+    {
+        $path = $store->resolve($file);
+
+        abort_if($path === null, 404);
+
+        $name = basename($path);
+
+        if (! $store->delete($name)) {
+            return redirect()
+                ->route('admin.settings.general', ['tab' => 'backup'])
+                ->with('status', sprintf('%s could not be deleted. Check the folder permissions.', $name));
+        }
+
+        AdminLogger::activity('settings.backup.delete', sprintf('Deleted the backup %s.', $name));
+
+        return redirect()
+            ->route('admin.settings.general', ['tab' => 'backup'])
+            ->with('status', sprintf('%s was deleted.', $name));
+    }
+
+    /**
+     * The database, and the archives held on disk.
+     *
+     * Restoring is not here. Reading an archive back overwrites live data, so it is
+     * separate work with its own confirmation path; the manifest inside each
+     * archive exists so that work can check what it has been handed first.
      *
      * @return array<string, mixed>
      */
     private function backupOverview(): array
     {
         $connection = config('database.default');
-
-        $files = [];
-        $disk = Storage::disk('local');
-
-        if ($disk->exists('backups')) {
-            foreach ($disk->files('backups') as $path) {
-                $files[] = [
-                    'name' => basename($path),
-                    'size' => $disk->size($path),
-                    'modified' => $disk->lastModified($path),
-                ];
-            }
-
-            usort($files, fn (array $a, array $b) => $b['modified'] <=> $a['modified']);
-        }
+        $store = app(BackupStore::class);
+        $files = $store->all();
 
         return [
             'connection' => $connection,
@@ -392,6 +460,10 @@ class GeneralConfigController extends Controller
             'host' => config("database.connections.{$connection}.host"),
             'table_count' => $this->countTables(),
             'files' => $files,
+            'total_bytes' => array_sum(array_column($files, 'bytes')),
+            'pending' => (bool) Cache::get(RunBackup::PENDING_KEY, false),
+            'keep' => (int) config('backup.keep', 7),
+            'daily_at' => (string) config('backup.daily_at', '03:00'),
             'path' => 'storage/app/private/backups',
         ];
     }

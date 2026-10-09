@@ -317,13 +317,23 @@ class RolesAndPermissionsSeeder extends Seeder
                 'update' => ['settings.security.update', 'Update security settings'],
             ],
             /*
-            | View only. Taking a backup and restoring from one are not built: the
-            | screen says so itself. Permissions for buttons that do not exist are
-            | worse than no permissions, because a role appears to grant something
-            | it cannot.
+            | Taking a backup, fetching one and deleting one, as three separate
+            | capabilities. Restoring is still not built, so there is deliberately no
+            | permission for it: one that guards nothing is worse than none, because
+            | a role appears to grant something it cannot do.
+            |
+            | download is the sensitive one, and the reason these are not a single
+            | slug. An archive holds every participant's identity card number and
+            | every password hash in the system in one file; being trusted to press
+            | "Back up now" is not the same as being trusted to carry that off the
+            | server. It is granted to no role here, which leaves it with super admin
+            | only, and that is the intended answer rather than an oversight.
             */
             'Backup & Restore' => [
                 'view' => ['settings.backup.view', 'View backup and restore'],
+                'create' => ['settings.backup.create', 'Take a backup'],
+                'export' => ['settings.backup.download', 'Download a backup archive'],
+                'delete' => ['settings.backup.delete', 'Delete a backup archive'],
             ],
             'Maintenance' => [
                 'view' => ['settings.maintenance.view', 'View maintenance mode'],
