@@ -171,35 +171,58 @@ class CouponReportScreenTest extends CouponTestCase
 
     public function test_the_range_narrows_the_activity_but_not_the_stock(): void
     {
-        $coupon = $this->fixedCoupon(10, ['quantity' => 10, 'name' => 'RANGED']);
-        $redeemer = app(CouponRedeemer::class);
+        /*
+         | 16:30 UTC is chosen, and must stay chosen. On the office clock (+08) that
+         | instant is already 00:30 the NEXT day, so the stored UTC date and the date
+         | an operator reads off the screen disagree — which is the whole reason
+         | LocalDateRange exists. Pinned here, every run exercises that disagreement.
+         |
+         | Built from a bare now() this test asked for the UTC day instead of the
+         | operator's day and so only failed between 16:00 and midnight UTC: it passed
+         | for the whole of development and then broke at 16:32 one evening. Do not
+         | "simplify" the pin away or the guard goes back to being a coin toss.
+         */
+        $pinned = Carbon::parse('2026-10-09 16:30:00', 'UTC');
 
-        // Two last month, one today.
-        Carbon::setTestNow(now()->subMonth());
-        $redeemer->claim($coupon->fresh(), 100);
-        $redeemer->claim($coupon->fresh(), 100);
-        Carbon::setTestNow();
+        Carbon::setTestNow($pinned->copy());
 
-        $redeemer->claim($coupon->fresh(), 100);
+        try {
+            $coupon = $this->fixedCoupon(10, ['quantity' => 10, 'name' => 'RANGED']);
+            $redeemer = app(CouponRedeemer::class);
 
-        $response = $this->reportAs([
-            'from' => now()->toDateString(),
-            'to' => now()->toDateString(),
-        ]);
+            // Two last month, one today.
+            Carbon::setTestNow($pinned->copy()->subMonth());
+            $redeemer->claim($coupon->fresh(), 100);
+            $redeemer->claim($coupon->fresh(), 100);
+            Carbon::setTestNow($pinned->copy());
 
-        $batch = $response->viewData('batches')->firstWhere('name', 'RANGED');
+            $redeemer->claim($coupon->fresh(), 100);
 
-        // Activity, narrowed.
-        $this->assertSame(1, (int) $batch->redeemed_in_range);
-        $this->assertSame(10.0, (float) $batch->discount_in_range);
+            // The picker's values as a real operator's browser fills them: the date
+            // on the office clock, which at this instant is the 10th, not the 9th.
+            $localToday = $pinned->copy()->setTimezone(LocalTime::zone())->toDateString();
 
-        // Stock, not narrowed: a use spent last month is still gone.
-        $this->assertSame(10, (int) $batch->quantity);
-        $this->assertSame(3, (int) $batch->redeemed_total);
-        $this->assertSame(7, $response->viewData('summary')['uses_left']);
+            $response = $this->reportAs([
+                'from' => $localToday,
+                'to' => $localToday,
+            ]);
 
-        $this->assertSame(10.0, $response->viewData('summary')['given']);
-        $this->assertSame(1, $response->viewData('summary')['redemptions']);
+            $batch = $response->viewData('batches')->firstWhere('name', 'RANGED');
+
+            // Activity, narrowed.
+            $this->assertSame(1, (int) $batch->redeemed_in_range);
+            $this->assertSame(10.0, (float) $batch->discount_in_range);
+
+            // Stock, not narrowed: a use spent last month is still gone.
+            $this->assertSame(10, (int) $batch->quantity);
+            $this->assertSame(3, (int) $batch->redeemed_total);
+            $this->assertSame(7, $response->viewData('summary')['uses_left']);
+
+            $this->assertSame(10.0, $response->viewData('summary')['given']);
+            $this->assertSame(1, $response->viewData('summary')['redemptions']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_a_redemption_in_the_small_hours_is_counted_on_its_local_day(): void
@@ -209,32 +232,47 @@ class CouponReportScreenTest extends CouponTestCase
          | previous day in UTC, which is how the column is stored, so comparing the
          | picker's local date against it loses the row. Asking for today must find a
          | redemption made at 04:00 today.
+         |
+         | Pinned to 16:30 UTC for the same reason as the test above: the office clock
+         | is already on the next day at that instant, so the local day built here is
+         | never the UTC day, whatever hour the suite happens to run at. Read off a
+         | bare now() the instants drifted with the wall clock and the trap was only
+         | half set. Keep the pin.
          */
-        $coupon = $this->fixedCoupon(10, ['quantity' => 5, 'name' => 'EARLY']);
+        $pinned = Carbon::parse('2026-10-09 16:30:00', 'UTC');
 
-        $localMorning = Carbon::parse(now()->toDateString() . ' 04:00:00', LocalTime::zone());
+        Carbon::setTestNow($pinned->copy());
 
-        Carbon::setTestNow($localMorning->copy()->utc());
-        app(CouponRedeemer::class)->claim($coupon, 100);
-        Carbon::setTestNow();
+        try {
+            $coupon = $this->fixedCoupon(10, ['quantity' => 5, 'name' => 'EARLY']);
 
-        $redemption = CouponCode::query()->redeemed()->sole();
+            // 04:00 on the office clock's own day, which is 20:00 the day before in UTC.
+            $localMorning = $pinned->copy()->setTimezone(LocalTime::zone())->startOfDay()->setTime(4, 0);
 
-        // Stored on the previous UTC day, which is exactly the trap.
-        $this->assertSame(
-            $localMorning->toDateString(),
-            $redemption->redeemed_at->copy()->setTimezone(LocalTime::zone())->toDateString(),
-        );
+            Carbon::setTestNow($localMorning->copy()->utc());
+            app(CouponRedeemer::class)->claim($coupon, 100);
+            Carbon::setTestNow($pinned->copy());
 
-        $response = $this->reportAs([
-            'from' => $localMorning->toDateString(),
-            'to' => $localMorning->toDateString(),
-        ]);
+            $redemption = CouponCode::query()->redeemed()->sole();
 
-        $batch = $response->viewData('batches')->firstWhere('name', 'EARLY');
+            // Stored on the previous UTC day, which is exactly the trap.
+            $this->assertSame(
+                $localMorning->toDateString(),
+                $redemption->redeemed_at->copy()->setTimezone(LocalTime::zone())->toDateString(),
+            );
 
-        $this->assertSame(1, (int) $batch->redeemed_in_range, 'A local-morning redemption fell out of its own day.');
-        $this->assertSame(10.0, (float) $batch->discount_in_range);
+            $response = $this->reportAs([
+                'from' => $localMorning->toDateString(),
+                'to' => $localMorning->toDateString(),
+            ]);
+
+            $batch = $response->viewData('batches')->firstWhere('name', 'EARLY');
+
+            $this->assertSame(1, (int) $batch->redeemed_in_range, 'A local-morning redemption fell out of its own day.');
+            $this->assertSame(10.0, (float) $batch->discount_in_range);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_a_malformed_date_is_dropped_rather_than_widening_the_range(): void
