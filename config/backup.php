@@ -52,12 +52,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Automatic backups kept
+    | Automatic backups kept — the fallback, not the source of truth
     |--------------------------------------------------------------------------
     |
-    | The nightly run prunes its own archives beyond this many. Manual archives
-    | are never pruned: somebody took one deliberately, usually right before
-    | doing something they were nervous about.
+    | Retention is set on the Backup & Restore tab now: a number kept, an age in
+    | days and a total size in MB, any of them switched off with 0. This value is
+    | what App\Support\BackupSettings::keepCount() falls back to while nothing has
+    | been saved, so an untouched installation keeps the seven it always kept.
+    |
+    | Manual archives are never pruned by any of them: somebody took one
+    | deliberately, usually right before doing something they were nervous about.
     |
     */
 

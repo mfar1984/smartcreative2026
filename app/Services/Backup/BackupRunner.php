@@ -2,6 +2,7 @@
 
 namespace App\Services\Backup;
 
+use App\Support\BackupSettings;
 use App\Support\LocalTime;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -117,13 +118,22 @@ class BackupRunner
     }
 
     /**
-     * Automatic archives beyond the newest few. Manual ones are never pruned.
+     * Apply the retention limits set on the Backup & Restore tab.
      *
-     * @return array<int, string>
+     * The three numbers are read here rather than passed in, so the scheduled run,
+     * the command and anything added later all obey the same saved values. Manual
+     * archives are never pruned, and the newest automatic one is never pruned
+     * either — see BackupStore::prune().
+     *
+     * @return array<int, array{name: string, rule: string, bytes: int}>
      */
     public function prune(): array
     {
-        return $this->store->prune((int) config('backup.keep', 7));
+        return $this->store->prune(
+            BackupSettings::keepCount(),
+            BackupSettings::keepDays(),
+            BackupSettings::keepMb(),
+        );
     }
 
     /**

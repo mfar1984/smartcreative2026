@@ -602,10 +602,10 @@
                         <p>
                             Each archive holds the whole database and everything uploaded. An automatic
                             backup is taken daily at {{ $backup['daily_at'] }}
-                            ({{ \App\Support\LocalTime::zone() }}) and the newest {{ $backup['keep'] }} are kept;
-                            backups you take by hand are never removed automatically. Reading an archive
-                            back overwrites live data and cannot be undone, so it is deliberately not a
-                            button here yet.
+                            ({{ \App\Support\LocalTime::zone() }}) and the old ones are cleared out under
+                            the limits below; backups you take by hand are never removed automatically.
+                            Reading an archive back overwrites live data and cannot be undone, so it is
+                            deliberately not a button here yet.
                         </p>
                     </div>
                 </div>
@@ -621,6 +621,19 @@
                     </p>
                 </div>
 
+                {{-- What the size limit could not do. Shown because the pruner
+                     refusing to delete the last archive, or refusing to touch a
+                     manual one, is otherwise invisible: the folder simply stays
+                     over the limit and nothing says why. --}}
+                @foreach ($backup['warnings'] as $warning)
+                    <div role="alert" class="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-4 mb-5">
+                        <svg class="w-5 h-5 shrink-0 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        <p class="text-sm text-red-800">{{ $warning }}</p>
+                    </div>
+                @endforeach
+
                 <x-admin.panel title="Database" icon="database">
                     @foreach ([
                         'Connection' => $backup['connection'],
@@ -634,6 +647,70 @@
                         </x-admin.field-row>
                     @endforeach
                 </x-admin.panel>
+
+                {{-- Retention. Three limits, any of them switched off with 0, and an
+                     archive goes when the first of them is reached. The newest
+                     automatic archive is never deleted by any of them, which is why
+                     a small limit is safe to type here. --}}
+                <form action="{{ route('admin.settings.backup.retention.update') }}" method="POST">
+                    @csrf
+                    @method('PUT')
+
+                    <x-admin.panel title="Retention" icon="archive">
+                        <x-admin.field-row label="On Disk Now" help="What the limits below are being applied to. Backups you took by hand are counted here, because they use the same quota.">
+                            <p class="text-sm text-gray-900 md:pt-2.5 tabular-nums">
+                                <span class="font-semibold">{{ \App\Services\Backup\BackupStore::humanBytes($backup['total_bytes']) }}</span>
+                                in {{ count($backup['files']) }} {{ count($backup['files']) === 1 ? 'archive' : 'archives' }}
+                                <span class="text-gray-500">({{ $backup['auto_count'] }} automatic, {{ count($backup['files']) - $backup['auto_count'] }} manual)</span>
+                            </p>
+                        </x-admin.field-row>
+
+                        <x-admin.field-row label="Automatic Backups Kept" help="How many automatic archives to keep. 0 keeps every one of them." for="keep_count" :required="true" error="keep_count">
+                            <input type="number" id="keep_count" name="keep_count" required
+                                   min="0" max="{{ \App\Support\BackupSettings::MAX_KEEP_COUNT }}"
+                                   value="{{ old('keep_count', $backup['retention']['keep_count']) }}"
+                                   @disabled(! $canUpdateBackup)
+                                   class="{{ $input }}">
+                        </x-admin.field-row>
+
+                        <x-admin.field-row label="Delete Older Than (days)" help="Automatic archives older than this many days are removed. 0 switches the age limit off." for="keep_days" :required="true" error="keep_days">
+                            <input type="number" id="keep_days" name="keep_days" required
+                                   min="0" max="{{ \App\Support\BackupSettings::MAX_KEEP_DAYS }}"
+                                   value="{{ old('keep_days', $backup['retention']['keep_days']) }}"
+                                   @disabled(! $canUpdateBackup)
+                                   class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1.5">
+                                Counted in days on this clock ({{ \App\Support\LocalTime::zone() }}), the same one the
+                                file names are written on.
+                            </p>
+                        </x-admin.field-row>
+
+                        <x-admin.field-row label="Total Size Limit (MB)" help="Keep the backups folder under this many MB. 0 switches the size limit off." for="keep_mb" :required="true" error="keep_mb">
+                            <input type="number" id="keep_mb" name="keep_mb" required
+                                   min="0" max="{{ \App\Support\BackupSettings::MAX_KEEP_MB }}"
+                                   value="{{ old('keep_mb', $backup['retention']['keep_mb']) }}"
+                                   @disabled(! $canUpdateBackup)
+                                   class="{{ $input }}">
+                            <p class="text-xs text-amber-700 mt-1.5">
+                                Whichever limit is reached first is the one that applies. The newest automatic
+                                backup is never deleted, whatever these say, and backups you took by hand are
+                                never deleted automatically at all — so a limit set too small leaves the folder
+                                over it and says so here rather than clearing it out.
+                            </p>
+                        </x-admin.field-row>
+                    </x-admin.panel>
+
+                    <div class="flex items-center justify-between gap-4 bg-white rounded-lg border border-gray-200 px-5 py-4 mb-5">
+                        @if ($canUpdateBackup)
+                            <p class="text-xs text-gray-500">Applied by the next automatic backup.</p>
+                            <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm shrink-0">
+                                Save Changes
+                            </button>
+                        @else
+                            <p class="text-xs text-gray-500">Your role can view these limits but not change them.</p>
+                        @endif
+                    </div>
+                </form>
 
                 {{-- Back up now. A POST of its own, outside any other form, and it
                      only queues the work: zipping the uploads folder takes longer

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin\Settings;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\UpdateBackupRetentionRequest;
 use App\Http\Requests\Admin\UpdateGeneralConfigRequest;
 use App\Http\Requests\Admin\UpdateMaintenanceRequest;
 use App\Http\Requests\Admin\UpdateSecurityConfigRequest;
@@ -12,6 +13,7 @@ use App\Models\Setting;
 use App\Services\AdminLogger;
 use App\Services\Backup\BackupStore;
 use App\Services\Security\LoginBanService;
+use App\Support\BackupSettings;
 use App\Support\BrandingSettings;
 use App\Support\GeneralSettings;
 use App\Support\SecuritySettings;
@@ -97,6 +99,7 @@ class GeneralConfigController extends Controller
             'canUpdateSecurity' => $request->user()->hasPermission('settings.security.update'),
             'canUpdateMaintenance' => $request->user()->hasPermission('settings.maintenance.update'),
             'canViewBackup' => $request->user()->hasPermission('settings.backup.view'),
+            'canUpdateBackup' => $request->user()->hasPermission('settings.backup.update'),
             'canCreateBackup' => $request->user()->hasPermission('settings.backup.create'),
             'canDownloadBackup' => $request->user()->hasPermission('settings.backup.download'),
             'canDeleteBackup' => $request->user()->hasPermission('settings.backup.delete'),
@@ -397,6 +400,48 @@ class GeneralConfigController extends Controller
     }
 
     /**
+     * Save the three retention limits.
+     *
+     * Behind settings.backup.update, which is a permission of its own: a role
+     * trusted to read the backup list is not thereby trusted to decide how long
+     * the archives live. Nothing is deleted here — the next automatic run applies
+     * whatever is saved, and it can never remove the newest automatic archive.
+     */
+    public function updateBackupRetention(UpdateBackupRetentionRequest $request)
+    {
+        $before = BackupSettings::formValues();
+        $validated = $request->validated();
+
+        foreach ($validated as $key => $value) {
+            BackupSettings::write($key, (string) $value);
+        }
+
+        // The reader memoises the group per request and the redirect draws the
+        // form again, so a stale value here would show the old limits.
+        BackupSettings::flush();
+
+        AdminLogger::activity(
+            'settings.backup.retention',
+            sprintf(
+                'Set backup retention: keep %s, %s, %s.',
+                (int) $validated['keep_count'] === 0 ? 'every automatic backup' : $validated['keep_count'] . ' automatic backups',
+                (int) $validated['keep_days'] === 0 ? 'no age limit' : 'up to ' . $validated['keep_days'] . ' days old',
+                (int) $validated['keep_mb'] === 0 ? 'no size limit' : 'under ' . $validated['keep_mb'] . ' MB in total',
+            ),
+        );
+        AdminLogger::audit(
+            new Setting(['key' => 'backup.*', 'group' => 'backup']),
+            'settings.updated',
+            $before,
+            $validated,
+        );
+
+        return redirect()
+            ->route('admin.settings.general', ['tab' => 'backup'])
+            ->with('status', 'Retention settings saved. They are applied by the next automatic backup.');
+    }
+
+    /**
      * Send one archive to the browser.
      *
      * The record is written before the file is, and deliberately so: an archive
@@ -472,9 +517,18 @@ class GeneralConfigController extends Controller
             'host' => config("database.connections.{$connection}.host"),
             'table_count' => $this->countTables(),
             'files' => $files,
+
+            /*
+             | The total INCLUDES manual archives, because that is what actually
+             | occupies the hosting quota, even though pruning only ever deletes
+             | automatic ones. A figure that left them out would be the one number
+             | on this screen that does not match what the account is using.
+             */
             'total_bytes' => array_sum(array_column($files, 'bytes')),
+            'auto_count' => count(array_filter($files, fn (array $row) => $row['type'] === BackupStore::TYPE_AUTO)),
             'pending' => (bool) Cache::get(RunBackup::PENDING_KEY, false),
-            'keep' => (int) config('backup.keep', 7),
+            'retention' => BackupSettings::formValues(),
+            'warnings' => $store->retentionWarnings(BackupSettings::keepMb()),
             'daily_at' => (string) config('backup.daily_at', '03:00'),
             'path' => 'storage/app/private/backups',
         ];

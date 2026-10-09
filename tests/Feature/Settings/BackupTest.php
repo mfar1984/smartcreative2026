@@ -342,7 +342,9 @@ class BackupTest extends TestCase
         $this->writeArchive('backup-2026-02-01-120000-manual.zip');
         $this->writeArchive('backup-2026-02-02-120000-manual.zip');
 
-        $removed = app(BackupRunner::class)->prune();
+        // prune() now reports the rule each archive went under as well as its name;
+        // what is kept and what goes is unchanged.
+        $removed = array_column(app(BackupRunner::class)->prune(), 'name');
 
         $kept = $this->archives();
 

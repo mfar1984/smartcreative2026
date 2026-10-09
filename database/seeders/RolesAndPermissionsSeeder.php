@@ -347,9 +347,15 @@ class RolesAndPermissionsSeeder extends Seeder
             | "Back up now" is not the same as being trusted to carry that off the
             | server. It is granted to no role here, which leaves it with super admin
             | only, and that is the intended answer rather than an oversight.
+            |
+            | update is the retention limits: how many archives are kept, how old
+            | they may get, how much disk they may use. Separate from view for the
+            | same reason — a number typed there decides how far back a restore can
+            | reach — and granted to no role here either, so it is super admin only.
             */
             'Backup & Restore' => [
                 'view' => ['settings.backup.view', 'View backup and restore'],
+                'update' => ['settings.backup.update', 'Change backup retention limits'],
                 'create' => ['settings.backup.create', 'Take a backup'],
                 'export' => ['settings.backup.download', 'Download a backup archive'],
                 'delete' => ['settings.backup.delete', 'Delete a backup archive'],

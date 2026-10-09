@@ -2,6 +2,7 @@
 
 namespace App\Services\Backup;
 
+use App\Services\AdminLogger;
 use App\Support\LocalTime;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
@@ -39,6 +40,23 @@ class BackupStore
     public const TYPE_MANUAL = 'manual';
 
     public const TYPES = [self::TYPE_AUTO, self::TYPE_MANUAL];
+
+    public const RULE_COUNT = 'count';
+
+    public const RULE_AGE = 'age';
+
+    public const RULE_SIZE = 'size';
+
+    /**
+     * Why an archive was removed, in the words the log line and the command both
+     * use. One map, so the record and the console cannot describe the same
+     * deletion differently.
+     */
+    public const RULES = [
+        self::RULE_COUNT => 'beyond the number of automatic backups kept',
+        self::RULE_AGE => 'older than the age limit',
+        self::RULE_SIZE => 'over the total size limit',
+    ];
 
     /**
      * A byte count as a sentence. Rounded for reading, not for arithmetic.
@@ -139,26 +157,171 @@ class BackupStore
     }
 
     /**
-     * Drop automatic archives beyond the newest $keep. Manual ones are untouched.
+     * Apply the three retention limits. Manual archives are never touched.
      *
-     * @return array<int, string> the names removed
+     * Each limit is independent and 0 switches it off, so an archive goes when
+     * ANY enabled limit says so — whichever target is reached first, which is
+     * what the owner asked for.
+     *
+     * THE FOLDER CAN NEVER BE EMPTIED BY THIS METHOD, and that is true by
+     * construction rather than by a check further down: the newest automatic
+     * archive is taken out of the candidate list on the line below, before any
+     * rule is consulted, so there is no rule, no ordering and no stored value
+     * that can reach it. A 1 MB budget against a 46 MB archive therefore leaves
+     * that archive alone instead of leaving the owner with no backup at all.
+     * retentionWarnings() is what tells the operator the budget could not be
+     * honoured, because a size rule that silently gave up looks exactly like one
+     * that worked, right up until a restore is needed.
+     *
+     * Every removal is recorded here rather than by the caller, for the same
+     * reason: an archive that disappears with no log line is indistinguishable
+     * from one that was stolen.
+     *
+     * @return array<int, array{name: string, rule: string, bytes: int}> newest removed first
      */
-    public function prune(int $keep): array
+    public function prune(int $keepCount = 0, int $keepDays = 0, int $keepMb = 0): array
     {
-        $auto = array_values(array_filter(
-            $this->all(),
-            fn (array $row) => $row['type'] === self::TYPE_AUTO,
-        ));
+        $rows = $this->all();
+
+        $auto = array_values(array_filter($rows, fn (array $row) => $row['type'] === self::TYPE_AUTO));
+
+        // The guard. Everything after this line works on candidates only, and the
+        // newest automatic archive is not one of them.
+        $candidates = array_slice($auto, 1);
+
+        /*
+         | The age cutoff is built on the OFFICE clock, not on a bare now().
+         |
+         | The archive's name carries the local wall-clock date (see PATTERN), and
+         | "older than seven days" means seven days on the calendar the owner
+         | reads. Between local midnight and 08:00 the UTC date is still yesterday,
+         | so a UTC startOfDay would move this cutoff by a whole day and prune an
+         | archive a day early, or keep one a day too long. That bug has been fixed
+         | three times in this project already.
+         */
+        $cutoff = $keepDays > 0
+            ? Carbon::now(LocalTime::zone())->startOfDay()->subDays($keepDays)
+            : null;
+
+        $budget = $keepMb > 0 ? $keepMb * 1024 * 1024 : 0;
+
+        /*
+         | What is kept no matter what: every manual archive, plus the newest
+         | automatic one. Manual archives count towards the budget because they do
+         | occupy the quota, but they are never deleted to make room.
+         */
+        $held = array_sum(array_column(
+            array_filter($rows, fn (array $row) => $row['type'] === self::TYPE_MANUAL),
+            'bytes',
+        )) + (int) ($auto[0]['bytes'] ?? 0);
 
         $removed = [];
+        $overBudget = false;
 
-        foreach (array_slice($auto, max($keep, 0)) as $row) {
-            if ($this->delete($row['name'])) {
-                $removed[] = $row['name'];
+        foreach ($candidates as $index => $row) {
+            // Position among the automatic archives, newest first. The newest is 0
+            // and is not in this loop, so the first candidate is already 1.
+            $position = $index + 1;
+
+            $rule = match (true) {
+                $keepCount > 0 && $position >= $keepCount => self::RULE_COUNT,
+                $cutoff !== null && $row['created_at']->lessThan($cutoff) => self::RULE_AGE,
+
+                /*
+                 | Once the budget is full it stays full: everything older goes too,
+                 | rather than skipping one large archive and keeping a smaller older
+                 | one behind it. "The newest few that fit" is a list somebody can
+                 | reason about; a folder with gaps in it is not.
+                 */
+                $overBudget => self::RULE_SIZE,
+                $budget > 0 && $held + $row['bytes'] > $budget => self::RULE_SIZE,
+                default => null,
+            };
+
+            if ($rule === null) {
+                $held += $row['bytes'];
+
+                continue;
             }
+
+            if ($rule === self::RULE_SIZE) {
+                $overBudget = true;
+            }
+
+            if (! $this->delete($row['name'])) {
+                // A file that could not be deleted still occupies the quota, so it
+                // is counted rather than wished away.
+                $held += $row['bytes'];
+
+                continue;
+            }
+
+            $removed[] = ['name' => $row['name'], 'rule' => $rule, 'bytes' => $row['bytes']];
+
+            AdminLogger::activity(
+                'settings.backup.prune',
+                sprintf('Retention removed %s: %s.', $row['name'], self::RULES[$rule]),
+                null,
+                'Retention',
+            );
         }
 
         return $removed;
+    }
+
+    /**
+     * What the size limit could not do, in words, for the Backup & Restore tab.
+     *
+     * Both cases are the pruner refusing to do harm, and both would otherwise be
+     * invisible: the folder simply stays over the limit and nothing says why.
+     *
+     * @return array<int, string>
+     */
+    public function retentionWarnings(int $keepMb): array
+    {
+        if ($keepMb <= 0) {
+            return [];
+        }
+
+        $rows = $this->all();
+        $budget = $keepMb * 1024 * 1024;
+        $total = array_sum(array_column($rows, 'bytes'));
+
+        if ($total <= $budget) {
+            return [];
+        }
+
+        $warnings = [];
+
+        $auto = array_values(array_filter($rows, fn (array $row) => $row['type'] === self::TYPE_AUTO));
+        $manual = array_values(array_filter($rows, fn (array $row) => $row['type'] === self::TYPE_MANUAL));
+
+        // One archive bigger than the whole budget. It is kept, so the size limit
+        // cannot be honoured and saying nothing would hide that.
+        if (isset($auto[0]) && $auto[0]['bytes'] > $budget) {
+            $warnings[] = sprintf(
+                'The total size limit is %d MB, but the newest automatic archive on its own is %s. It is kept anyway — the newest automatic backup is never deleted — so the size limit cannot be honoured. Raise the limit to at least %d MB.',
+                $keepMb,
+                self::humanBytes($auto[0]['bytes']),
+                (int) ceil($auto[0]['bytes'] / 1024 / 1024),
+            );
+        }
+
+        // Nothing left to prune and still over: the manual archives are what is
+        // filling the folder, and those are never removed automatically.
+        if (count($auto) <= 1 && $manual !== []) {
+            $warnings[] = sprintf(
+                'The backups folder is %s, over the %d MB limit, and %d manual %s (%s) %s what is holding it there. Manual backups are never removed automatically — delete one by hand if the space is needed.',
+                self::humanBytes($total),
+                $keepMb,
+                count($manual),
+                count($manual) === 1 ? 'archive' : 'archives',
+                self::humanBytes((int) array_sum(array_column($manual, 'bytes'))),
+                count($manual) === 1 ? 'is' : 'are',
+            );
+        }
+
+        return $warnings;
     }
 
     /**

@@ -1117,6 +1117,17 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware(['permission:settings.backup.create', 'throttle:6,1'])
                 ->name('backup.run');
 
+            /*
+            | The retention limits: how many automatic archives to keep, how old
+            | they may get, and how much disk the folder may use. Its own
+            | permission, because deciding how long a backup lives is a different
+            | trust from being allowed to look at the list. Declared before the
+            | {file} routes so "retention" is never read as an archive name.
+            */
+            Route::put('backup/retention', [GeneralConfigController::class, 'updateBackupRetention'])
+                ->middleware('permission:settings.backup.update')
+                ->name('backup.retention.update');
+
             Route::get('backup/{file}', [GeneralConfigController::class, 'downloadBackup'])
                 ->middleware(['permission:settings.backup.download', 'throttle:20,1'])
                 ->where('file', '[A-Za-z0-9._-]+')

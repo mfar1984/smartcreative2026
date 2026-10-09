@@ -19,8 +19,10 @@ use Illuminate\Support\Facades\Log;
  * works over SSH with no browser and no sign in, which is the way to take an
  * archive when the admin itself cannot be reached.
  *
- * Automatic runs prune their own old archives afterwards. Manual ones never prune
- * anything: somebody took one deliberately.
+ * Automatic runs then apply the retention limits set on the Backup & Restore tab
+ * — a number kept, an age in days, a total size in MB, any of them switched off
+ * with 0 — and print what went and why. Manual runs never prune anything:
+ * somebody took one deliberately.
  */
 class RunBackup extends Command
 {
@@ -73,25 +75,40 @@ class RunBackup extends Command
         );
 
         if ($type === BackupStore::TYPE_AUTO) {
-            $removed = $runner->prune();
-
-            if ($removed !== []) {
-                $this->components->info(sprintf(
-                    'Pruned %d old automatic %s: %s',
-                    count($removed),
-                    count($removed) === 1 ? 'backup' : 'backups',
-                    implode(', ', $removed),
-                ));
-
-                AdminLogger::activity(
-                    'settings.backup.prune',
-                    sprintf('Pruned %d old automatic backup(s): %s.', count($removed), implode(', ', $removed)),
-                    null,
-                    'Console',
-                );
-            }
+            $this->reportPruning($runner->prune());
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Say what retention removed, and under which rule.
+     *
+     * One line per archive naming the rule, not a count: an operator reading a
+     * cron mail needs to know WHY an archive went, because "pruned 4 backups" is
+     * the same sentence whether the count limit did its job or a mistyped size
+     * limit cleared out most of the folder.
+     *
+     * The activity log line is written by BackupStore::prune() itself, so it
+     * cannot be missed by a caller that forgets.
+     *
+     * @param  array<int, array{name: string, rule: string, bytes: int}>  $removed
+     */
+    private function reportPruning(array $removed): void
+    {
+        if ($removed === []) {
+            return;
+        }
+
+        $this->components->info(sprintf(
+            'Retention removed %d automatic %s (%s freed):',
+            count($removed),
+            count($removed) === 1 ? 'backup' : 'backups',
+            BackupStore::humanBytes((int) array_sum(array_column($removed, 'bytes'))),
+        ));
+
+        foreach ($removed as $row) {
+            $this->components->twoColumnDetail($row['name'], BackupStore::RULES[$row['rule']]);
+        }
     }
 }
