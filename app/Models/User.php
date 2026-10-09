@@ -26,6 +26,7 @@ class User extends Authenticatable
         'role_id',
         'is_active',
         'is_handler',
+        'password_changed_at',
     ];
 
     /**
@@ -51,7 +52,45 @@ class User extends Authenticatable
             'is_active' => 'boolean',
             'is_handler' => 'boolean',
             'last_login_at' => 'datetime',
+            'password_changed_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Stamp password_changed_at whenever the password is set or changed.
+     *
+     * Hooked on the model rather than in each controller so every path that sets a
+     * password — user create, user update, and anything added later — records the
+     * timestamp without having to remember to. The password is cast to 'hashed',
+     * so isDirty('password') is true for a freshly set or a changed password and
+     * false when the field was left blank on an edit. The guard lets a caller that
+     * sets password_changed_at explicitly (a test, a backfill) keep its value.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $user): void {
+            if ($user->isDirty('password') && ! $user->isDirty('password_changed_at')) {
+                $user->password_changed_at = now();
+            }
+        });
+    }
+
+    /**
+     * Whether this user's password has aged past the configured expiry window.
+     *
+     * Returns false when expiry is switched off (0 days) or when no change has
+     * ever been recorded, so an installation that has not opted in, and a user
+     * whose column is still NULL, are both treated as not expired. Enforcement is
+     * deferred in Part 1 (see the brief); this reader exists so the timestamp has
+     * a single interpretation when enforcement is wired up later.
+     */
+    public function passwordHasExpired(int $expiryDays): bool
+    {
+        if ($expiryDays <= 0 || $this->password_changed_at === null) {
+            return false;
+        }
+
+        return $this->password_changed_at->lt(now()->subDays($expiryDays));
     }
 
     public function role(): BelongsTo

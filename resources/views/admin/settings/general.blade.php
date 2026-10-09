@@ -226,6 +226,134 @@
             </form>
         @endif
 
+        {{-- ==================== Security ====================
+             Password policy and session controls. Grouped under clear section
+             headings so Parts 2 and 3 (banned IPs, rate limit, IP allowlist,
+             audit toggle) can be appended as further panels on this same tab. --}}
+        @if ($activeTab === 'security')
+            <x-admin.section-intro
+                title="Security"
+                description="Password policy and session controls for the admin area. Defaults match the current behaviour, so saving without changes leaves everything as it is."
+                icon="shield"
+                accent="purple" />
+
+            <form action="{{ route('admin.settings.security.update') }}" method="POST">
+                @csrf
+                @method('PUT')
+
+                <x-admin.panel title="Password Policy" icon="lock">
+                    <x-admin.field-row label="Minimum Length" help="The shortest password a new or changed account password may be. Cannot be lower than 8." for="password_min" :required="true" error="password_min">
+                        <input type="number" id="password_min" name="password_min" required
+                               min="{{ \App\Support\SecuritySettings::MIN_PASSWORD_MIN }}"
+                               max="{{ \App\Support\SecuritySettings::MAX_PASSWORD_MIN }}"
+                               value="{{ old('password_min', $security['password_min']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Require Uppercase" help="Force both an upper and a lower case letter. Off by default, matching today's rule." for="password_require_upper" error="password_require_upper">
+                        <div class="md:pt-2">
+                            <label for="password_require_upper" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="password_require_upper" value="0">
+                                <input type="checkbox" id="password_require_upper" name="password_require_upper" value="1"
+                                       @checked(old('password_require_upper', $security['password_require_upper']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Require a mix of upper and lower case</span>
+                            </label>
+                        </div>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Require Number" help="At least one digit." for="password_require_number" error="password_require_number">
+                        <div class="md:pt-2">
+                            <label for="password_require_number" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="password_require_number" value="0">
+                                <input type="checkbox" id="password_require_number" name="password_require_number" value="1"
+                                       @checked(old('password_require_number', $security['password_require_number']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Require at least one number</span>
+                            </label>
+                        </div>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Require Symbol" help="At least one symbol such as ! or @." for="password_require_symbol" error="password_require_symbol">
+                        <div class="md:pt-2">
+                            <label for="password_require_symbol" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="password_require_symbol" value="0">
+                                <input type="checkbox" id="password_require_symbol" name="password_require_symbol" value="1"
+                                       @checked(old('password_require_symbol', $security['password_require_symbol']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Require at least one symbol</span>
+                            </label>
+                        </div>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Password Expiry (days)" help="Days a password stays valid. 0 means it never expires, which is the current behaviour." for="password_expiry_days" :required="true" error="password_expiry_days">
+                        <input type="number" id="password_expiry_days" name="password_expiry_days" required
+                               min="0" max="{{ \App\Support\SecuritySettings::MAX_PASSWORD_EXPIRY_DAYS }}"
+                               value="{{ old('password_expiry_days', $security['password_expiry_days']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                        <p class="text-xs text-gray-500 mt-1.5">
+                            The change date is now recorded. Forcing an expired user to change their
+                            password is a planned follow-up, so a value above 0 is stored but not yet
+                            enforced.
+                        </p>
+                    </x-admin.field-row>
+                </x-admin.panel>
+
+                <x-admin.panel title="Sessions" icon="activity">
+                    <x-admin.field-row label="Inactivity Timeout (minutes)" help="Log an admin out after this many minutes with no activity. Defaults to the current session lifetime." for="session_timeout_minutes" :required="true" error="session_timeout_minutes">
+                        <input type="number" id="session_timeout_minutes" name="session_timeout_minutes" required
+                               min="{{ \App\Support\SecuritySettings::MIN_SESSION_TIMEOUT_MINUTES }}"
+                               max="{{ \App\Support\SecuritySettings::MAX_SESSION_TIMEOUT_MINUTES }}"
+                               value="{{ old('session_timeout_minutes', $security['session_timeout_minutes']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="One Session Per User" help="When on, logging in ends this user's other sessions. Off by default." for="single_session" error="single_session">
+                        <div class="md:pt-2">
+                            <label for="single_session" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="single_session" value="0">
+                                <input type="checkbox" id="single_session" name="single_session" value="1"
+                                       @checked(old('single_session', $security['single_session']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Allow only one active session per user</span>
+                            </label>
+                        </div>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Clear Session On Logout" help="Delete the session record on logout and on auto-logout, instead of leaving an empty row behind." for="destroy_session_on_logout" error="destroy_session_on_logout">
+                        <div class="md:pt-2">
+                            <label for="destroy_session_on_logout" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="destroy_session_on_logout" value="0">
+                                <input type="checkbox" id="destroy_session_on_logout" name="destroy_session_on_logout" value="1"
+                                       @checked(old('destroy_session_on_logout', $security['destroy_session_on_logout']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Remove the session record on logout</span>
+                            </label>
+                        </div>
+                    </x-admin.field-row>
+                </x-admin.panel>
+
+                <div class="flex items-center justify-between gap-4 bg-white rounded-lg border border-gray-200 px-5 py-4 mt-5">
+                    @if ($canUpdateSecurity)
+                        <p class="text-xs text-gray-500">Changes take effect immediately after saving.</p>
+                        <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm shrink-0">
+                            Save Changes
+                        </button>
+                    @else
+                        <p class="text-xs text-gray-500">Your role can view these settings but not change them.</p>
+                    @endif
+                </div>
+            </form>
+        @endif
+
         {{-- ==================== Backup & Restore ==================== --}}
         @if ($activeTab === 'backup')
             <x-admin.section-intro

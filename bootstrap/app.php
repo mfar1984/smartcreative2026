@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnforceInactivityTimeout;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\EnsureUserCanAccessAdmin;
 use App\Http\Middleware\PublicMaintenanceMode;
@@ -23,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => EnsureUserCanAccessAdmin::class,
             'permission' => EnsurePermission::class,
+            'session.timeout' => EnforceInactivityTimeout::class,
         ]);
 
         // Soft maintenance mode for the public site. The middleware itself

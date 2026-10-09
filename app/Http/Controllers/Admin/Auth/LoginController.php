@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin\Auth;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\LoginRequest;
 use App\Services\AdminLogger;
+use App\Support\SessionGuard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
@@ -47,6 +48,17 @@ class LoginController extends Controller
         // Guards against session fixation: the pre-login session id is discarded.
         $request->session()->regenerate();
 
+        // When one-session-per-user is on, drop this user's other session rows so
+        // only the session just created survives. Runs after regenerate() so the
+        // new id is in place and is the one kept. Off by default, so first deploy
+        // is unchanged.
+        SessionGuard::enforceSingleSession($request, $user->id);
+
+        // Stamp the activity marker the inactivity middleware reads, so the first
+        // authenticated request after login is measured from now, not from a stale
+        // value left by an earlier session.
+        $request->session()->put('last_activity_at', now()->timestamp);
+
         $user->forceFill([
             'last_login_at' => now(),
             'last_login_ip' => $request->ip(),
@@ -70,9 +82,9 @@ class LoginController extends Controller
     {
         AdminLogger::activity('auth.logout', 'Signed out of the admin area.');
 
-        Auth::logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+        // Logs out AND deletes the underlying sessions row, so logging out no
+        // longer leaves a stale user_id NULL row behind — the owner's complaint.
+        SessionGuard::logoutAndDestroy($request);
 
         return redirect()->route('admin.login');
     }

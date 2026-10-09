@@ -2,9 +2,9 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Support\PasswordPolicy;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Password;
 
 class UpdateUserRequest extends FormRequest
 {
@@ -26,7 +26,7 @@ class UpdateUserRequest extends FormRequest
             'username' => ['required', 'string', 'max:120', Rule::unique('users', 'username')->ignore($userId)],
             'email' => ['required', 'string', 'email:rfc', 'max:190', Rule::unique('users', 'email')->ignore($userId)],
             // Blank means "leave the current password alone".
-            'password' => ['nullable', 'confirmed', Password::min(10)->letters()->numbers()->symbols()],
+            'password' => ['nullable', 'confirmed', PasswordPolicy::rule()],
             'role_id' => ['required', 'integer', 'exists:roles,id'],
             'is_active' => ['nullable', 'boolean'],
         ];

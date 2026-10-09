@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Admin\Settings;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateGeneralConfigRequest;
 use App\Http\Requests\Admin\UpdateMaintenanceRequest;
+use App\Http\Requests\Admin\UpdateSecurityConfigRequest;
 use App\Models\Setting;
 use App\Services\AdminLogger;
 use App\Support\BrandingSettings;
 use App\Support\GeneralSettings;
+use App\Support\SecuritySettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -20,6 +22,7 @@ class GeneralConfigController extends Controller
      */
     public const TABS = [
         'general' => ['label' => 'General', 'icon' => 'sliders'],
+        'security' => ['label' => 'Security', 'icon' => 'shield'],
         'backup' => ['label' => 'Backup & Restore', 'icon' => 'database'],
         'maintenance' => ['label' => 'Maintenance', 'icon' => 'wrench'],
     ];
@@ -34,6 +37,7 @@ class GeneralConfigController extends Controller
      */
     private const TAB_PERMISSIONS = [
         'general' => 'settings.general.view',
+        'security' => 'settings.security.view',
         'backup' => 'settings.backup.view',
         'maintenance' => 'settings.maintenance.view',
     ];
@@ -70,6 +74,7 @@ class GeneralConfigController extends Controller
             'tabs' => $tabs,
             'activeTab' => $tab,
             'general' => $this->generalValues(),
+            'security' => SecuritySettings::formValues(),
             'maintenance' => $this->maintenanceValues(),
             'backup' => $this->backupOverview(),
             'timezones' => \DateTimeZone::listIdentifiers(),
@@ -77,6 +82,7 @@ class GeneralConfigController extends Controller
             'timeFormats' => array_keys(GeneralSettings::TIME_FORMATS),
             'branding' => $this->brandingCards(),
             'canUpdateGeneral' => $request->user()->hasPermission('settings.general.update'),
+            'canUpdateSecurity' => $request->user()->hasPermission('settings.security.update'),
             'canUpdateMaintenance' => $request->user()->hasPermission('settings.maintenance.update'),
             'canViewBackup' => $request->user()->hasPermission('settings.backup.view'),
         ]);
@@ -195,6 +201,33 @@ class GeneralConfigController extends Controller
         return redirect()
             ->route('admin.settings.general', ['tab' => 'maintenance'])
             ->with('status', 'Maintenance settings saved.');
+    }
+
+    public function updateSecurity(UpdateSecurityConfigRequest $request)
+    {
+        $before = SecuritySettings::formValues();
+        $validated = $request->validated();
+
+        foreach ($validated as $key => $value) {
+            SecuritySettings::write($key, (string) $value);
+        }
+
+        // The reader memoises the group per request, and the redirect draws the
+        // form again, so a stale value here would show the old policy until the
+        // next click.
+        SecuritySettings::flush();
+
+        AdminLogger::activity('settings.security.update', 'Updated security settings.');
+        AdminLogger::audit(
+            new Setting(['key' => 'security.*', 'group' => 'security']),
+            'settings.updated',
+            $before,
+            $validated,
+        );
+
+        return redirect()
+            ->route('admin.settings.general', ['tab' => 'security'])
+            ->with('status', 'Security settings saved.');
     }
 
     /**

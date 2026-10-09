@@ -307,6 +307,16 @@ class RolesAndPermissionsSeeder extends Seeder
                 'update' => ['settings.general.update', 'Update general config'],
             ],
             /*
+            | The Security tab on the General Config screen: password policy and
+            | session controls. Its own view/update pair rather than folded into
+            | General, because changing how passwords and sessions behave is a more
+            | sensitive capability than editing the company address.
+            */
+            'Security' => [
+                'view' => ['settings.security.view', 'View security settings'],
+                'update' => ['settings.security.update', 'Update security settings'],
+            ],
+            /*
             | View only. Taking a backup and restoring from one are not built: the
             | screen says so itself. Permissions for buttons that do not exist are
             | worse than no permissions, because a role appears to grant something
@@ -484,6 +494,8 @@ class RolesAndPermissionsSeeder extends Seeder
 
                 'settings.general.view',
                 'settings.general.update',
+                'settings.security.view',
+                'settings.security.update',
                 'settings.backup.view',
                 'settings.maintenance.view',
                 'settings.maintenance.update',

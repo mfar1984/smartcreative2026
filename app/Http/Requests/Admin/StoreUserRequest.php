@@ -2,8 +2,8 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Support\PasswordPolicy;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rules\Password;
 
 class StoreUserRequest extends FormRequest
 {
@@ -23,7 +23,7 @@ class StoreUserRequest extends FormRequest
             // Free text, not an email: usernames like "administrator@root" are valid.
             'username' => ['required', 'string', 'max:120', 'unique:users,username'],
             'email' => ['required', 'string', 'email:rfc', 'max:190', 'unique:users,email'],
-            'password' => ['required', 'confirmed', Password::min(10)->letters()->numbers()->symbols()],
+            'password' => ['required', 'confirmed', PasswordPolicy::rule()],
             'role_id' => ['required', 'integer', 'exists:roles,id'],
             'is_active' => ['nullable', 'boolean'],
         ];
