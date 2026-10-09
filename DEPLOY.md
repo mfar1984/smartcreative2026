@@ -277,3 +277,25 @@ It expects to be run on every deployment. Two things it does are worth knowing:
   stops appearing on the matrix as a checkbox that grants nothing.
 
 Accounts, passwords and role assignments are left alone.
+
+## Locked out of the admin
+
+Repeated failed sign ins ban the IP address they came from, for as long as General
+Config, Security says. A ban, the sign-in rate limit and the IP allowlist cover the
+admin only; the public site, registration and the CHIP webhook are never blocked.
+
+None of the ways back in waits for the ban to run out:
+
+- `GET /admin/login` is never blocked. A banned address still gets the sign-in form,
+  with a notice saying until when.
+- A super admin can sign in from a banned address. That sign in lifts the ban and is
+  recorded in the activity log as a warning. A super admin is never held to the IP
+  allowlist either.
+- From SSH or the cPanel Terminal, with no web access at all:
+
+```bash
+php artisan security:unban 203.0.113.10   # one address, and its failure count
+php artisan security:unban --all          # every ban
+```
+
+Each prints exactly what it lifted.

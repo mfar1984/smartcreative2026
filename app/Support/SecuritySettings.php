@@ -24,8 +24,11 @@ use App\Models\Setting;
  *     Part 1 ships, because the owner asked for it and the old behaviour (leaving
  *     a stale user_id NULL row behind) is the bug being fixed
  *
- * Part 1 populates only the password-policy and session keys. Parts 2 and 3 add
- * more keys to the same group and the same tab.
+ * Part 1 populates the password-policy and session keys. Part 2 adds the
+ * sign-in ban, the two rate limits and the IP allowlist. Their defaults keep
+ * today's behaviour for the limits (10 sign-in attempts per minute, no admin
+ * request limit, no allowlist); the ban itself is new by design, with generous
+ * defaults of ten failures inside fifteen minutes.
  */
 final class SecuritySettings
 {
@@ -56,6 +59,20 @@ final class SecuritySettings
         // Session controls
         'single_session' => '0',
         'destroy_session_on_logout' => '1',
+
+        // Failed sign-in bans (admin sign in only, never the public site)
+        'ban_enabled' => '1',
+        'ban_after_failures' => '10',
+        'ban_window_minutes' => '15',
+        'ban_duration_minutes' => '30',
+
+        // Rate limits. 10 per minute is exactly the old throttle:10,1 on the
+        // sign-in POST; 0 means the admin area has no request limit, as today.
+        'login_attempts_per_minute' => '10',
+        'admin_requests_per_minute' => '0',
+
+        // Empty means no restriction, which is today's behaviour.
+        'ip_allowlist' => '',
     ];
 
     /**
@@ -76,6 +93,36 @@ final class SecuritySettings
     public const MAX_PASSWORD_MIN = 128;
 
     public const MAX_PASSWORD_EXPIRY_DAYS = 3650; // ten years
+
+    /*
+     | Bounds on the Part 2 numbers. The floors are the lockout guard: below them
+     | a single mistyped password, or a burst of ordinary clicks, would start
+     | refusing people. The form rejects anything outside these and the readers
+     | clamp a stray stored value back inside them.
+     */
+    public const MIN_BAN_AFTER_FAILURES = 3;
+
+    public const MAX_BAN_AFTER_FAILURES = 100;
+
+    public const MIN_BAN_WINDOW_MINUTES = 1;
+
+    public const MAX_BAN_WINDOW_MINUTES = 1440; // one day
+
+    public const MIN_BAN_DURATION_MINUTES = 1;
+
+    public const MAX_BAN_DURATION_MINUTES = 1440; // one day
+
+    public const MIN_LOGIN_ATTEMPTS_PER_MINUTE = 3;
+
+    public const MAX_LOGIN_ATTEMPTS_PER_MINUTE = 600;
+
+    /** 0 switches the admin request limit off; any other value is at least this. */
+    public const MIN_ADMIN_REQUESTS_PER_MINUTE = 60;
+
+    public const MAX_ADMIN_REQUESTS_PER_MINUTE = 10000;
+
+    /** Longest allowlist the form accepts, in characters. */
+    public const MAX_IP_ALLOWLIST_LENGTH = 5000;
 
     /**
      * The whole group, read once per request.
@@ -196,6 +243,94 @@ final class SecuritySettings
     }
 
     /* ---------------------------------------------------------------------
+     | Typed accessors — failed sign-in bans
+     * ------------------------------------------------------------------ */
+
+    public static function banEnabled(): bool
+    {
+        return self::bool('ban_enabled');
+    }
+
+    /** Failed sign ins from one IP that trigger a ban, never fewer than three. */
+    public static function banAfterFailures(): int
+    {
+        return self::clamp(self::int('ban_after_failures'), self::MIN_BAN_AFTER_FAILURES, self::MAX_BAN_AFTER_FAILURES);
+    }
+
+    /** The window, in minutes, those failures are counted in. */
+    public static function banWindowMinutes(): int
+    {
+        return self::clamp(self::int('ban_window_minutes'), self::MIN_BAN_WINDOW_MINUTES, self::MAX_BAN_WINDOW_MINUTES);
+    }
+
+    /** How long a ban lasts, in minutes, before it lifts on its own. */
+    public static function banDurationMinutes(): int
+    {
+        return self::clamp(self::int('ban_duration_minutes'), self::MIN_BAN_DURATION_MINUTES, self::MAX_BAN_DURATION_MINUTES);
+    }
+
+    /* ---------------------------------------------------------------------
+     | Typed accessors — rate limits
+     * ------------------------------------------------------------------ */
+
+    /** Sign-in POSTs allowed from one IP per minute. */
+    public static function loginAttemptsPerMinute(): int
+    {
+        return self::clamp(self::int('login_attempts_per_minute'), self::MIN_LOGIN_ATTEMPTS_PER_MINUTE, self::MAX_LOGIN_ATTEMPTS_PER_MINUTE);
+    }
+
+    /**
+     * Requests one signed-in user may make per minute across the admin area.
+     *
+     * 0 means no limit. Anything else is floored at 60, so a typo such as 6
+     * cannot stall the scoring desk in the middle of an event.
+     */
+    public static function adminRequestsPerMinute(): int
+    {
+        $value = self::int('admin_requests_per_minute');
+
+        if ($value <= 0) {
+            return 0;
+        }
+
+        return self::clamp($value, self::MIN_ADMIN_REQUESTS_PER_MINUTE, self::MAX_ADMIN_REQUESTS_PER_MINUTE);
+    }
+
+    /* ---------------------------------------------------------------------
+     | Typed accessors — IP allowlist
+     * ------------------------------------------------------------------ */
+
+    /**
+     * The allowlist entries, one IP or CIDR range each. Empty means no restriction.
+     *
+     * @return array<int, string>
+     */
+    public static function ipAllowlist(): array
+    {
+        return self::allowlistLines((string) self::get('ip_allowlist'));
+    }
+
+    /**
+     * Split allowlist text into its trimmed, non-empty lines.
+     *
+     * @return array<int, string>
+     */
+    public static function allowlistLines(string $text): array
+    {
+        $lines = preg_split('/\R/', $text) ?: [];
+
+        return array_values(array_filter(
+            array_map('trim', $lines),
+            fn (string $line) => $line !== '',
+        ));
+    }
+
+    private static function clamp(int $value, int $min, int $max): int
+    {
+        return max($min, min($max, $value));
+    }
+
+    /* ---------------------------------------------------------------------
      | Form values
      * ------------------------------------------------------------------ */
 
@@ -215,6 +350,13 @@ final class SecuritySettings
             'session_timeout_minutes' => (string) self::sessionTimeoutMinutes(),
             'single_session' => self::singleSession() ? '1' : '0',
             'destroy_session_on_logout' => self::destroySessionOnLogout() ? '1' : '0',
+            'ban_enabled' => self::banEnabled() ? '1' : '0',
+            'ban_after_failures' => (string) self::banAfterFailures(),
+            'ban_window_minutes' => (string) self::banWindowMinutes(),
+            'ban_duration_minutes' => (string) self::banDurationMinutes(),
+            'login_attempts_per_minute' => (string) self::loginAttemptsPerMinute(),
+            'admin_requests_per_minute' => (string) self::adminRequestsPerMinute(),
+            'ip_allowlist' => implode("\n", self::ipAllowlist()),
         ];
     }
 

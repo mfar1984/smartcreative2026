@@ -341,6 +341,92 @@
                     </x-admin.field-row>
                 </x-admin.panel>
 
+                {{-- Part 2. Everything below applies to the admin sign in and the admin
+                     area only. The public website, registration, checkout and the
+                     payment callbacks are never banned, limited or allowlisted. --}}
+                <x-admin.panel title="Failed Sign-in Bans" icon="warning">
+                    <x-admin.field-row label="Ban Repeated Failures" help="Block sign in from one IP address after too many failed attempts. A super admin can still sign in from a banned address." for="ban_enabled" error="ban_enabled">
+                        <div class="md:pt-2">
+                            <label for="ban_enabled" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="ban_enabled" value="0">
+                                <input type="checkbox" id="ban_enabled" name="ban_enabled" value="1"
+                                       @checked(old('ban_enabled', $security['ban_enabled']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Ban an IP address after repeated failed sign ins</span>
+                            </label>
+                        </div>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Failures Before Ban" help="Failed sign ins from one IP address that trigger a ban. At least {{ \App\Support\SecuritySettings::MIN_BAN_AFTER_FAILURES }}." for="ban_after_failures" :required="true" error="ban_after_failures">
+                        <input type="number" id="ban_after_failures" name="ban_after_failures" required
+                               min="{{ \App\Support\SecuritySettings::MIN_BAN_AFTER_FAILURES }}"
+                               max="{{ \App\Support\SecuritySettings::MAX_BAN_AFTER_FAILURES }}"
+                               value="{{ old('ban_after_failures', $security['ban_after_failures']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Counting Window (minutes)" help="Only failures within this many minutes of each other count towards a ban." for="ban_window_minutes" :required="true" error="ban_window_minutes">
+                        <input type="number" id="ban_window_minutes" name="ban_window_minutes" required
+                               min="{{ \App\Support\SecuritySettings::MIN_BAN_WINDOW_MINUTES }}"
+                               max="{{ \App\Support\SecuritySettings::MAX_BAN_WINDOW_MINUTES }}"
+                               value="{{ old('ban_window_minutes', $security['ban_window_minutes']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Ban Duration (minutes)" help="How long a ban lasts. It lifts on its own afterwards, or sooner from the list below." for="ban_duration_minutes" :required="true" error="ban_duration_minutes">
+                        <input type="number" id="ban_duration_minutes" name="ban_duration_minutes" required
+                               min="{{ \App\Support\SecuritySettings::MIN_BAN_DURATION_MINUTES }}"
+                               max="{{ \App\Support\SecuritySettings::MAX_BAN_DURATION_MINUTES }}"
+                               value="{{ old('ban_duration_minutes', $security['ban_duration_minutes']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+                </x-admin.panel>
+
+                <x-admin.panel title="Rate Limits" icon="pulse">
+                    <x-admin.field-row label="Sign-in Attempts Per Minute" help="Sign in attempts allowed from one IP address per minute. 10 is the current behaviour." for="login_attempts_per_minute" :required="true" error="login_attempts_per_minute">
+                        <input type="number" id="login_attempts_per_minute" name="login_attempts_per_minute" required
+                               min="{{ \App\Support\SecuritySettings::MIN_LOGIN_ATTEMPTS_PER_MINUTE }}"
+                               max="{{ \App\Support\SecuritySettings::MAX_LOGIN_ATTEMPTS_PER_MINUTE }}"
+                               value="{{ old('login_attempts_per_minute', $security['login_attempts_per_minute']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Admin Requests Per Minute" help="Requests one signed-in user may make per minute in the admin area. 0 means no limit, the current behaviour. Otherwise at least {{ \App\Support\SecuritySettings::MIN_ADMIN_REQUESTS_PER_MINUTE }}." for="admin_requests_per_minute" :required="true" error="admin_requests_per_minute">
+                        <input type="number" id="admin_requests_per_minute" name="admin_requests_per_minute" required
+                               min="0"
+                               max="{{ \App\Support\SecuritySettings::MAX_ADMIN_REQUESTS_PER_MINUTE }}"
+                               value="{{ old('admin_requests_per_minute', $security['admin_requests_per_minute']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+                </x-admin.panel>
+
+                <x-admin.panel title="IP Allowlist" icon="globe">
+                    <x-admin.field-row label="Allowed IP Addresses" help="One IP address or CIDR range per line. Leave empty to allow sign in from anywhere, the current behaviour." for="ip_allowlist" error="ip_allowlist">
+                        <textarea id="ip_allowlist" name="ip_allowlist" rows="5"
+                                  maxlength="{{ \App\Support\SecuritySettings::MAX_IP_ALLOWLIST_LENGTH }}"
+                                  placeholder="203.0.113.10&#10;198.51.100.0/24"
+                                  spellcheck="false"
+                                  @disabled(! $canUpdateSecurity)
+                                  class="{{ $input }} resize-y font-mono">{{ old('ip_allowlist', $security['ip_allowlist']) }}</textarea>
+
+                        <p class="text-xs text-gray-500 mt-1.5">
+                            Your current IP: <span class="font-mono font-semibold text-gray-700">{{ $currentIp }}</span>
+                        </p>
+                        <p class="text-xs text-amber-700 mt-1">
+                            When the list is not empty, anyone who is not a super admin is refused sign in, and
+                            signed out, unless their IP is on it. Add your own address before saving. A super
+                            admin is never blocked by this list, and failed sign ins from a listed address are
+                            never counted towards a ban.
+                        </p>
+                    </x-admin.field-row>
+                </x-admin.panel>
+
                 <div class="flex items-center justify-between gap-4 bg-white rounded-lg border border-gray-200 px-5 py-4 mt-5">
                     @if ($canUpdateSecurity)
                         <p class="text-xs text-gray-500">Changes take effect immediately after saving.</p>
@@ -352,6 +438,81 @@
                     @endif
                 </div>
             </form>
+
+            {{-- Banned IPs. Outside the settings form above on purpose: HTML does not
+                 allow one form inside another, and every button here is a DELETE of
+                 its own. Bans currently in force only; expired ones no longer bar
+                 anybody and are not listed. --}}
+            <x-admin.panel title="Banned IPs" icon="shield" :flush="true" class="mt-5">
+                @if ($canUpdateSecurity && $bans->isNotEmpty())
+                    <x-slot:actions>
+                        <form action="{{ route('admin.settings.security.bans.clear') }}" method="POST"
+                              onsubmit="return confirm('Lift every ban in this list?\n\nEach address can try to sign in again straight away.');">
+                            @csrf
+                            @method('DELETE')
+                            <button type="submit"
+                                    class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition">
+                                <x-admin.icon name="trash" class="w-4 h-4" />
+                                Clear all
+                            </button>
+                        </form>
+                    </x-slot:actions>
+                @endif
+
+                @if (! $bansEnforced && $bans->isNotEmpty())
+                    <p class="px-5 py-3 text-xs text-amber-800 bg-amber-50 border-b border-amber-200">
+                        Bans are switched off, so the addresses below are not being blocked.
+                    </p>
+                @endif
+
+                @if ($bans->isEmpty())
+                    <p class="px-5 py-10 text-sm text-gray-500 text-center">
+                        No IP address is banned right now.
+                    </p>
+                @else
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-left">
+                                <tr>
+                                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">IP Address</th>
+                                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Failed Attempts</th>
+                                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Banned At</th>
+                                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Expires At</th>
+                                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Reason</th>
+                                    @if ($canUpdateSecurity)
+                                        <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Actions</th>
+                                    @endif
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                @foreach ($bans as $ban)
+                                    <tr>
+                                        <td class="px-5 py-3 font-mono text-gray-900 break-all">{{ $ban->ip_address }}</td>
+                                        <td class="px-5 py-3 text-gray-600 tabular-nums">{{ $ban->failed_attempts }}</td>
+                                        <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ \App\Support\LocalTime::format($ban->banned_at) }}</td>
+                                        <td class="px-5 py-3 text-gray-600 whitespace-nowrap">{{ \App\Support\LocalTime::format($ban->expires_at) }}</td>
+                                        <td class="px-5 py-3 text-gray-600">{{ $ban->reason }}</td>
+                                        @if ($canUpdateSecurity)
+                                            <td class="px-5 py-3 text-center whitespace-nowrap">
+                                                <form action="{{ route('admin.settings.security.bans.destroy', $ban) }}" method="POST">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <button type="submit"
+                                                            class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition"
+                                                            aria-label="Remove the ban on {{ $ban->ip_address }}">
+                                                        <x-admin.icon name="trash" class="w-4 h-4" />
+                                                        Remove
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        @endif
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @endif
+            </x-admin.panel>
         @endif
 
         {{-- ==================== Backup & Restore ==================== --}}

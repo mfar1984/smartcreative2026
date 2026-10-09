@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UpdateGeneralConfigRequest;
 use App\Http\Requests\Admin\UpdateMaintenanceRequest;
 use App\Http\Requests\Admin\UpdateSecurityConfigRequest;
+use App\Models\BannedIp;
 use App\Models\Setting;
 use App\Services\AdminLogger;
+use App\Services\Security\LoginBanService;
 use App\Support\BrandingSettings;
 use App\Support\GeneralSettings;
 use App\Support\SecuritySettings;
@@ -60,7 +62,7 @@ class GeneralConfigController extends Controller
         'message' => 'The website is temporarily unavailable while we carry out scheduled maintenance. Please check back shortly.',
     ];
 
-    public function index(Request $request)
+    public function index(Request $request, LoginBanService $bans)
     {
         $tabs = array_filter(
             self::TABS,
@@ -75,6 +77,13 @@ class GeneralConfigController extends Controller
             'activeTab' => $tab,
             'general' => $this->generalValues(),
             'security' => SecuritySettings::formValues(),
+
+            // Read only for the Security tab, which only a role holding
+            // settings.security.view is ever shown.
+            'bans' => $tab === 'security' ? $bans->active() : collect(),
+            'bansEnforced' => SecuritySettings::banEnabled(),
+            'currentIp' => $request->ip(),
+
             'maintenance' => $this->maintenanceValues(),
             'backup' => $this->backupOverview(),
             'timezones' => \DateTimeZone::listIdentifiers(),
@@ -206,7 +215,7 @@ class GeneralConfigController extends Controller
     public function updateSecurity(UpdateSecurityConfigRequest $request)
     {
         $before = SecuritySettings::formValues();
-        $validated = $request->validated();
+        $validated = $request->settings();
 
         foreach ($validated as $key => $value) {
             SecuritySettings::write($key, (string) $value);
@@ -228,6 +237,42 @@ class GeneralConfigController extends Controller
         return redirect()
             ->route('admin.settings.general', ['tab' => 'security'])
             ->with('status', 'Security settings saved.');
+    }
+
+    /**
+     * Remove one row from the Banned IPs list: lifts that address's ban and clears
+     * its failure count.
+     */
+    public function destroyBan(BannedIp $bannedIp, LoginBanService $bans)
+    {
+        $ip = $bannedIp->ip_address;
+
+        $bans->lift($ip);
+
+        AdminLogger::activity('settings.security.unban', sprintf('Removed the sign-in ban on %s.', $ip));
+
+        return redirect()
+            ->route('admin.settings.general', ['tab' => 'security'])
+            ->with('status', sprintf('The ban on %s was removed. It can sign in again now.', $ip));
+    }
+
+    /** Clear all: lifts every ban at once. */
+    public function clearBans(LoginBanService $bans)
+    {
+        $lifted = $bans->liftAll();
+
+        AdminLogger::activity(
+            'settings.security.unban_all',
+            $lifted->isEmpty()
+                ? 'Cleared the Banned IPs list; no ban was in force.'
+                : sprintf('Cleared every sign-in ban (%d): %s.', $lifted->count(), $lifted->pluck('ip_address')->implode(', ')),
+        );
+
+        return redirect()
+            ->route('admin.settings.general', ['tab' => 'security'])
+            ->with('status', $lifted->isEmpty()
+                ? 'There were no bans to clear.'
+                : sprintf('%d %s lifted.', $lifted->count(), $lifted->count() === 1 ? 'ban' : 'bans'));
     }
 
     /**

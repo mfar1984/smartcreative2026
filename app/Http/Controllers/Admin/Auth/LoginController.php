@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Admin\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\EnforceIpAllowlist;
 use App\Http\Requests\Admin\LoginRequest;
 use App\Services\AdminLogger;
+use App\Services\Security\LoginBanService;
 use App\Support\SessionGuard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -12,9 +14,27 @@ use Illuminate\Validation\ValidationException;
 
 class LoginController extends Controller
 {
-    public function create()
+    /**
+     * The sign-in form. NEVER blocked, not even for a banned address.
+     *
+     * A super admin can sign in through a ban (see LoginRequest), and this form is
+     * the only way to do it, so a banned address still gets the form, with a notice
+     * saying sign in from its network is blocked and until when.
+     */
+    public function create(Request $request, LoginBanService $bans)
     {
-        return view('admin.auth.login');
+        $ip = (string) $request->ip();
+        $ban = $bans->activeBan($ip);
+
+        return view('admin.auth.login', [
+            'banNotice' => $ban !== null ? $bans->blockedMessage($ban) : null,
+
+            // Carried in the URL rather than flashed: the sign-out that sends people
+            // here deletes the session row after the response, flash included.
+            'networkNotice' => $request->query('notice') === EnforceIpAllowlist::NOTICE
+                ? sprintf('You were signed out because your current network (IP %s) is not on the admin IP allowlist.', $ip)
+                : null,
+        ]);
     }
 
     /**

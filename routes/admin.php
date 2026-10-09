@@ -50,12 +50,26 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('admin')->name('admin.')->group(function () {
 
-    // Sign in. Throttled at the route as a second line of defence behind the
-    // per username limiter in LoginRequest.
+    /*
+    | Sign in. Throttled at the route, per IP, as a second line of defence behind
+    | the per username limiter in LoginRequest. The limit is the admin-login named
+    | limiter (AppServiceProvider), read from General Config, Security on every
+    | request; its default of 10 a minute is the old throttle:10,1.
+    |
+    | The GET is never throttled and never blocked, not even for a banned address:
+    | a super admin can sign in through a ban, and this form is the way in.
+    |
+    | The IP ban, this limiter and the IP allowlist apply to these two routes and to
+    | the authenticated admin group below, and to nothing else. Never to the public
+    | website, registration, checkout, the payment return pages or the CHIP webhook:
+    | on event day hundreds of participants on the stadium Wi-Fi share one public IP,
+    | and the gateway calls back from a few fixed addresses, so a ban or a limit on
+    | the public side would block a whole venue or stop payments being recorded.
+    */
     Route::middleware('guest')->group(function () {
         Route::get('login', [LoginController::class, 'create'])->name('login');
         Route::post('login', [LoginController::class, 'store'])
-            ->middleware('throttle:10,1')
+            ->middleware('throttle:admin-login')
             ->name('login.attempt');
     });
 
@@ -66,8 +80,10 @@ Route::prefix('admin')->name('admin.')->group(function () {
     // Everything below requires an authenticated account that still holds
     // admin access, plus the specific permission for that screen. session.timeout
     // runs after admin so the user is resolved before the inactivity check reads
-    // the session.
-    Route::middleware(['auth', 'admin', 'session.timeout'])->group(function () {
+    // the session. ip.allowlist signs out anyone but a super admin whose IP is not
+    // on a non-empty allowlist; throttle:admin-requests is the per-user request
+    // limit, off by default. Both are set on General Config, Security.
+    Route::middleware(['auth', 'admin', 'session.timeout', 'ip.allowlist', 'throttle:admin-requests'])->group(function () {
 
         Route::get('/', DashboardController::class)
             ->middleware('permission:dashboard.view')
@@ -964,6 +980,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::put('security', [GeneralConfigController::class, 'updateSecurity'])
                 ->middleware('permission:settings.security.update')
                 ->name('security.update');
+
+            // Banned IPs on the Security tab. DELETE only, so a GET (a prefetch,
+            // a pasted link) can never lift a ban.
+            Route::delete('security/banned-ips', [GeneralConfigController::class, 'clearBans'])
+                ->middleware('permission:settings.security.update')
+                ->name('security.bans.clear');
+            Route::delete('security/banned-ips/{bannedIp}', [GeneralConfigController::class, 'destroyBan'])
+                ->whereNumber('bannedIp')
+                ->middleware('permission:settings.security.update')
+                ->name('security.bans.destroy');
 
             // Integration - tabs: Email, API & Webhook, Payments, SMS, Telegram
             Route::get('integration', [IntegrationController::class, 'index'])

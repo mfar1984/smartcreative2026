@@ -3,9 +3,13 @@
 namespace App\Providers;
 
 use App\Support\MailSettings;
+use App\Support\SecuritySettings;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Mail\MailManager;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
 
@@ -37,6 +41,45 @@ class AppServiceProvider extends ServiceProvider
          */
         Paginator::defaultView('vendor.pagination.admin');
         Paginator::defaultSimpleView('vendor.pagination.admin');
+
+        $this->configureRateLimiting();
+    }
+
+    /**
+     * The two admin rate limits set on General Config, Security.
+     *
+     * Read from the settings on every request rather than at boot, so a change
+     * applies on the next request without a deploy. The callbacks only run for
+     * the routes that name them, so defining them here costs a public request
+     * nothing.
+     *
+     * ADMIN ROUTES ONLY. Neither limiter may be attached to the public site,
+     * registration, checkout or the payment callbacks: on event day hundreds of
+     * participants on the stadium Wi-Fi share one public IP, and a limit keyed on
+     * that IP would refuse a whole venue at once.
+     */
+    private function configureRateLimiting(): void
+    {
+        // POST admin/login, per IP. The default of 10 is exactly the old
+        // throttle:10,1, with its own counter instead of one shared with every
+        // other unnamed throttle on the site.
+        RateLimiter::for('admin-login', function (Request $request) {
+            return Limit::perMinute(SecuritySettings::loginAttemptsPerMinute())
+                ->by((string) $request->ip());
+        });
+
+        // The authenticated admin group, per user, so one busy account cannot
+        // slow down the next. Off (0) by default, which is today's behaviour.
+        RateLimiter::for('admin-requests', function (Request $request) {
+            $perMinute = SecuritySettings::adminRequestsPerMinute();
+
+            if ($perMinute === 0) {
+                return Limit::none();
+            }
+
+            return Limit::perMinute($perMinute)
+                ->by((string) ($request->user()?->getAuthIdentifier() ?? $request->ip()));
+        });
     }
 
     /**
