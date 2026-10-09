@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin\Event;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\EventRequest;
+use App\Models\Coupon;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\WifiCredential;
@@ -107,6 +108,7 @@ class RegistrationController extends Controller
 
         $addons->sync($event, $request->addonRows());
         $questions->sync($event, $request->questionRows());
+        $this->syncCoupons($request, $event);
 
         AdminLogger::activity('events.create', sprintf('Created event %s.', $event->title));
         AdminLogger::audit($event, 'created', null, [
@@ -248,6 +250,7 @@ class RegistrationController extends Controller
 
         $addons->sync($event, $request->addonRows());
         $questions->sync($event, $request->questionRows());
+        $this->syncCoupons($request, $event);
 
         AdminLogger::activity('events.update', sprintf('Updated event %s.', $event->title));
         AdminLogger::audit($event, 'updated', $before, [
@@ -336,6 +339,20 @@ class RegistrationController extends Controller
             'modes' => Event::MODES,
             'categories' => Event::query()->distinct()->orderBy('category')->pluck('category')->all(),
             'roles' => ParticipantOptions::ROLES,
+
+            /*
+             | Coupon batches that may be ticked for this event.
+             |
+             | Event-kind only, so a shop coupon can never be attached to an event:
+             | the kind decides which total the discount comes off and which record a
+             | redemption points at. Expired batches are left out, because ticking one
+             | would promise a discount that refuses itself at redeem time; an
+             | exhausted batch is deliberately still offered, so a used-up coupon can
+             | be left in place while a fresh one is added beside it.
+             */
+            'coupons' => Coupon::query()->ofKind(Coupon::KIND_EVENT)->offered()->orderBy('name')->get(),
+            'selectedCoupons' => $event->exists ? $event->coupons()->pluck('coupons.id')->all() : [],
+
             'payment' => [
                 'summary' => PaymentSettings::summary(),
                 'ready' => PaymentSettings::isReady(),
@@ -343,6 +360,39 @@ class RegistrationController extends Controller
                 'provider' => PaymentSettings::providerLabel(),
             ],
         ];
+    }
+
+    /**
+     * Apply the coupon ticks on the form.
+     *
+     * Every posted id is checked against the Event-kind batches before it is written,
+     * so a tampered payload cannot attach a shop coupon — or an id that is not a
+     * coupon at all — to an event. The pivot carries no money, but which coupons an
+     * event accepts decides what it can be discounted by.
+     *
+     * The hidden `coupons_present` marker is what makes unticking the last one work:
+     * an empty tick list sends no `coupons` key at all, which is indistinguishable
+     * from a payload that never drew the picker. Without the marker the detach would
+     * never happen and a coupon could not be removed.
+     */
+    private function syncCoupons(EventRequest $request, Event $event): void
+    {
+        if (! $request->boolean('coupons_present')) {
+            return;
+        }
+
+        $posted = array_map('intval', (array) $request->input('coupons', []));
+
+        $valid = $posted === []
+            ? []
+            : Coupon::query()
+                ->ofKind(Coupon::KIND_EVENT)
+                ->whereKey($posted)
+                ->pluck('id')
+                ->all();
+
+        $event->coupons()->sync($valid);
+        $event->unsetRelation('coupons');
     }
 
     /**

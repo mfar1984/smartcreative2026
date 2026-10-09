@@ -45,6 +45,17 @@ class PaymentFigures
      *
      * A free entry has no payment to report on, so including it would pad every
      * count with rows that can never move.
+     *
+     * A fully discounted registration is a free entry by this test, deliberately: a
+     * coupon that took RM 250.00 down to RM 0.00 leaves an entry holding no money, so
+     * it belongs in neither Collected nor Outstanding and the `amount > 0` filter
+     * stays exactly as it is.
+     *
+     * What that filter must not do is drop a real person out of a HEAD COUNT, which is
+     * why byEvent() is deliberately not built on this. Everything else here is a money
+     * figure or a chase list — abandoned() and failed() are lists of people to contact
+     * about a payment, and countsByStatus() is the payment breakdown drawn beside the
+     * takings — so a row holding no money has no place in any of them.
      */
     public static function base(): Builder
     {
@@ -256,7 +267,20 @@ class PaymentFigures
      */
     public static function byEvent(?string $from = null, ?string $to = null): array
     {
-        $rows = self::window(self::base(), $from, $to)
+        /*
+         | NOT built on base(), and that is the whole difference between this and
+         | every other figure in this class.
+         |
+         | base() filters to `amount > 0`, which is right for money and wrong for a
+         | head count. Once a coupon can take a registration down to RM 0.00, a free
+         | entry is a real person who really registered — and with the filter on the
+         | query, COUNT(*) dropped them, so an event that gave away twenty places
+         | reported twenty fewer entries than it had taken. The money columns keep the
+         | filter inside their own CASE expressions instead, so collected and
+         | outstanding report exactly the figures they always have while the count
+         | stops lying.
+         */
+        $rows = self::window(EventRegistration::query(), $from, $to)
             ->join('events', 'events.id', '=', 'event_registrations.event_id')
             /*
              | Received money and remaining balance, matching collected() and
@@ -267,8 +291,8 @@ class PaymentFigures
             ->selectRaw("
                 events.title as title,
                 COUNT(*) as entries,
-                SUM(amount_paid) as collected,
-                SUM(CASE WHEN payment_status IN (?, ?, ?, ?) AND event_registrations.status != ? THEN amount - amount_paid ELSE 0 END) as outstanding
+                SUM(CASE WHEN event_registrations.amount > 0 THEN amount_paid ELSE 0 END) as collected,
+                SUM(CASE WHEN event_registrations.amount > 0 AND payment_status IN (?, ?, ?, ?) AND event_registrations.status != ? THEN amount - amount_paid ELSE 0 END) as outstanding
             ", [
                 ...self::OWING,
                 EventRegistration::STATUS_CANCELLED,

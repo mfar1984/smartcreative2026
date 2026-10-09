@@ -131,6 +131,20 @@ class ShopProductRequest extends FormRequest
             'categories' => ['array'],
             'categories.*' => ['integer', Rule::exists('shop_categories', 'id')],
 
+            /* ---------------- Coupons ----------------
+             |
+             | Ids only. Which of them are actually Shop-kind batches is checked in the
+             | controller before anything is written, because that is the rule that
+             | matters: an event coupon attached to a product would discount the wrong
+             | total.
+             |
+             | coupons_present marks that the picker was drawn, so an empty list can be
+             | told apart from a payload that never had one.
+             */
+            'coupons' => ['nullable', 'array', 'max:100'],
+            'coupons.*' => ['integer'],
+            'coupons_present' => ['nullable', 'boolean'],
+
             /* ---------------- Search engines ---------------- */
 
             'seo_title' => ['nullable', 'string', 'max:70'],
@@ -491,6 +505,11 @@ class ShopProductRequest extends FormRequest
         $data = $this->safe()->except([
             'slug',
             'categories',
+
+            // Written to the pivot by the controller, not to the products row.
+            'coupons',
+            'coupons_present',
+
             'variants',
             'images',
             'remove_images',

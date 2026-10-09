@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin\Shop;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ShopProductRequest;
+use App\Models\Coupon;
 use App\Models\Event;
 use App\Models\ShopCategory;
 use App\Models\ShopProduct;
@@ -101,6 +102,7 @@ class ProductController extends Controller
 
         $product->categories()->sync($request->categoryIds());
         $variants->sync($product, $request->variantRows());
+        $this->syncCoupons($request, $product);
 
         $this->addImages($request, $product);
 
@@ -142,6 +144,7 @@ class ProductController extends Controller
 
         $product->categories()->sync($request->categoryIds());
         $variants->sync($product, $request->variantRows());
+        $this->syncCoupons($request, $product);
 
         $this->removeImages($request, $product);
         $this->addImages($request, $product);
@@ -211,6 +214,17 @@ class ProductController extends Controller
                 ? $product->categories->pluck('id')->all()
                 : [],
 
+            /*
+             | Coupon batches that may be ticked for this product.
+             |
+             | Shop-kind only, so an event coupon can never be attached to a product:
+             | the kind decides which total the discount comes off and which record a
+             | redemption points at. Expired batches are left out because ticking one
+             | would promise a discount that refuses itself at checkout.
+             */
+            'coupons' => Coupon::query()->ofKind(Coupon::KIND_SHOP)->offered()->orderBy('name')->get(),
+            'selectedCoupons' => $product->exists ? $product->coupons()->pluck('coupons.id')->all() : [],
+
             'fulfilments' => ShopProduct::FULFILMENTS,
 
             /*
@@ -223,6 +237,37 @@ class ProductController extends Controller
              */
             'collectableEvents' => $this->collectableEvents($product),
         ];
+    }
+
+    /**
+     * Apply the coupon ticks on the form.
+     *
+     * Every posted id is checked against the Shop-kind batches before anything is
+     * written, so a tampered payload cannot attach an event coupon — or an id that is
+     * not a coupon at all — to a product.
+     *
+     * The hidden `coupons_present` marker is what makes unticking the last one work:
+     * an empty tick list sends no `coupons` key, which is indistinguishable from a
+     * payload that never drew the picker.
+     */
+    private function syncCoupons(ShopProductRequest $request, ShopProduct $product): void
+    {
+        if (! $request->boolean('coupons_present')) {
+            return;
+        }
+
+        $posted = array_map('intval', (array) $request->input('coupons', []));
+
+        $valid = $posted === []
+            ? []
+            : Coupon::query()
+                ->ofKind(Coupon::KIND_SHOP)
+                ->whereKey($posted)
+                ->pluck('id')
+                ->all();
+
+        $product->coupons()->sync($valid);
+        $product->unsetRelation('coupons');
     }
 
     /**

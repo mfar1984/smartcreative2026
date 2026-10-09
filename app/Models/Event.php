@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\ParticipantOptions;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 
@@ -134,6 +135,18 @@ class Event extends Model
     public function wifiCredentials(): HasMany
     {
         return $this->hasMany(WifiCredential::class);
+    }
+
+    /**
+     * Coupon batches the organiser has ticked for this event.
+     *
+     * Several may be ticked, which is the owner's intent: a batch that runs out is
+     * left in place and a fresh one added beside it, so the page can offer whichever
+     * still has codes rather than losing the discount altogether.
+     */
+    public function coupons(): BelongsToMany
+    {
+        return $this->belongsToMany(Coupon::class)->orderBy('coupons.name');
     }
 
     /**

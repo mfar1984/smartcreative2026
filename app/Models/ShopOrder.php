@@ -126,6 +126,8 @@ class ShopOrder extends Model
         'state',
         'country',
         'items_total',
+        'discount_total',
+        'coupon_code_id',
         'shipping_total',
         'grand_total',
         'shipping_label',
@@ -161,6 +163,7 @@ class ShopOrder extends Model
             'received_confirmed_at' => 'datetime',
             'refunded_at' => 'datetime',
             'items_total' => 'decimal:2',
+            'discount_total' => 'decimal:2',
             'shipping_total' => 'decimal:2',
             'grand_total' => 'decimal:2',
             'refunded_amount' => 'decimal:2',
@@ -540,6 +543,39 @@ class ShopOrder extends Model
     public function itemsTotalLabel(): string
     {
         return PaymentFigures::money((float) $this->items_total);
+    }
+
+    /* ---------------------------------------------------------------------
+     | Coupons
+     |
+     | The discount comes off the ITEMS and never off the postage: a courier charges
+     | what it charges whether or not the buyer had a code.
+     |
+     |     grand_total = items_total - discount_total + shipping_total
+     |
+     | with the discount capped at items_total, so the total can never go negative and
+     | never eat the delivery charge.
+     * ------------------------------------------------------------------ */
+
+    public function couponCode(): BelongsTo
+    {
+        return $this->belongsTo(CouponCode::class, 'coupon_code_id');
+    }
+
+    public function hasDiscount(): bool
+    {
+        return (float) $this->discount_total > 0.005;
+    }
+
+    public function discountTotalLabel(): string
+    {
+        return PaymentFigures::money((float) $this->discount_total);
+    }
+
+    /** What the items come to once the coupon is off them. */
+    public function discountedItemsTotal(): float
+    {
+        return max(0.0, round((float) $this->items_total - (float) $this->discount_total, 2));
     }
 
     public function shippingTotalLabel(): string

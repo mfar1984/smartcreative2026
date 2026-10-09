@@ -79,6 +79,25 @@ class RolesAndPermissionsSeeder extends Seeder
         ],
 
         /*
+        | Coupon. One module rather than one per screen, because Tracking is the same
+        | batches read from the redemption end: there is nothing on it somebody with
+        | the coupon list cannot already see.
+        |
+        | Granted to no role here, which leaves it with super admin only. That is
+        | deliberate for a first release: a coupon is money off, and who may create
+        | one is a decision for the owner to make in Roles Management rather than for
+        | this file to assume.
+        */
+        'Coupon' => [
+            'Coupons' => [
+                'view' => ['coupons.view', 'View coupons and redemptions'],
+                'create' => ['coupons.create', 'Create coupon batches'],
+                'update' => ['coupons.update', 'Edit coupon batches'],
+                'delete' => ['coupons.delete', 'Delete coupon batches'],
+            ],
+        ],
+
+        /*
         | One module per screen in the sidebar, so a role can be given one
         | Campaign screen without the other four. A single campaigns.view covering
         | all five made the menu all or nothing: unticking anything changed

@@ -395,6 +395,17 @@
                 'currency' => $payment['currency'],
             ])
 
+            {{-- ---------------- Coupons ----------------
+
+                 Directly after the items, because between them they are everything
+                 this event charges for and everything it takes off. --}}
+            @include('admin.coupon.partials.picker', [
+                'coupons' => $coupons,
+                'selected' => $selectedCoupons,
+                'price' => $event->registrationAmount(),
+                'priceNoun' => 'event',
+            ])
+
             {{-- ---------------- How people register ---------------- --}}
             <x-admin.panel title="Registration Rules" icon="users">
                 <x-admin.field-row label="Registration Mode" help="Decides what the public form asks for." for="registration_mode" :required="true" error="registration_mode">

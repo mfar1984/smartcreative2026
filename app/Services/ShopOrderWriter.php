@@ -31,9 +31,19 @@ class ShopOrderWriter
 
     /**
      * @param  array<string, mixed>  $buyer  validated customer and address fields
+     * @param  float  $discount  what a coupon takes off the GOODS, never the postage.
+     *         Worked out and claimed by the caller through CouponRedeemer, because
+     *         claiming is race-safe work that belongs in one place; this method is
+     *         handed the figure and is responsible only for storing it correctly.
+     * @param  int|null  $couponCodeId  the code that paid for it, for the trail
      */
-    public function place(array $buyer, string $paymentMethod, ?string $ip = null): ShopOrder
-    {
+    public function place(
+        array $buyer,
+        string $paymentMethod,
+        ?string $ip = null,
+        float $discount = 0.0,
+        ?int $couponCodeId = null,
+    ): ShopOrder {
         $lines = Cart::lines();
 
         if ($lines->isEmpty()) {
@@ -43,6 +53,21 @@ class ShopOrderWriter
         $itemsTotal = round((float) $lines->sum('line_total'), 2);
 
         /*
+         | Capped at the goods, so the total can never go negative and the discount can
+         | never reach the postage. A courier charges what it charges whether or not
+         | the buyer had a code, and letting a RM100 coupon on a RM30 basket swallow
+         | the delivery charge would be paying to post somebody a free parcel.
+         */
+        $discount = min(round(max(0.0, $discount), 2), $itemsTotal);
+
+        /*
+         | Postage is quoted on the FULL goods total, not the discounted one.
+         |
+         | ShippingSettings::quote() bands by a free-delivery threshold, and quoting it
+         | after the discount would hand a buyer free postage they had not reached —
+         | the coupon is a reduction on the goods, not a second promotion on the
+         | delivery.
+         |
          | A collected order is never posted, so postage is not quoted for it at all
          | rather than quoted and then zeroed. Nothing about the shipping settings is
          | consulted: no flat rate, no free-delivery threshold, no banding by state.
@@ -51,7 +76,7 @@ class ShopOrderWriter
         $shipping = $isOffline ? 0.0 : ShippingSettings::quote($buyer['state'] ?? null, $itemsTotal);
         $collection = $isOffline ? Cart::collectionPoint() : null;
 
-        return DB::transaction(function () use ($lines, $buyer, $paymentMethod, $ip, $itemsTotal, $shipping, $isOffline, $collection) {
+        return DB::transaction(function () use ($lines, $buyer, $paymentMethod, $ip, $itemsTotal, $discount, $couponCodeId, $shipping, $isOffline, $collection) {
             $order = new ShopOrder([
                 'reference' => ShopOrder::nextReference(),
                 'status' => ShopOrder::STATUS_PENDING_PAYMENT,
@@ -74,8 +99,12 @@ class ShopOrderWriter
                 'country' => 'Malaysia',
 
                 'items_total' => $itemsTotal,
+                'discount_total' => $discount,
+                'coupon_code_id' => $couponCodeId,
                 'shipping_total' => $shipping,
-                'grand_total' => round($itemsTotal + $shipping, 2),
+                // Goods less the coupon, plus the postage. The discount is already
+                // capped at the goods above, so this cannot go negative.
+                'grand_total' => round($itemsTotal - $discount + $shipping, 2),
                 'shipping_label' => $isOffline
                     ? 'Collected at the counter, nothing posted'
                     : $this->shippingLabel($buyer['state'] ?? null, $shipping),
@@ -94,6 +123,21 @@ class ShopOrderWriter
             ]);
 
             $order->save();
+
+            /*
+             | Point the claimed code at the order it paid for.
+             |
+             | The claim has to happen before this, because the discount is part of the
+             | total the row is created with — so the code is stamped first and learns
+             | which order it belongs to here, inside the same transaction. A rollback
+             | takes both, which is the point: a code marked spent against an order
+             | that was never written would be a coupon lost for nothing.
+             */
+            if ($couponCodeId !== null) {
+                \App\Models\CouponCode::query()
+                    ->whereKey($couponCodeId)
+                    ->update(['shop_order_id' => $order->id]);
+            }
 
             foreach ($lines as $line) {
                 /** @var ShopProduct $product */
@@ -117,11 +161,14 @@ class ShopOrderWriter
             }
 
             $this->record($order, ShopOrder::STATUS_PENDING_PAYMENT, sprintf(
-                'Order placed, paying by %s. %s',
+                'Order placed, paying by %s. %s%s',
                 ShopOrder::METHODS[$paymentMethod] ?? $paymentMethod,
                 $isOffline
                     ? 'To be collected at ' . ($order->collectionSummary() ?: 'the counter') . '.'
                     : 'To be posted.',
+                $discount > 0
+                    ? sprintf(' Coupon took %s off the goods.', \App\Support\PaymentFigures::money($discount))
+                    : '',
             ));
 
             return $order;

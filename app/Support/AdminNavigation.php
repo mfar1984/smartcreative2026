@@ -45,6 +45,41 @@ class AdminNavigation
                 // that name, and repeating it reads badly in the sidebar.
                 'label' => 'Modules',
                 'items' => [
+                    /*
+                    | Coupon sits above Event because that is the order the work
+                    | happens in: a batch is created first, then ticked on the event or
+                    | the product it discounts. Its own group rather than an Event
+                    | child, because the same batches are ticked on shop products too.
+                    */
+                    [
+                        'kind' => 'group',
+                        'key' => 'coupons',
+                        'label' => 'Coupon',
+                        'icon' => 'tag',
+                        'children' => [
+                            [
+                                'label' => 'Coupon',
+                                'route' => 'admin.coupons.index',
+                                /*
+                                | Listed rather than wildcarded, so the create and edit
+                                | screens light this item while Tracking keeps its own.
+                                */
+                                'active' => [
+                                    'admin.coupons.index',
+                                    'admin.coupons.create',
+                                    'admin.coupons.edit',
+                                ],
+                                'permission' => 'coupons.view',
+                            ],
+                            [
+                                'label' => 'Tracking',
+                                'route' => 'admin.coupons.tracking',
+                                'active' => 'admin.coupons.tracking',
+                                'permission' => 'coupons.view',
+                            ],
+                        ],
+                    ],
+
                     [
                         'kind' => 'group',
                         'key' => 'event',

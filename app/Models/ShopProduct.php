@@ -113,6 +113,18 @@ class ShopProduct extends Model
         return $this->belongsToMany(ShopCategory::class, 'shop_category_product');
     }
 
+    /**
+     * Coupon batches this product accepts.
+     *
+     * Ticking one here says "this product accepts that code at checkout"; the buyer
+     * is still the one who types it. Several may be ticked so a batch that runs out
+     * can be left in place and a fresh one added beside it.
+     */
+    public function coupons(): BelongsToMany
+    {
+        return $this->belongsToMany(Coupon::class, 'coupon_shop_product')->orderBy('coupons.name');
+    }
+
     /** Ordered inside the relation so every caller gets the same sequence. */
     public function images(): HasMany
     {

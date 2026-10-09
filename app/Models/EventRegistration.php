@@ -65,6 +65,8 @@ class EventRegistration extends Model
         'payment_synced_at',
         'registration_fee',
         'addons_total',
+        'discount_amount',
+        'coupon_code_id',
         'amount',
         'amount_paid',
         'refunded_amount',
@@ -79,6 +81,7 @@ class EventRegistration extends Model
         return [
             'registration_fee' => 'decimal:2',
             'addons_total' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
             'amount' => 'decimal:2',
             'amount_paid' => 'decimal:2',
             'refunded_amount' => 'decimal:2',
@@ -319,6 +322,36 @@ class EventRegistration extends Model
     public function addonsTotalLabel(): string
     {
         return 'RM ' . number_format((float) $this->addons_total, 2);
+    }
+
+    /* ---------------------------------------------------------------------
+     | Coupons
+     |
+     | `discount_amount` is a record of what was taken off, never a figure anything
+     | subtracts again. The discount is already inside `amount`:
+     |
+     |     amount = registration_fee + addons_total - discount_amount, floored at 0
+     |
+     | which is what keeps every money figure in the system correct without touching
+     | any of them. PaymentFigures works outstanding out as `amount - amount_paid`
+     | rather than reading a column, and paymentStatusFromLedger() already answers
+     | PAID for isFree(), so a 100% coupon needs no new status rule anywhere.
+     * ------------------------------------------------------------------ */
+
+    /** The coupon code this entry was given, when it had one. */
+    public function couponCode(): BelongsTo
+    {
+        return $this->belongsTo(CouponCode::class, 'coupon_code_id');
+    }
+
+    public function hasDiscount(): bool
+    {
+        return (float) $this->discount_amount > 0.005;
+    }
+
+    public function discountLabel(): string
+    {
+        return 'RM ' . number_format((float) $this->discount_amount, 2);
     }
 
     public function isPaid(): bool

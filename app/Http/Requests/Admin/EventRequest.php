@@ -159,6 +159,21 @@ class EventRequest extends FormRequest
             // Zero is allowed and means free. Blank means "same as the add-on".
             'addons.*.variants.*.price' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
             'addons.*.variants.*.stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
+
+            /* ---------------- Coupons ----------------
+             |
+             | Ids only. Which of them are actually Event-kind batches is checked in
+             | the controller before anything is written, because that is the rule
+             | that matters: a shop coupon attached to an event would discount the
+             | wrong total.
+             |
+             | coupons_present marks that the picker was drawn, so an empty list can
+             | be told apart from a payload that never had one. Without it, unticking
+             | the last coupon would be read as "leave it alone".
+             */
+            'coupons' => ['nullable', 'array', 'max:100'],
+            'coupons.*' => ['integer'],
+            'coupons_present' => ['nullable', 'boolean'],
         ];
     }
 
@@ -715,6 +730,10 @@ class EventRequest extends FormRequest
             'remove_rules_file',
             'slug',
             'addons',
+
+            // Written to the pivot by the controller, not to the events row.
+            'coupons',
+            'coupons_present',
         ]);
 
         // Member bounds are meaningful only when one submission may name several people.

@@ -28,6 +28,12 @@ readonly class TotalCorrection
      * @param  array<int, array<string, mixed>>  $additions
      *         lines that have to be created, ready for EventRegistrationAddon. Never
      *         carry a variant: see RegistrationTotalsRecalculator on stock.
+     * @param  float  $discount  what a coupon already took off this entry.
+     *         Carried through rather than recomputed, and part of correctedAmount:
+     *         the corrected charge is fee + items - discount, floored at zero. A
+     *         recalculation that left this out would silently wipe the discount and
+     *         reopen a balance on an entry that was settled, which is exactly the
+     *         phantom-money shape this class already exists to clean up.
      * @param  string|null  $blocked  why this entry cannot be re-priced, when it cannot
      */
     public function __construct(
@@ -39,6 +45,7 @@ readonly class TotalCorrection
         public float $correctedRegistrationFee,
         public array $lines,
         public array $additions = [],
+        public float $discount = 0.0,
         public ?string $blocked = null,
     ) {
     }
@@ -59,6 +66,7 @@ readonly class TotalCorrection
             correctedRegistrationFee: (float) $registration->registration_fee,
             lines: [],
             additions: [],
+            discount: (float) $registration->discount_amount,
             blocked: $reason,
         );
     }
@@ -78,6 +86,28 @@ readonly class TotalCorrection
     public function currentAddonsTotal(): float
     {
         return round((float) $this->registration->addons_total, 2);
+    }
+
+    /** Whether a coupon took anything off this entry. */
+    public function hasDiscount(): bool
+    {
+        return $this->discount > 0.005;
+    }
+
+    public function discountLabel(): string
+    {
+        return PaymentFigures::money($this->discount);
+    }
+
+    /**
+     * The code that was used, for the preview to name.
+     *
+     * The operator's question about a discounted row is "is my discount still there
+     * after this press", and a figure with no code beside it does not answer it.
+     */
+    public function couponLabel(): ?string
+    {
+        return $this->registration->couponCode?->codeLabel();
     }
 
     /**

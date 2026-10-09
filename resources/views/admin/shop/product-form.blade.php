@@ -159,6 +159,17 @@
                 </x-admin.field-row>
             </x-admin.panel>
 
+            {{-- ==================== Coupons ====================
+
+                 Directly after Pricing, because it is the other half of the same
+                 question: what this costs, and what can come off it. --}}
+            @include('admin.coupon.partials.picker', [
+                'coupons' => $coupons,
+                'selected' => $selectedCoupons,
+                'price' => (float) $product->price,
+                'priceNoun' => 'product',
+            ])
+
             {{-- ==================== Payment ==================== --}}
             <x-admin.panel title="Payment Methods" icon="credit-card">
                 <x-admin.field-row

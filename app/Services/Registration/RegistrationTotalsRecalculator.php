@@ -8,6 +8,7 @@ use App\Models\EventRegistration;
 use App\Models\EventRegistrationAddon;
 use App\Services\AdminLogger;
 use App\Support\AddonOrder;
+use App\Support\CouponDiscount;
 use App\Support\PaymentFigures;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
@@ -46,6 +47,11 @@ use Illuminate\Support\Facades\DB;
  * carry 40.00 in registration_fee from when that was the fee, and adding it on top of
  * the shirt would charge a one-person entry that has already paid RM 40.00 another
  * RM 40.00. The fee today is RM 0.00 and that is the fee.
+ *
+ * Then whatever a coupon took off is subtracted, read off the row rather than worked
+ * out again. That subtraction is not optional and not decoration: without it one press
+ * writes the undiscounted figure over an entry that was settled in full and reopens a
+ * balance nobody owes. See the comment at the discount line in correctionFor().
  *
  * TWO KINDS OF WRONG
  *
@@ -97,7 +103,9 @@ class RegistrationTotalsRecalculator
         $event->loadMissing('addons.variants');
 
         return $event->registrations()
-            ->with(['participants', 'addonLines', 'payments'])
+            // couponCode so the preview can name the code beside the figure it is
+            // preserving, rather than one query per discounted row.
+            ->with(['participants', 'addonLines', 'payments', 'couponCode.coupon'])
             ->orderByDesc('id')
             ->get()
             ->map(fn (EventRegistration $registration) => $this->correctionFor($event, $registration))
@@ -218,6 +226,23 @@ class RegistrationTotalsRecalculator
         $fee = round($event->registrationAmount(), 2);
 
         /*
+         | Whatever a coupon already took off, carried straight through.
+         |
+         | THIS LINE IS THE WHOLE POINT OF READING THIS METHOD TWICE. The corrected
+         | charge below is fee + items - discount. Leave the discount out and one
+         | press of "Recheck Totals" writes the undiscounted figure over a
+         | registration that was settled in full, reopening a balance nobody owes and
+         | sending a payment reminder for it. The project has been burned by exactly
+         | that shape twice.
+         |
+         | Read off the row rather than recomputed, because it is a record of what was
+         | given at the time rather than a price that can be derived again: a
+         | percentage of a charge that has since been corrected is no longer the
+         | ringgit figure the visitor was shown.
+         */
+        $discount = round((float) $registration->discount_amount, 2);
+
+        /*
          | A row claiming an item total with no line behind it and nothing in the
          | catalogue that could account for it. That is a damaged record, and quietly
          | writing a smaller charge over it is not this action's business.
@@ -238,11 +263,14 @@ class RegistrationTotalsRecalculator
             registration: $registration,
             people: $people,
             currentAmount: (float) $registration->amount,
-            correctedAmount: round($fee + $addonsTotal, 2),
+            // Floored at zero through CouponDiscount, so there is one place that
+            // decides a charge can never be negative.
+            correctedAmount: CouponDiscount::applyTo(round($fee + $addonsTotal, 2), $discount),
             correctedAddonsTotal: $addonsTotal,
             correctedRegistrationFee: $fee,
             lines: $figures,
             additions: $additions,
+            discount: $discount,
         );
     }
 
@@ -441,6 +469,11 @@ class RegistrationTotalsRecalculator
             'amount' => (float) $correction->registration->amount,
             'registration_fee' => (float) $correction->registration->registration_fee,
             'addons_total' => (float) $correction->registration->addons_total,
+
+            // Recorded on both sides so the trail proves a discount survived the
+            // press rather than leaving anybody to work it out from the totals.
+            'discount_amount' => (float) $correction->registration->discount_amount,
+
             'payment_status' => $correction->registration->payment_status,
             'status' => $correction->registration->status,
 
@@ -602,6 +635,7 @@ class RegistrationTotalsRecalculator
             'amount' => (float) $written->amount,
             'registration_fee' => (float) $written->registration_fee,
             'addons_total' => (float) $written->addons_total,
+            'discount_amount' => (float) $written->discount_amount,
             'payment_status' => $written->payment_status,
             'status' => $written->status,
             'addon_lines' => $written->addonLines()->count(),

@@ -85,6 +85,17 @@
                     touched, and no size's stock count moves.
                 </p>
 
+                {{-- Said out loud rather than left to be inferred from the figures. The
+                     one question an owner has about pressing this on a discounted entry
+                     is whether the discount survives, and a column alone does not
+                     promise it. --}}
+                <p class="text-sm text-gray-700 leading-relaxed">
+                    A coupon discount already given is <span class="font-semibold">kept</span>, and it is
+                    shown in its own column so you can read it along the row. The corrected charge is
+                    the event fee plus the items <em>less</em> that discount, so an entry that was
+                    settled in full stays settled and no balance is reopened on it.
+                </p>
+
                 <p class="text-sm text-gray-700 leading-relaxed">
                     Nothing is written until you tick the confirmation at the foot of this page.
                     Entries already charging the right amount, itemised the right way, are left
@@ -135,6 +146,12 @@
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Reference</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">People</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Charged now</th>
+                                {{-- Its own column so a preserved discount is readable along
+                                     the row. A coupon that silently vanished here would reopen
+                                     a balance on an entry that was settled, so the operator has
+                                     to be able to see it survived rather than take it on
+                                     trust. --}}
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Coupon</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Should be</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Difference</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Received</th>
@@ -163,6 +180,14 @@
                                         @endif
                                     </td>
                                     <td class="px-5 py-3 text-right text-gray-600 tabular-nums whitespace-nowrap">{{ $correction->currentAmountLabel() }}</td>
+                                    <td class="px-5 py-3 text-right tabular-nums whitespace-nowrap">
+                                        @if ($correction->hasDiscount())
+                                            <span class="font-semibold text-green-700">&minus;{{ $correction->discountLabel() }}</span>
+                                            <span class="block text-xs text-gray-500 font-mono">{{ $correction->couponLabel() }}</span>
+                                        @else
+                                            <span class="text-gray-300">&mdash;</span>
+                                        @endif
+                                    </td>
                                     <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{{ $correction->correctedAmountLabel() }}</td>
                                     <td class="px-5 py-3 text-right font-semibold text-amber-700 tabular-nums whitespace-nowrap">{{ $correction->differenceLabel() }}</td>
                                     <td class="px-5 py-3 text-right text-gray-600 tabular-nums whitespace-nowrap">{{ $correction->registration->amountPaidLabel() }}</td>
@@ -181,7 +206,7 @@
                         </tbody>
                         <tfoot class="bg-gray-50">
                             <tr>
-                                <td colspan="4" class="px-5 py-3 text-right text-xs font-bold uppercase tracking-wide text-gray-500">
+                                <td colspan="5" class="px-5 py-3 text-right text-xs font-bold uppercase tracking-wide text-gray-500">
                                     Added to what is owed
                                 </td>
                                 <td class="px-5 py-3 text-right text-base font-bold text-amber-800 tabular-nums whitespace-nowrap">
@@ -298,6 +323,8 @@
         <x-admin.panel :title="'No change needed · ' . count($unchanged) . ' ' . Str::plural('entry', count($unchanged))" icon="check" :flush="true">
             @if ($unchanged === [])
                 <p class="px-5 py-6 text-sm text-gray-500">There are no entries on this event.</p>
+                {{-- A paragraph rather than an empty row, so no colspan to keep in step
+                     with the header above. --}}
             @else
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -307,6 +334,12 @@
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Reference</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">People</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Charged</th>
+                                {{-- Shown here too. A discounted entry that is already
+                                     charging the right amount lands in this table, and it
+                                     is the one the operator most wants to see a coupon
+                                     figure against: "nothing to change" is only reassuring
+                                     if the discount is visibly still there. --}}
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Coupon</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Payment</th>
                                 <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Why it is left alone</th>
                             </tr>
@@ -323,6 +356,14 @@
                                     </td>
                                     <td class="px-5 py-3 text-center text-gray-600 tabular-nums">{{ $correction->people }}</td>
                                     <td class="px-5 py-3 text-right text-gray-900 tabular-nums whitespace-nowrap">{{ $correction->currentAmountLabel() }}</td>
+                                    <td class="px-5 py-3 text-right tabular-nums whitespace-nowrap">
+                                        @if ($correction->hasDiscount())
+                                            <span class="font-semibold text-green-700">&minus;{{ $correction->discountLabel() }}</span>
+                                            <span class="block text-xs text-gray-500 font-mono">{{ $correction->couponLabel() }}</span>
+                                        @else
+                                            <span class="text-gray-300">&mdash;</span>
+                                        @endif
+                                    </td>
                                     <td class="px-5 py-3 whitespace-nowrap">
                                         <x-admin.badge :tone="$payTones[$correction->registration->payment_status] ?? 'gray'">
                                             {{ $correction->registration->paymentStatusLabel() }}

@@ -534,7 +534,46 @@ class ChipGateway implements PaymentGateway
      */
     private function products(EventRegistration $registration): array
     {
-        $registration->loadMissing(['event', 'addonLines']);
+        $registration->loadMissing(['event', 'addonLines', 'couponCode']);
+
+        /*
+         | A discounted entry is sent as ONE line for what is actually owed.
+         |
+         | CHIP totals the product lines itself and chargePayload() refuses a
+         | cent-level mismatch, so an itemised list adding up to the undiscounted
+         | charge would either be refused here or — worse — take the full price while
+         | our books recorded a discount, and every payment after that reconciles
+         | wrong. A discount line with a negative price would balance the arithmetic
+         | but CHIP is not documented to accept one, and guessing at a gateway's
+         | tolerance for negative money is not something to do with live payments.
+         |
+         | So the figure is quoted the way RegistrationBalanceCharge already quotes a
+         | balance and has been taking money with for months: one line, naming the
+         | reference and the code, priced at what is owed. The itemisation is lost on
+         | the CHIP receipt for discounted entries only; the invoice in the admin and
+         | in the confirmation email still itemises in full.
+         */
+        if ($registration->hasDiscount()) {
+            $amount = $this->cents((float) $registration->amount);
+
+            if ($amount <= 0) {
+                throw new PaymentGatewayException(
+                    'Nothing to charge on ' . $registration->reference . ': the coupon covers it in full.',
+                    'There is nothing to pay on this registration.',
+                );
+            }
+
+            return [[
+                'name' => $this->trim(sprintf(
+                    '%s · %s · after coupon %s',
+                    $registration->event?->title ?? 'Event registration',
+                    $registration->reference,
+                    $registration->couponCode?->codeLabel() ?? 'discount',
+                )),
+                'price' => $amount,
+                'quantity' => '1',
+            ]];
+        }
 
         $products = [];
 

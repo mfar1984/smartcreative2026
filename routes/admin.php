@@ -9,6 +9,8 @@ use App\Http\Controllers\Admin\Campaign\AudienceController;
 use App\Http\Controllers\Admin\Campaign\CampaignController;
 use App\Http\Controllers\Admin\Campaign\CampaignReportController;
 use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
+use App\Http\Controllers\Admin\Coupon\CouponController;
+use App\Http\Controllers\Admin\Coupon\TrackingController as CouponTrackingController;
 use App\Http\Controllers\Admin\Event\IdentityCardController;
 use App\Http\Controllers\Admin\Event\ParticipantController;
 use App\Http\Controllers\Admin\Payment\PaymentController;
@@ -88,6 +90,60 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::get('/', DashboardController::class)
             ->middleware('permission:dashboard.view')
             ->name('dashboard');
+
+        /*
+        |----------------------------------------------------------------------
+        | Coupon
+        |----------------------------------------------------------------------
+        |
+        | Money off, so it sits above Event in the sidebar for the reason the work
+        | happens in that order: a batch is created here, then ticked on the event or
+        | the shop product it discounts.
+        |
+        | One set of four permissions rather than one per screen. Tracking is the same
+        | batches read from the redemption end, so there is nothing on it somebody
+        | with the coupon list cannot already see.
+        |
+        | No show route: a batch is six fields and the edit form is the detail view,
+        | so a second read-only screen would be two places to keep in step for no
+        | gain. That is the same call Portfolio made.
+        |
+        */
+        Route::prefix('coupons')->name('coupons.')->group(function () {
+
+            // `create` and `tracking` are declared before `{coupon}` so neither is
+            // swallowed as a route parameter.
+            Route::get('/', [CouponController::class, 'index'])
+                ->middleware('permission:coupons.view')
+                ->name('index');
+
+            Route::get('create', [CouponController::class, 'create'])
+                ->middleware('permission:coupons.create')
+                ->name('create');
+
+            Route::post('/', [CouponController::class, 'store'])
+                ->middleware('permission:coupons.create')
+                ->name('store');
+
+            Route::get('tracking', [CouponTrackingController::class, 'index'])
+                ->middleware('permission:coupons.view')
+                ->name('tracking');
+
+            Route::get('{coupon}/edit', [CouponController::class, 'edit'])
+                ->middleware('permission:coupons.update')
+                ->whereNumber('coupon')
+                ->name('edit');
+
+            Route::put('{coupon}', [CouponController::class, 'update'])
+                ->middleware('permission:coupons.update')
+                ->whereNumber('coupon')
+                ->name('update');
+
+            Route::delete('{coupon}', [CouponController::class, 'destroy'])
+                ->middleware('permission:coupons.delete')
+                ->whereNumber('coupon')
+                ->name('destroy');
+        });
 
         /*
         |----------------------------------------------------------------------

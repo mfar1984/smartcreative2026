@@ -21,21 +21,54 @@ class ShopOrderChargeBuilder
      */
     public function build(ShopOrder $order): GatewayCharge
     {
-        $order->loadMissing('items');
+        $order->loadMissing(['items', 'couponCode']);
 
         $products = [];
 
-        foreach ($order->items as $item) {
-            /** @var ShopOrderItem $item */
-            $products[] = [
-                // label() already folds in the variant, so the CHIP receipt
-                // itemises what was bought rather than showing one lump sum.
-                'name' => $this->trim($item->label()),
-                'price' => $this->cents((float) $item->unit_price),
-                // A string, matching the official SDK, whose Product model
-                // declares it as a string and casts on the way in.
-                'quantity' => (string) (int) $item->quantity,
-            ];
+        if ($order->hasDiscount()) {
+            /*
+             | A discounted order sends ONE line for the goods, priced at what is
+             | actually owed for them, and keeps the postage as its own line.
+             |
+             | CHIP totals the product lines itself and chargePayload() refuses a
+             | cent-level mismatch, so itemising at full price would either be refused
+             | or take the undiscounted amount while our books recorded a discount —
+             | and then every payment after it reconciles wrong. A negative discount
+             | line would balance the arithmetic, but CHIP is not documented to accept
+             | one and a live payment path is not the place to find out.
+             |
+             | Shipping stays separate because the discount never touches it, and the
+             | buyer should be able to read the postage on the CHIP page as its own
+             | figure rather than folded into a single number.
+             */
+            $items = $this->cents($order->discountedItemsTotal());
+
+            if ($items > 0) {
+                $products[] = [
+                    'name' => $this->trim(sprintf(
+                        '%s · %d %s · after coupon %s',
+                        $order->reference,
+                        $order->itemCount(),
+                        $order->itemCount() === 1 ? 'item' : 'items',
+                        $order->couponCode?->codeLabel() ?? 'discount',
+                    )),
+                    'price' => $items,
+                    'quantity' => '1',
+                ];
+            }
+        } else {
+            foreach ($order->items as $item) {
+                /** @var ShopOrderItem $item */
+                $products[] = [
+                    // label() already folds in the variant, so the CHIP receipt
+                    // itemises what was bought rather than showing one lump sum.
+                    'name' => $this->trim($item->label()),
+                    'price' => $this->cents((float) $item->unit_price),
+                    // A string, matching the official SDK, whose Product model
+                    // declares it as a string and casts on the way in.
+                    'quantity' => (string) (int) $item->quantity,
+                ];
+            }
         }
 
         if ((float) $order->shipping_total > 0) {
