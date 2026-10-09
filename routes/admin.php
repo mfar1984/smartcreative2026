@@ -1079,6 +1079,17 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::put('maintenance', [GeneralConfigController::class, 'updateMaintenance'])
                 ->middleware('permission:settings.maintenance.update')
                 ->name('maintenance.update');
+
+            /*
+            | The holding page, drawn inside the admin so it can be checked without
+            | taking the public site down. Behind the view permission, not the
+            | update one: looking at the page changes nothing. A GET is safe here
+            | precisely because it writes nothing — it reads the saved settings and
+            | renders, so a prefetch or a pasted link cannot switch anything on.
+            */
+            Route::get('maintenance/preview', [GeneralConfigController::class, 'previewMaintenance'])
+                ->middleware('permission:settings.maintenance.view')
+                ->name('maintenance.preview');
             Route::put('security', [GeneralConfigController::class, 'updateSecurity'])
                 ->middleware('permission:settings.security.update')
                 ->name('security.update');

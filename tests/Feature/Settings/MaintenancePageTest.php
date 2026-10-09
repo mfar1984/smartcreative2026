@@ -6,6 +6,7 @@ use App\Models\Role;
 use App\Models\Setting;
 use App\Models\User;
 use App\Support\BrandingSettings;
+use App\Support\MaintenanceSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Foundation\ViteManifestNotFoundException;
 use Illuminate\Support\Facades\Storage;
@@ -38,14 +39,17 @@ class MaintenancePageTest extends TestCase
     {
         parent::setUp();
 
-        // Static per-request cache. Flushed on the way in and on the way out so a
-        // logo written here cannot decide what an unrelated test reads.
+        // Static per-request caches. Flushed on the way in and on the way out so a
+        // logo written here cannot decide what an unrelated test reads, and the
+        // switch turned on here cannot hold down an unrelated test's public page.
         BrandingSettings::flush();
+        MaintenanceSettings::flush();
     }
 
     protected function tearDown(): void
     {
         BrandingSettings::flush();
+        MaintenanceSettings::flush();
 
         parent::tearDown();
     }
@@ -60,6 +64,10 @@ class MaintenancePageTest extends TestCase
         Setting::write('maintenance.enabled', '1', 'maintenance');
         Setting::write('maintenance.heading', $heading, 'maintenance');
         Setting::write('maintenance.message', $message, 'maintenance');
+
+        // The group is memoised per process, so a write made after something has
+        // already read it would otherwise not be seen.
+        MaintenanceSettings::flush();
     }
 
     private function superAdmin(): User

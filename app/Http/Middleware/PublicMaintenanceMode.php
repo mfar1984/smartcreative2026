@@ -2,7 +2,7 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\Setting;
+use App\Support\MaintenanceSettings;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,6 +15,11 @@ class PublicMaintenanceMode
      * Deliberately separate from Laravel's own `artisan down`: this only covers
      * the public site, so an administrator can never lock themselves out of
      * the admin area by flipping the switch.
+     *
+     * Whether maintenance is on is DECIDED HERE, on every request, by reading the
+     * switch and the saved window. No job turns it on and no job turns it off, so
+     * a window ends because the time passed rather than because something ran —
+     * see App\Support\MaintenanceSettings for why that matters.
      */
     public function handle(Request $request, Closure $next): Response
     {
@@ -22,14 +27,22 @@ class PublicMaintenanceMode
             return $next($request);
         }
 
-        if (Setting::read('maintenance.enabled', '0') !== '1') {
+        if (! MaintenanceSettings::isHoldingPublicSite()) {
             return $next($request);
         }
 
-        return response()->view('pages.site-maintenance', [
-            'heading' => Setting::read('maintenance.heading', 'We are carrying out maintenance'),
-            'message' => Setting::read('maintenance.message', 'The website is temporarily unavailable. Please check back shortly.'),
-        ], Response::HTTP_SERVICE_UNAVAILABLE);
+        // Staff doing the work keep seeing the live site. Checked after the admin
+        // bypass above, which is independent of this list: a mistake here can only
+        // decide who sees the holding page, never who reaches the admin.
+        if (MaintenanceSettings::exemptsIp((string) $request->ip())) {
+            return $next($request);
+        }
+
+        return response()->view(
+            MaintenanceSettings::HOLDING_PAGE_VIEW,
+            MaintenanceSettings::holdingPageData(),
+            Response::HTTP_SERVICE_UNAVAILABLE,
+        );
     }
 
     private function shouldBypass(Request $request): bool

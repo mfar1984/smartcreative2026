@@ -32,6 +32,18 @@
     // form allows up to 1000 characters. Long messages are set left instead, which
     // keeps a short one looking deliberate and a long one looking like a notice.
     $longMessage = mb_strlen($message) > 220;
+
+    /*
+     | The optional expected return time, already filtered by
+     | MaintenanceSettings::upcomingReturnAt(): null when none was saved AND null
+     | once the time it names has gone by, because "back by 9am" at half past ten
+     | is worse than saying nothing. A wall-clock value, so it is printed with
+     | formatWallClock() — shifting it would move a 9am return to 5pm.
+     |
+     | Defaulted rather than assumed: this page's whole job is to render when
+     | things are already wrong, so it does not throw over a missing variable.
+     */
+    $returnAt = $returnAt ?? null;
 @endphp
 <!DOCTYPE html>
 {{-- Follows the app locale rather than a hardcoded "en": the audience is Malaysian
@@ -147,6 +159,36 @@
             text-align: left;
         }
 
+        /* The expected return time. One quiet line, centred even when the message
+           above it is set left, so it reads as a fact about the outage rather than
+           as the end of the operator's sentence. No countdown and no script: this
+           page has to work with nothing but itself. */
+        .return {
+            margin: 1.5rem 0 0;
+            padding-top: 1.125rem;
+            border-top: 1px solid #e8eefb;
+            font-size: 0.9375rem;
+            line-height: 1.6;
+            text-align: center;
+            color: #334155;
+        }
+
+        .return strong {
+            font-weight: 600;
+            color: #1d4ed8;
+
+            /* A date, a time and a zone name is a long string on a narrow phone, so
+               it is allowed to wrap as a unit rather than pushing the card wider. */
+            display: inline-block;
+        }
+
+        .return .zone {
+            display: block;
+            margin-top: 0.25rem;
+            font-size: 0.75rem;
+            color: #64748b;
+        }
+
         .footnote {
             margin: 1.5rem 0 0;
             font-size: 0.75rem;
@@ -173,6 +215,17 @@
             <div class="body">
                 <h1 class="heading">{{ $heading }}</h1>
                 <p class="message{{ $longMessage ? ' is-long' : '' }}">{{ $message }}</p>
+
+                @if ($returnAt)
+                    <p class="return">
+                        Expected back by
+                        <strong>{{ App\Support\LocalTime::formatWallClock($returnAt) }}</strong>
+                        {{-- Named, because a visitor abroad cannot read "9:00 am" without
+                             it. The underscore is taken out of the zone identifier: this
+                             line is read by the public, not by an operator. --}}
+                        <span class="zone">{{ str_replace('_', ' ', App\Support\LocalTime::zone()) }} time</span>
+                    </p>
+                @endif
             </div>
         </div>
 

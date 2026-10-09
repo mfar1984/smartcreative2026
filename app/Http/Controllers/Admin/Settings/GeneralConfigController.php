@@ -16,6 +16,7 @@ use App\Services\Security\LoginBanService;
 use App\Support\BackupSettings;
 use App\Support\BrandingSettings;
 use App\Support\GeneralSettings;
+use App\Support\MaintenanceSettings;
 use App\Support\SecuritySettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -61,12 +62,6 @@ class GeneralConfigController extends Controller
         'favicon' => 'favicon_path',
     ];
 
-    private const MAINTENANCE_DEFAULTS = [
-        'enabled' => '0',
-        'heading' => 'We are carrying out maintenance',
-        'message' => 'The website is temporarily unavailable while we carry out scheduled maintenance. Please check back shortly.',
-    ];
-
     public function index(Request $request, LoginBanService $bans)
     {
         $tabs = array_filter(
@@ -89,7 +84,8 @@ class GeneralConfigController extends Controller
             'bansEnforced' => SecuritySettings::banEnabled(),
             'currentIp' => $request->ip(),
 
-            'maintenance' => $this->maintenanceValues(),
+            'maintenance' => MaintenanceSettings::formValues(),
+            'maintenanceState' => $this->maintenanceState(),
             'backup' => $this->backupOverview(),
             'timezones' => \DateTimeZone::listIdentifiers(),
             'dateFormats' => array_keys(GeneralSettings::DATE_FORMATS),
@@ -196,16 +192,21 @@ class GeneralConfigController extends Controller
 
     public function updateMaintenance(UpdateMaintenanceRequest $request)
     {
-        $before = $this->maintenanceValues();
-        $validated = $request->validated();
+        $before = MaintenanceSettings::formValues();
+        $settings = $request->settings();
 
-        Setting::write('maintenance.enabled', $validated['enabled'] ? '1' : '0', 'maintenance');
-        Setting::write('maintenance.heading', $validated['heading'], 'maintenance');
-        Setting::write('maintenance.message', $validated['message'], 'maintenance');
+        foreach ($settings as $key => $value) {
+            MaintenanceSettings::write($key, $value);
+        }
+
+        // The reader memoises the group per request, and the redirect draws the
+        // form and the "in force now" line again, so a stale value here would
+        // report the state the site was in before this save.
+        MaintenanceSettings::flush();
 
         AdminLogger::activity(
             'settings.maintenance.update',
-            $validated['enabled']
+            $settings['enabled'] === '1'
                 ? 'Turned public maintenance mode ON.'
                 : 'Turned public maintenance mode OFF.',
         );
@@ -213,12 +214,31 @@ class GeneralConfigController extends Controller
             new Setting(['key' => 'maintenance.*', 'group' => 'maintenance']),
             'settings.updated',
             $before,
-            ['enabled' => $validated['enabled'] ? '1' : '0'] + $validated,
+            MaintenanceSettings::formValues(),
         );
 
         return redirect()
             ->route('admin.settings.general', ['tab' => 'maintenance'])
             ->with('status', 'Maintenance settings saved.');
+    }
+
+    /**
+     * The holding page as a visitor would see it, inside the admin, with the site
+     * still up.
+     *
+     * Renders the SAME view the middleware renders, from the same values, so what
+     * is checked here is what is served. A 200 and not a 503: this is a page in the
+     * admin, and a 503 would have the browser — and anything watching the admin —
+     * believe the panel itself had fallen over. Nothing is written, so looking at
+     * the page cannot turn maintenance on, and it draws the same whether the switch
+     * is on or off.
+     */
+    public function previewMaintenance()
+    {
+        return response()->view(
+            MaintenanceSettings::HOLDING_PAGE_VIEW,
+            MaintenanceSettings::holdingPageData(),
+        );
     }
 
     public function updateSecurity(UpdateSecurityConfigRequest $request)
@@ -365,18 +385,24 @@ class GeneralConfigController extends Controller
     }
 
     /**
-     * @return array<string, string|null>
+     * What is in force on the public site at this moment, for the tab to state
+     * plainly: off, on by hand, on by schedule, armed for later, or finished.
+     *
+     * Resolved here rather than in the Blade so the tab cannot disagree with the
+     * middleware about whether the site is up — both read the same methods.
+     *
+     * @return array<string, mixed>
      */
-    private function maintenanceValues(): array
+    private function maintenanceState(): array
     {
-        $stored = Setting::readGroup('maintenance');
-        $values = [];
-
-        foreach (self::MAINTENANCE_DEFAULTS as $key => $default) {
-            $values[$key] = $stored['maintenance.' . $key] ?? $default;
-        }
-
-        return $values;
+        return [
+            'state' => MaintenanceSettings::state(),
+            'holding' => MaintenanceSettings::isHoldingPublicSite(),
+            'start' => MaintenanceSettings::windowStart(),
+            'end' => MaintenanceSettings::windowEnd(),
+            'return_at' => MaintenanceSettings::expectedReturnAt(),
+            'return_passed' => MaintenanceSettings::returnTimeHasPassed(),
+        ];
     }
 
     /**

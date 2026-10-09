@@ -42,8 +42,20 @@ final class IpAllowlist
     /** Whether the address is on a non-empty list. Always false when the list is empty. */
     public static function contains(string $ip): bool
     {
-        $entries = self::entries();
+        return self::matches($ip, self::entries());
+    }
 
+    /**
+     * Whether an address matches any entry in a list of addresses and CIDR ranges.
+     *
+     * The matching itself, with no opinion about which list it is reading, so the
+     * Maintenance tab's exemption list goes through this same comparison instead of
+     * growing a second one. An empty list matches nothing.
+     *
+     * @param  array<int, string>  $entries
+     */
+    public static function matches(string $ip, array $entries): bool
+    {
         if ($entries === [] || $ip === '') {
             return false;
         }

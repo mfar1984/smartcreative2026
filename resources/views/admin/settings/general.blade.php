@@ -837,11 +837,75 @@
                 </p>
             </div>
 
+            @php
+                // Wall-clock values, printed with the shift withheld: these are times
+                // somebody typed on the office clock, not instants.
+                $clock = \App\Support\LocalTime::zone();
+                $saidStart = \App\Support\LocalTime::formatWallClock($maintenanceState['start']);
+                $saidEnd = \App\Support\LocalTime::formatWallClock($maintenanceState['end']);
+                $saidReturn = \App\Support\LocalTime::formatWallClock($maintenanceState['return_at']);
+            @endphp
+
             <form action="{{ route('admin.settings.maintenance.update') }}" method="POST">
                 @csrf
                 @method('PUT')
 
                 <x-admin.panel title="Maintenance Mode" icon="power">
+                    {{-- What is in force, in one sentence, before any field. An operator
+                         reading this tab should never have to work out from the switch and
+                         the window below whether the public site is up. --}}
+                    <x-admin.field-row label="In Force Now" help="What a visitor to the public website is seeing at this moment.">
+                        <div class="md:pt-1.5">
+                            @if ($maintenanceState['holding'])
+                                <p class="text-sm font-semibold text-red-600">
+                                    ON &mdash; visitors see the holding page.
+                                </p>
+                            @else
+                                <p class="text-sm font-semibold text-green-600">
+                                    OFF &mdash; the website is live.
+                                </p>
+                            @endif
+
+                            <p class="text-xs text-gray-600 mt-1.5">
+                                @switch($maintenanceState['state'])
+                                    @case(\App\Support\MaintenanceSettings::STATE_MANUAL)
+                                        Switched on by hand. It stays on until the switch below is cleared.
+                                        @break
+
+                                    @case(\App\Support\MaintenanceSettings::STATE_WINDOW_RUNNING)
+                                        @if ($maintenanceState['end'])
+                                            On by schedule until {{ $saidEnd }}. It ends by itself when that
+                                            time passes &mdash; nothing has to run, and nobody has to be here.
+                                        @else
+                                            On by schedule since {{ $saidStart }}. This window has no end time,
+                                            so it stays on until you clear the switch below.
+                                        @endif
+                                        @break
+
+                                    @case(\App\Support\MaintenanceSettings::STATE_WINDOW_PENDING)
+                                        Scheduled to begin at {{ $saidStart }}@if ($maintenanceState['end']) and end at {{ $saidEnd }}@endif.
+                                        Nothing happens to the website until then.
+                                        @break
+
+                                    @case(\App\Support\MaintenanceSettings::STATE_WINDOW_FINISHED)
+                                        The scheduled window finished at {{ $saidEnd }} and is over. Clear the
+                                        dates below when you no longer need them.
+                                        @break
+
+                                    @default
+                                        No window is set and the switch is off.
+                                @endswitch
+                            </p>
+
+                            @if ($maintenanceState['return_passed'])
+                                <p class="text-xs text-amber-700 mt-1.5">
+                                    The expected return time ({{ $saidReturn }}) has passed, so the holding page
+                                    is not showing it. Set a new one or clear it.
+                                </p>
+                            @endif
+                        </div>
+                    </x-admin.field-row>
+
                     <x-admin.field-row label="Status" help="Turn the holding page on or off." for="enabled" error="enabled">
                         <div class="md:pt-2">
                             <label for="enabled" class="inline-flex items-center gap-2.5 cursor-pointer">
@@ -852,12 +916,16 @@
                                 <span class="text-sm text-gray-700">Enable maintenance mode</span>
                             </label>
 
+                            {{-- About the SWITCH, not about the site. In Force Now above is
+                                 the answer to "is the website up", and with a window running
+                                 the two are deliberately different: the switch can be off
+                                 while the site is held. --}}
                             <p class="text-xs text-gray-500 mt-1.5">
-                                Currently
+                                The switch is
                                 @if ($maintenance['enabled'] === '1')
-                                    <span class="font-semibold text-red-600">ON</span> &mdash; visitors see the holding page.
+                                    <span class="font-semibold text-red-600">on</span>, which holds the site whatever the dates below say.
                                 @else
-                                    <span class="font-semibold text-green-600">OFF</span> &mdash; the website is live.
+                                    <span class="font-semibold text-green-600">off</span>. The scheduled window below can still hold the site on its own.
                                 @endif
                             </p>
                         </div>
@@ -872,10 +940,97 @@
                                class="{{ $input }}">
                     </x-admin.field-row>
 
-                    <x-admin.field-row label="Message" help="Explain what is happening and when to come back." for="message" :required="true" error="message">
+                    <x-admin.field-row label="Message" help="Explain what is happening. The expected return time below has a field of its own." for="message" :required="true" error="message">
                         <textarea id="message" name="message" rows="4" required maxlength="1000"
                                   @disabled(! $canUpdateMaintenance)
                                   class="{{ $input }} resize-y">{{ old('message', $maintenance['message']) }}</textarea>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Expected Return" help="Optional. Shown as a quiet line under the message. Leave it empty to say nothing about timing." for="expected_return_at" error="expected_return_at">
+                        <input type="datetime-local" id="expected_return_at" name="expected_return_at"
+                               value="{{ old('expected_return_at', $maintenance['expected_return_at']) }}"
+                               @disabled(! $canUpdateMaintenance)
+                               class="{{ $input }}">
+                        <p class="text-xs text-gray-500 mt-1.5">
+                            Read on this clock ({{ $clock }}), exactly as typed. Once the time has
+                            passed the line disappears from the holding page rather than promising a
+                            return that is already late.
+                        </p>
+                    </x-admin.field-row>
+
+                    {{-- Opens in a new tab, so unsaved edits on this form are not lost.
+                         It draws the SAVED copy, which is the point: it shows what a
+                         visitor would get right now, not what is typed in the boxes. --}}
+                    <x-admin.field-row label="Preview" help="Check the page without taking the website down.">
+                        <p class="text-sm text-gray-600 md:pt-2">
+                            <a href="{{ route('admin.settings.maintenance.preview') }}"
+                               target="_blank" rel="noopener"
+                               class="inline-flex items-center gap-1.5 font-semibold text-blue-600 hover:text-blue-700">
+                                <x-admin.icon name="eye" class="w-4 h-4" />
+                                Open the holding page in a new tab
+                            </a>
+                        </p>
+                        <p class="text-xs text-gray-500 mt-1.5">
+                            The real page, with the copy as last saved, and the public website left
+                            exactly as it is. Save first to see edits you have just made.
+                        </p>
+                    </x-admin.field-row>
+                </x-admin.panel>
+
+                {{-- The scheduled window. Decided by the middleware on every request,
+                     never by a job, so it also ENDS without anything running. --}}
+                <x-admin.panel title="Scheduled Window" icon="activity">
+                    <x-admin.field-row label="Start" help="Optional. From this time the holding page is shown, with no need to touch the switch." for="window_start" error="window_start">
+                        <input type="datetime-local" id="window_start" name="window_start"
+                               value="{{ old('window_start', $maintenance['window_start']) }}"
+                               @disabled(! $canUpdateMaintenance)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="End" help="Optional. The website comes back by itself at this time. Needs a start, and must be after it." for="window_end" error="window_end">
+                        <input type="datetime-local" id="window_end" name="window_end"
+                               value="{{ old('window_end', $maintenance['window_end']) }}"
+                               @disabled(! $canUpdateMaintenance)
+                               class="{{ $input }}">
+                        <p class="text-xs text-gray-500 mt-1.5">
+                            Both times are read on this clock ({{ $clock }}), exactly as typed.
+                        </p>
+                        <p class="text-xs text-amber-700 mt-1.5">
+                            Nothing runs in the background for this. Each request works out for itself
+                            whether it is inside the window, so the site comes back when the end time
+                            passes even if cron, the queue worker and everything else on the server are
+                            dead. A start with no end has nothing to bring the site back: it stays on
+                            until you clear the switch.
+                        </p>
+                    </x-admin.field-row>
+                </x-admin.panel>
+
+                {{-- Who still sees the live site. Deliberately NOT the Security tab's
+                     allowlist: that one decides who may sign in, this one decides who is
+                     exempt from the holding page. --}}
+                <x-admin.panel title="Exempt IP Addresses" icon="globe">
+                    <x-admin.field-row label="Addresses" help="One IP address or CIDR range per line. Anyone on the list sees the live website while everybody else gets the holding page." for="exempt_ips" error="exempt_ips">
+                        <textarea id="exempt_ips" name="exempt_ips" rows="5"
+                                  maxlength="{{ \App\Support\MaintenanceSettings::MAX_EXEMPT_IPS_LENGTH }}"
+                                  placeholder="203.0.113.10&#10;198.51.100.0/24"
+                                  spellcheck="false"
+                                  @disabled(! $canUpdateMaintenance)
+                                  class="{{ $input }} resize-y font-mono">{{ old('exempt_ips', $maintenance['exempt_ips']) }}</textarea>
+
+                        <p class="text-xs text-gray-500 mt-1.5">
+                            Your current IP: <span class="font-mono font-semibold text-gray-700">{{ $currentIp }}</span>
+                        </p>
+                        <p class="text-xs text-gray-500 mt-1">
+                            Empty means nobody is let through, which is how this has always worked.
+                            The admin area and a signed in administrator are unaffected either way, so
+                            a mistake in this box cannot lock anybody out.
+                        </p>
+                        <p class="text-xs text-amber-700 mt-1">
+                            This is not the IP allowlist on the Security tab. That one RESTRICTS who may
+                            sign in to the admin. This one EXEMPTS who still sees the live public site
+                            while maintenance is on. They are separate settings and neither reads the
+                            other.
+                        </p>
                     </x-admin.field-row>
                 </x-admin.panel>
 
