@@ -114,7 +114,11 @@
 
         <div class="fixed inset-0 bg-gray-900/50" data-design-close></div>
 
-        <div class="relative flex min-h-full items-start justify-center p-4">
+        {{-- Centred both ways. `min-h-full` with `items-center` centres a short panel
+             in the viewport and still lets a tall one grow downwards, because the
+             scroll lives on the wrapper above rather than on this box: a panel taller
+             than the screen scrolls instead of having its top cut off. --}}
+        <div class="relative flex min-h-full items-center justify-center p-4">
             <div class="w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-xl">
 
                 {{-- Sticky rather than a scroll box around the cards: the panel itself

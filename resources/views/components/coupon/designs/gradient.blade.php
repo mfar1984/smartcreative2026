@@ -5,6 +5,10 @@
     The circles are decorative and absolutely positioned, so the panel clips its own
     overflow and they can never push the layout wider than the column it sits in.
 
+    Two real columns on a wide screen: the left one flexes into whatever the code chip
+    does not take, so a long event title wraps inside its own column instead of running
+    under the chip. On a phone they stack and the chip has the full width.
+
     @param \App\Support\CouponTicket $ticket
     @param bool $compact
 --}}
@@ -21,7 +25,7 @@
         'relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between',
         $compact ? 'px-4 py-3' : 'px-5 py-5 sm:px-7 sm:py-7',
     ])>
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
             <p @class([
                 'font-bold uppercase tracking-[0.2em] text-indigo-200',
                 $compact ? 'text-[9px]' : 'text-[10px]',
@@ -36,7 +40,12 @@
                 {{ $ticket->discountLabel() }}
             </p>
 
-            <p @class(['mt-2 text-blue-100 break-words', $compact ? 'text-[11px]' : 'text-sm'])>
+            {{-- Two lines, then an ellipsis. The whole title is still in the markup
+                 for a screen reader; what is clamped is only what is drawn. --}}
+            <p @class([
+                'mt-2 text-blue-100 break-words line-clamp-2',
+                $compact ? 'text-[11px]' : 'text-sm',
+            ])>
                 {{ $ticket->subject }}
             </p>
 

@@ -18,6 +18,8 @@
     {{-- The spine. A full-height bar on a wide screen, a top rule on a phone. --}}
     <span class="h-1.5 w-full shrink-0 bg-blue-600 sm:h-auto sm:w-2" aria-hidden="true"></span>
 
+    {{-- The body. Flexes into whatever the stub does not take, so a long event title
+         wraps inside this column rather than running under the code. --}}
     <div @class(['min-w-0 flex-1', $compact ? 'px-4 py-3' : 'px-5 py-5 sm:px-7 sm:py-6'])>
         <p @class([
             'font-bold uppercase tracking-widest text-blue-600',
@@ -33,7 +35,12 @@
             {{ $ticket->discountLabel() }}
         </p>
 
-        <p @class(['mt-2 text-slate-600 break-words', $compact ? 'text-[11px]' : 'text-sm'])>
+        {{-- Two lines, then an ellipsis. The whole title is still in the markup for a
+             screen reader; what is clamped is only what is drawn. --}}
+        <p @class([
+            'mt-2 text-slate-600 break-words line-clamp-2',
+            $compact ? 'text-[11px]' : 'text-sm',
+        ])>
             {{ $ticket->subject }}
         </p>
 

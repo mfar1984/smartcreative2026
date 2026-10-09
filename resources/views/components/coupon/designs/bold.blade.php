@@ -52,16 +52,20 @@
             {{ $ticket->kindLabel() }} COUPON
         </p>
 
+        {{-- Two lines, then an ellipsis. The whole title is still in the markup for a
+             screen reader; what is clamped is only what is drawn. --}}
         <p @class([
-            'mt-1 font-semibold leading-snug text-slate-900 break-words',
+            'mt-1 font-semibold leading-snug text-slate-900 break-words line-clamp-2',
             $compact ? 'text-xs' : 'text-lg sm:text-xl',
         ])>
             {{ $ticket->subject }}
         </p>
 
+        {{-- The code keeps its natural width and the expiry wraps under it, rather
+             than the two being squeezed into one line that fits neither. --}}
         <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
             <p @class([
-                'rounded-md border border-blue-200 bg-blue-50 font-mono font-bold tracking-widest text-blue-700 break-all',
+                'shrink-0 rounded-md border border-blue-200 bg-blue-50 font-mono font-bold tracking-widest text-blue-700 break-all',
                 $compact ? 'px-2 py-1 text-xs' : 'px-4 py-2 text-lg sm:text-xl',
             ])>
                 {{ $ticket->code }}

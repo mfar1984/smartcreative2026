@@ -20,7 +20,9 @@
         'flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between',
         $compact ? 'px-4 py-3 gap-3' : 'px-5 py-5 sm:px-7 sm:py-7',
     ])>
-        <div class="min-w-0">
+        {{-- Flexes into whatever the stamp does not take, so a long event title wraps
+             inside its own column rather than running under the stamp. --}}
+        <div class="min-w-0 flex-1">
             <p @class([
                 'font-bold uppercase tracking-widest text-amber-700',
                 $compact ? 'text-[9px]' : 'text-[11px]',
@@ -35,7 +37,12 @@
                 {{ $ticket->discountLabel() }}
             </p>
 
-            <p @class(['mt-2 text-stone-600 break-words', $compact ? 'text-[11px]' : 'text-sm'])>
+            {{-- Two lines, then an ellipsis. The whole title is still in the markup
+                 for a screen reader; what is clamped is only what is drawn. --}}
+            <p @class([
+                'mt-2 text-stone-600 break-words line-clamp-2',
+                $compact ? 'text-[11px]' : 'text-sm',
+            ])>
                 {{ $ticket->subject }}
             </p>
 
