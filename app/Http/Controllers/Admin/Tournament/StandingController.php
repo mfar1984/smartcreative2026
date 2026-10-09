@@ -21,7 +21,11 @@ class StandingController extends Controller
 {
     public function index(Request $request)
     {
+        // Narrowed for a handler to the tournaments assigned to it, untouched for
+        // every other role. A tournament named in the query string that is not
+        // assigned is refused by tournament.scope before this runs.
         $tournaments = Tournament::query()
+            ->visibleTo($request->user())
             ->whereIn('status', [
                 Tournament::STATUS_ONGOING,
                 Tournament::STATUS_COMPLETED,

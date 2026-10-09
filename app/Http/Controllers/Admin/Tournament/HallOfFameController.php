@@ -50,7 +50,10 @@ class HallOfFameController extends Controller
 
         $status = $tab === 'published' ? Tournament::STATUS_PUBLISHED : Tournament::STATUS_COMPLETED;
 
+        // A handler only sees its own tournaments here too, so publishing is
+        // offered for the ones it ran and nothing else.
         $tournaments = Tournament::query()
+            ->visibleTo($request->user())
             ->where('status', $status)
             ->with(['event:id,title,starts_at', 'champions', 'playerAwards', 'pointRule:id,name,track_players,player_components'])
             ->latest('id')
@@ -83,7 +86,9 @@ class HallOfFameController extends Controller
             }
         }
 
-        $counts = Tournament::selectRaw('status, COUNT(*) as total')
+        $counts = Tournament::query()
+            ->visibleTo($request->user())
+            ->selectRaw('status, COUNT(*) as total')
             ->whereIn('status', [Tournament::STATUS_COMPLETED, Tournament::STATUS_PUBLISHED])
             ->groupBy('status')
             ->pluck('total', 'status');

@@ -5,6 +5,7 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -108,6 +109,44 @@ class User extends Authenticatable
     public function isHandler(): bool
     {
         return $this->is_handler === true;
+    }
+
+    /**
+     * The tournaments this user has been assigned to run.
+     */
+    public function handledTournaments(): BelongsToMany
+    {
+        return $this->belongsToMany(Tournament::class, 'tournament_handler')->withTimestamps();
+    }
+
+    /**
+     * Whether this user only ever sees the tournaments assigned to them.
+     *
+     * True for a handler and nobody else. The super admin is never narrowed, even
+     * if the flag were set on that account, because it is the way back in when an
+     * assignment goes wrong.
+     */
+    public function isRestrictedToAssignedTournaments(): bool
+    {
+        return $this->isHandler() && ! (bool) $this->role?->isSuperAdmin();
+    }
+
+    /**
+     * Whether this user may see and act on one tournament.
+     *
+     * Everyone who is not a handler runs every tournament, which is what keeps the
+     * existing administrator roles exactly as they are: this answers true for them
+     * without reading the pivot at all.
+     */
+    public function runsTournament(Tournament $tournament): bool
+    {
+        if (! $this->isRestrictedToAssignedTournaments()) {
+            return true;
+        }
+
+        return $this->handledTournaments()
+            ->where('tournaments.id', $tournament->getKey())
+            ->exists();
     }
 
     /**

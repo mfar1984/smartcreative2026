@@ -5,6 +5,7 @@ use App\Http\Middleware\EnforceIpAllowlist;
 use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\EnsureUserCanAccessAdmin;
 use App\Http\Middleware\PublicMaintenanceMode;
+use App\Http\Middleware\ScopeTournamentToHandler;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -27,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => EnsurePermission::class,
             'session.timeout' => EnforceInactivityTimeout::class,
             'ip.allowlist' => EnforceIpAllowlist::class,
+            'tournament.scope' => ScopeTournamentToHandler::class,
         ]);
 
         // Soft maintenance mode for the public site. The middleware itself

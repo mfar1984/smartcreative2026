@@ -607,8 +607,15 @@ Route::prefix('admin')->name('admin.')->group(function () {
         | Read only for now. The write routes arrive with the data model, which is
         | still waiting on how the short squad penalty and disqualification should
         | behave.
+        |
+        | tournament.scope is declared on the whole group rather than on the routes
+        | that take a {tournament}. A handler is confined to the tournaments assigned
+        | to it, and the group is where that cannot be forgotten on a route added
+        | later. It reads whichever tournament the request names, by path, by match
+        | or by ?tournament=, and refuses an unassigned one with a 403. For anybody
+        | who is not a handler it does nothing.
         */
-        Route::prefix('tournaments')->name('tournaments.')->group(function () {
+        Route::prefix('tournaments')->name('tournaments.')->middleware('tournament.scope')->group(function () {
             Route::get('/', [TournamentController::class, 'index'])
                 ->middleware('permission:tournaments.view')->name('index');
 

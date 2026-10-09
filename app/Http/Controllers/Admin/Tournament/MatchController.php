@@ -71,8 +71,14 @@ class MatchController extends Controller
         /*
          | A tournament has to be chosen. Several run at once, so a fixture list
          | without one named would mix two competitions into one table.
+         |
+         | visibleTo keeps a handler's picker to the tournaments assigned to it, and
+         | leaves every other role with the list it has always had. Typing another
+         | tournament's id into the query string is refused before this method runs,
+         | by tournament.scope on the route group.
          */
         $tournaments = Tournament::query()
+            ->visibleTo($request->user())
             ->whereIn('status', [Tournament::STATUS_ONGOING, Tournament::STATUS_COMPLETED, Tournament::STATUS_PUBLISHED])
             ->with('event:id,title')
             ->orderByDesc('id')

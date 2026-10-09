@@ -14,6 +14,12 @@
     @php
         $input = 'w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
         $format = old('format', $tournament->format);
+
+        // Ticked boxes survive a failed save: old() first, the saved assignment
+        // otherwise. Cast because old() brings the ids back as strings.
+        $pickedHandlers = collect(old('handlers', $assignedHandlers))
+            ->map(fn ($id) => (int) $id)
+            ->all();
     @endphp
 
     <x-admin.page-card
@@ -121,6 +127,46 @@
                     </select>
                 </x-admin.field-row>
             </x-admin.panel>
+
+            {{-- Left out entirely for anybody who may not decide who runs a
+                 tournament, so a handler is never shown a list it cannot save. --}}
+            @if ($canAssignHandlers)
+                <x-admin.panel title="Who Runs It" icon="users">
+                    <x-admin.field-row label="Handlers"
+                                       help="Tick whoever runs this tournament on the day. A handler sees only the tournaments ticked here."
+                                       error="handlers">
+                        @if ($handlerCandidates->isEmpty())
+                            <p class="text-sm text-gray-600 md:pt-2">
+                                No handler accounts exist yet. They are created under
+                                <a href="{{ route('admin.settings.users') }}" class="underline font-semibold">User Management</a>,
+                                and will appear here once one exists.
+                            </p>
+                        @else
+                            <div class="rounded-lg border border-gray-200 divide-y divide-gray-100" data-handlers>
+                                @foreach ($handlerCandidates as $candidate)
+                                    <label for="handler-{{ $candidate->id }}"
+                                           class="flex items-start gap-3 px-3.5 py-2.5 cursor-pointer select-none hover:bg-blue-50/40">
+                                        <input type="checkbox"
+                                               id="handler-{{ $candidate->id }}"
+                                               name="handlers[]"
+                                               value="{{ $candidate->id }}"
+                                               @checked(in_array((int) $candidate->id, $pickedHandlers, true))
+                                               class="w-4 h-4 mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                        <span class="min-w-0">
+                                            <span class="block text-sm font-semibold text-gray-900 truncate">{{ $candidate->name }}</span>
+                                            <span class="block text-xs text-gray-500 truncate">{{ $candidate->email }}</span>
+                                        </span>
+                                    </label>
+                                @endforeach
+                            </div>
+
+                            <p class="text-xs text-gray-500 mt-1.5">
+                                Leave every box clear and only administrators can reach this tournament.
+                            </p>
+                        @endif
+                    </x-admin.field-row>
+                </x-admin.panel>
+            @endif
 
             <div class="flex flex-wrap items-center justify-between gap-4 bg-white rounded-lg border border-gray-200 px-5 py-4 mt-5">
                 <p class="text-xs text-gray-500 max-w-md">

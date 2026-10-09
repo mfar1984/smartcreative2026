@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
@@ -119,6 +121,17 @@ class Tournament extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    /**
+     * The handlers who run this tournament.
+     *
+     * Several, because a tournament is run by a team on the day. An empty list means
+     * administrators only: no handler can see it.
+     */
+    public function handlers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'tournament_handler')->withTimestamps();
+    }
+
     public function entrants(): HasMany
     {
         return $this->hasMany(TournamentEntrant::class);
@@ -166,6 +179,26 @@ class Tournament extends Model
     public function tracksPlayers(): bool
     {
         return (bool) $this->pointRule?->tracksPlayers();
+    }
+
+    /* ---------------------------------------------------------------------
+     | Scopes
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Narrow a listing to the tournaments this user is allowed to see.
+     *
+     * Only a handler is narrowed, and only to what it has been assigned. Every
+     * existing administrator, and the super admin, pass through untouched, so no
+     * screen any of them use today returns fewer rows than it did.
+     */
+    public function scopeVisibleTo(Builder $query, ?User $user): Builder
+    {
+        if ($user === null || ! $user->isRestrictedToAssignedTournaments()) {
+            return $query;
+        }
+
+        return $query->whereHas('handlers', fn (Builder $handlers) => $handlers->whereKey($user->getKey()));
     }
 
     /* ---------------------------------------------------------------------

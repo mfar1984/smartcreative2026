@@ -8,6 +8,7 @@ use App\Models\EventRegistration;
 use App\Models\PointRule;
 use App\Models\Tournament;
 use App\Models\TournamentEntrant;
+use App\Models\User;
 use App\Services\AdminLogger;
 use App\Support\Tournament\EntrantImporter;
 use App\Support\Tournament\TournamentProgress;
@@ -72,14 +73,23 @@ class TournamentController extends Controller
         $search = trim((string) $request->query('q', ''));
         $eventId = (string) $request->query('event', '');
 
+        /*
+         | visibleTo narrows a handler to the tournaments assigned to it and leaves
+         | every other role with the whole table. The tab counts are narrowed with
+         | the same scope, because a count of four above a list of one would be the
+         | screen telling the handler about tournaments it cannot open.
+         */
         $query = Tournament::query()
+            ->visibleTo($request->user())
             ->with(['event:id,title', 'pointRule:id,name', 'creator:id,name'])
             ->withCount(['entrants' => fn ($q) => $q->where('status', TournamentEntrant::STATUS_ACTIVE)])
             ->where('status', $status)
             ->when($search !== '', fn ($q) => $q->where('name', 'like', "%{$search}%"))
             ->when($eventId !== '', fn ($q) => $q->where('event_id', $eventId));
 
-        $counts = Tournament::selectRaw('status, COUNT(*) as total')
+        $counts = Tournament::query()
+            ->visibleTo($request->user())
+            ->selectRaw('status, COUNT(*) as total')
             ->groupBy('status')
             ->pluck('total', 'status');
 
@@ -117,12 +127,16 @@ class TournamentController extends Controller
             'format' => Tournament::FORMAT_SINGLE_ELIM,
             'seeding_method' => Tournament::SEEDING_MANUAL,
             'event_id' => $request->query('event'),
-        ])));
+        ]), $request->user()));
     }
 
     public function store(Request $request)
     {
         $data = $this->validated($request);
+
+        // Read before anything is written, so a crafted handler id is refused
+        // rather than leaving a tournament created and the assignment rejected.
+        $handlers = $this->validatedHandlers($request, new Tournament);
 
         $tournament = Tournament::create($data + [
             'status' => Tournament::STATUS_SETUP,
@@ -135,6 +149,10 @@ class TournamentController extends Controller
             'settings' => $this->defaultSettings(),
         ]);
 
+        if ($handlers !== null) {
+            $tournament->handlers()->sync($handlers);
+        }
+
         AdminLogger::activity('tournaments.create', sprintf(
             'Created tournament %s on %s.',
             $tournament->name,
@@ -146,9 +164,9 @@ class TournamentController extends Controller
             ->with('status', 'Tournament created. Next: add the entrants.');
     }
 
-    public function edit(Tournament $tournament)
+    public function edit(Request $request, Tournament $tournament)
     {
-        return view('admin.tournament.form', $this->formData($tournament));
+        return view('admin.tournament.form', $this->formData($tournament, $request->user()));
     }
 
     public function update(Request $request, Tournament $tournament)
@@ -161,12 +179,24 @@ class TournamentController extends Controller
         $locked = $tournament->hasDraw();
 
         $data = $this->validated($request, $tournament);
+        $handlers = $this->validatedHandlers($request, $tournament);
 
         if ($locked) {
             unset($data['format'], $data['point_rule_id'], $data['event_id']);
         }
 
         $tournament->update($data);
+
+        /*
+         | Null means this request was never allowed to decide who runs the
+         | tournament, so whatever it sent under `handlers` is left on the floor and
+         | the existing assignment stands. That is the answer for a handler however
+         | its role is granted later: the policy refuses it before reading a
+         | permission, so it can assign neither itself nor anybody else.
+         */
+        if ($handlers !== null) {
+            $tournament->handlers()->sync($handlers);
+        }
 
         AdminLogger::activity('tournaments.update', sprintf('Updated tournament %s.', $tournament->name));
 
@@ -246,8 +276,11 @@ class TournamentController extends Controller
             'stages' => $stages,
             'suggestedStageType' => $this->suggestedStageType($tournament),
             'survey' => $survey,
-            'canUpdate' => $request->user()->hasPermission('tournaments.update'),
-            'canDelete' => $request->user()->hasPermission('tournaments.delete'),
+            // Asked of the policy rather than the permission alone, so the buttons on
+            // this screen answer the same question the routes do: the permission, and
+            // then whether this tournament is one of theirs to act on.
+            'canUpdate' => $request->user()->can('update', $tournament),
+            'canDelete' => $request->user()->can('delete', $tournament),
             'canGenerate' => $request->user()->hasPermission('tournaments.matches.generate'),
         ]);
     }
@@ -480,13 +513,76 @@ class TournamentController extends Controller
     }
 
     /**
+     * The handlers this request may assign, or null if it may not assign at all.
+     *
+     * Null rather than a refusal: somebody without the right to decide who runs a
+     * tournament never sees the section, so a `handlers` key arriving from them is
+     * a hand-made request and the sensible answer is to save the rest of the form
+     * and ignore it, not to fail a form they could not have filled in.
+     *
+     * The ids are checked against the users table with the handler flag and the
+     * active flag in the condition, so a posted id belonging to an ordinary
+     * administrator, or to a handler whose account has been switched off, is
+     * refused by validation rather than attached.
+     *
+     * @return array<int, int>|null
+     */
+    private function validatedHandlers(Request $request, Tournament $tournament): ?array
+    {
+        if (! $request->user()->can('assignHandlers', $tournament)) {
+            return null;
+        }
+
+        $data = $request->validate([
+            'handlers' => ['nullable', 'array'],
+            'handlers.*' => [
+                'integer',
+                Rule::exists('users', 'id')->where(
+                    fn ($query) => $query->where('is_handler', true)->where('is_active', true),
+                ),
+            ],
+        ], [
+            'handlers.*.exists' => 'One of the people ticked is not an active handler account.',
+        ]);
+
+        return collect($data['handlers'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    private function formData(Tournament $tournament): array
+    private function formData(Tournament $tournament, User $actor): array
     {
+        $canAssignHandlers = $actor->can('assignHandlers', $tournament);
+
         return [
             'tournament' => $tournament,
             'mode' => $tournament->exists ? 'edit' : 'create',
+
+            /*
+             | Who may be ticked, and who already is. Resolved here rather than in
+             | the view so the form cannot widen the list: only an account that is
+             | both flagged as a handler and still active is offered, which is the
+             | same pair of conditions the save validates against.
+             */
+            'canAssignHandlers' => $canAssignHandlers,
+
+            'handlerCandidates' => $canAssignHandlers
+                ? User::query()
+                    ->where('is_handler', true)
+                    ->where('is_active', true)
+                    ->orderBy('name')
+                    ->get(['id', 'name', 'email'])
+                : collect(),
+
+            'assignedHandlers' => $tournament->exists
+                ? $tournament->handlers()->pluck('users.id')->all()
+                : [],
+
             'events' => Event::whereHas('registrations')->orderByDesc('starts_at')->pluck('title', 'id'),
             'formats' => Tournament::FORMATS,
             'formatNotes' => Tournament::FORMAT_NOTES,
