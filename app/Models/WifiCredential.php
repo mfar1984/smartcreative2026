@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\LocalTime;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -87,10 +88,15 @@ class WifiCredential extends Model
      * Compared against today rather than filtered in PHP, so the export cannot carry a
      * dead login onto the router and the admin screen does not pad its counts with rows
      * from an event that finished last month.
+     *
+     * Today on the OFFICE clock, not UTC's. expires_on is a typed date and is not
+     * shifted; it was the comparison that was wrong, because now()->toDateString()
+     * is still yesterday between local midnight and 08:00, which kept a login that
+     * expired yesterday live through the whole of the night.
      */
     public function scopeLive(Builder $query): Builder
     {
-        return $query->whereDate('expires_on', '>=', now()->toDateString());
+        return $query->whereDate('expires_on', '>=', LocalTime::today());
     }
 
     /**

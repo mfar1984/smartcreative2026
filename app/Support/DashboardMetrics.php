@@ -8,7 +8,6 @@ use App\Models\EventRegistration;
 use App\Models\Tournament;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Every figure on the dashboard, worked out in one place.
@@ -21,11 +20,13 @@ use Illuminate\Support\Facades\DB;
  * queries on every refresh, short enough that somebody who has just marked a
  * payment paid sees it when they go back to look.
  *
- * A note on dates. `config/app.php` hardcodes UTC, so every existing screen buckets
- * days in UTC. This class does the same on purpose: a dashboard that split days at
- * a different hour from the payments report would produce two "today" figures that
- * never match. Whether the whole application should move to Asia/Kuala_Lumpur is a
- * separate decision, and it belongs in config, not here.
+ * A note on dates. `config/app.php` still hardcodes UTC and every timestamp is still
+ * STORED in UTC, which is the right way round for a database. What moved is the
+ * reading: every day boundary on this screen is now the office clock's, through
+ * LocalTime::today() and LocalDateRange, because the payments screens bucket that way
+ * too. The two agreeing matters more than either being simple — a dashboard splitting
+ * its days eight hours from the report beside it produces two "today" figures that
+ * never match.
  */
 final class DashboardMetrics
 {
@@ -166,13 +167,18 @@ final class DashboardMetrics
      * squeeze quiet days out of existence, making a flat week look busy. So it is
      * reversed and zero filled here.
      *
+     * The bars are LOCAL days, matching what dailyCollected() now returns: money
+     * taken at 04:00 in Kuala Lumpur belongs on this morning's bar, and bucketing
+     * either end of this on UTC put it on yesterday's.
+     *
      * @return array<int, array{label: string, value: float, note: string}>
      */
     private function revenueSeries(int $days): array
     {
-        $start = now()->subDays($days - 1)->startOfDay();
+        $today = $this->localToday();
+        $start = $today->copy()->subDays($days - 1);
 
-        $byDay = collect(PaymentFigures::dailyCollected($start->toDateString(), now()->toDateString()))
+        $byDay = collect(PaymentFigures::dailyCollected($start->toDateString(), $today->toDateString()))
             ->keyBy('date');
 
         $series = [];
@@ -203,13 +209,28 @@ final class DashboardMetrics
      */
     private function registrationSeries(int $days): array
     {
-        $start = now()->subDays($days - 1)->startOfDay();
+        $start = $this->localToday()->subDays($days - 1);
 
-        $byDay = EventRegistration::query()
-            ->where('created_at', '>=', $start)
-            ->selectRaw('DATE(created_at) as day, COUNT(*) as total')
-            ->groupBy('day')
-            ->pluck('total', 'day');
+        /*
+         | Bucketed by local day in PHP for the same reason dailyCollected() is:
+         | DATE(created_at) is the UTC date of an instant, so an entry taken in the
+         | small hours landed on the previous bar, and the portable way to group it on
+         | the office clock is to not ask the database to do date arithmetic at all.
+         | The window bounds the rows, so this is a loop over one chart's worth.
+         */
+        $byDay = [];
+
+        $rows = EventRegistration::query()
+            ->where('created_at', '>=', LocalDateRange::startsAt($start->toDateString()))
+            ->select('created_at')
+            ->get();
+
+        foreach ($rows as $row) {
+            // copy() first: the attribute instance is mutable.
+            $day = $row->created_at->copy()->setTimezone(LocalTime::zone())->toDateString();
+
+            $byDay[$day] = ($byDay[$day] ?? 0) + 1;
+        }
 
         $series = [];
 
@@ -318,14 +339,20 @@ final class DashboardMetrics
     /**
      * This window and the one immediately before it, as Y-m-d strings.
      *
+     * Counted off the office clock's today, not UTC's. Between local midnight and
+     * 08:00 the UTC date is still yesterday, so a window built from a bare now()
+     * ended before today had started and the dashboard reported nothing for the
+     * morning's entries. The strings are LOCAL days, which is what every consumer
+     * of them now converts.
+     *
      * @return array{0: string, 1: string, 2: string, 3: string}
      */
     private function windows(int $days): array
     {
-        $to = now();
-        $from = $to->copy()->subDays($days - 1)->startOfDay();
+        $to = $this->localToday();
+        $from = $to->copy()->subDays($days - 1);
         $prevTo = $from->copy()->subDay();
-        $prevFrom = $prevTo->copy()->subDays($days - 1)->startOfDay();
+        $prevFrom = $prevTo->copy()->subDays($days - 1);
 
         return [
             $from->toDateString(),
@@ -335,11 +362,20 @@ final class DashboardMetrics
         ];
     }
 
+    /**
+     * Entries made inside a range of LOCAL days.
+     *
+     * Converted through LocalDateRange rather than compared with whereDate, for the
+     * same reason PaymentFigures::window() is: created_at holds UTC instants, the
+     * range names days on the office clock, and an entry taken at 04:00 in Kuala
+     * Lumpur is stored on the previous UTC day. Comparing the two directly dropped
+     * it out of its own day and off the end of every window.
+     */
     private function countRegistrations(string $from, string $to): int
     {
         return EventRegistration::query()
-            ->whereDate('created_at', '>=', $from)
-            ->whereDate('created_at', '<=', $to)
+            ->where('created_at', '>=', LocalDateRange::startsAt($from))
+            ->where('created_at', '<=', LocalDateRange::endsAt($to))
             ->count();
     }
 
@@ -357,5 +393,19 @@ final class DashboardMetrics
         }
 
         return round(($current - $previous) / $previous * 100, 1);
+    }
+
+    /**
+     * Midnight at the start of today, on the office clock.
+     *
+     * One place the day boundary is decided for this class, built on LocalTime::today()
+     * so the dashboard splits its days at the same hour the payments screens do. A
+     * dashboard bucketing on UTC beside a report bucketing locally would show two
+     * "today" figures that never match, which is what the note at the top of this
+     * class used to accept and no longer has to.
+     */
+    private function localToday(): Carbon
+    {
+        return Carbon::parse(LocalTime::today(), LocalTime::zone());
     }
 }

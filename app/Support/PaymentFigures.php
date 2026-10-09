@@ -246,18 +246,76 @@ class PaymentFigures
          */
         $rows = EventRegistrationPayment::query()
             ->join('event_registrations', 'event_registrations.id', '=', 'event_registration_payments.event_registration_id')
-            ->when(filled($from), fn (Builder $q) => $q->whereDate('event_registration_payments.received_at', '>=', $from))
-            ->when(filled($to), fn (Builder $q) => $q->whereDate('event_registration_payments.received_at', '<=', $to))
-            ->selectRaw('DATE(event_registration_payments.received_at) as day, COUNT(*) as total, SUM(event_registration_payments.amount) as amount')
-            ->groupBy('day')
-            ->orderByDesc('day')
-            ->get();
+            ->when(
+                filled($from),
+                fn (Builder $q) => $q->where(
+                    'event_registration_payments.received_at',
+                    '>=',
+                    LocalDateRange::startsAt((string) $from),
+                ),
+            )
+            ->when(
+                filled($to),
+                fn (Builder $q) => $q->where(
+                    'event_registration_payments.received_at',
+                    '<=',
+                    LocalDateRange::endsAt((string) $to),
+                ),
+            )
+            ->select([
+                'event_registration_payments.received_at',
+                'event_registration_payments.amount',
+            ])
+            /*
+             | Streamed rather than collected, because this screen has no range by
+             | default: Settlements and Reports both allow an empty picker, which means
+             | the whole ledger. One row is in memory at a time either way, and two
+             | columns of it.
+             */
+            ->cursor();
 
-        return $rows->map(fn ($row) => [
-            'date' => (string) $row->day,
-            'count' => (int) $row->total,
-            'total' => (float) $row->amount,
-        ])->all();
+        /*
+         | Bucketed by local day in PHP, not by DATE() in SQL, and that is a decision
+         | about portability as much as about correctness.
+         |
+         | DATE(received_at) groups an instant by its UTC date, so a transfer taken at
+         | 04:00 in Kuala Lumpur landed on the previous bar of the chart. Grouping it
+         | on the office clock in SQL needs CONVERT_TZ, which MySQL has and the sqlite
+         | database the tests run on does not — so that fix would pass in production
+         | and fail every test, or be guarded by a driver branch only half of which
+         | any run exercises. Bucketing here behaves identically on both drivers
+         | because no date arithmetic is left to the database at all: the only
+         | comparison it makes is between two instants, which is the same comparison
+         | the coupon screens already make in production.
+         */
+        $buckets = [];
+
+        foreach ($rows as $row) {
+            // copy() before setTimezone(): Carbon 3 is mutable and received_at is the
+            // instance sitting in the model's attributes.
+            $day = $row->received_at->copy()->setTimezone(LocalTime::zone())->toDateString();
+
+            $buckets[$day] ??= ['count' => 0, 'total' => 0.0];
+            $buckets[$day]['count']++;
+            $buckets[$day]['total'] += (float) $row->amount;
+        }
+
+        // Newest first, as the screens expect. Y-m-d sorts correctly as a string,
+        // and SORT_STRING is spelled out so a date-shaped key cannot be compared as
+        // anything else.
+        krsort($buckets, SORT_STRING);
+
+        $days = [];
+
+        foreach ($buckets as $day => $figures) {
+            $days[] = [
+                'date' => (string) $day,
+                'count' => $figures['count'],
+                'total' => round($figures['total'], 2),
+            ];
+        }
+
+        return $days;
     }
 
     /**
@@ -315,12 +373,34 @@ class PaymentFigures
      * Applied to created_at rather than to the payment date, because the ranges
      * on screen are chosen to answer "what did this period bring in", and a
      * period owns the entries that were made in it.
+     *
+     * The boundaries are CONVERTED, never compared. created_at is a UTC instant and
+     * the pickers hand over a local day, so whereDate against the bare value lost
+     * every edge: an entry taken at 04:00 in Kuala Lumpur is stored on the previous
+     * UTC day, so it fell out of a range that ended on its own day and into one that
+     * ended the day before. This method is load bearing — collected(), outstanding(),
+     * grossCollected(), refunded(), countsByStatus() and byEvent() all run through
+     * it — so the conversion belongs here rather than in each of them.
      */
     public static function window(Builder $query, ?string $from, ?string $to): Builder
     {
         return $query
-            ->when(filled($from), fn (Builder $q) => $q->whereDate('event_registrations.created_at', '>=', $from))
-            ->when(filled($to), fn (Builder $q) => $q->whereDate('event_registrations.created_at', '<=', $to));
+            ->when(
+                filled($from),
+                fn (Builder $q) => $q->where(
+                    'event_registrations.created_at',
+                    '>=',
+                    LocalDateRange::startsAt((string) $from),
+                ),
+            )
+            ->when(
+                filled($to),
+                fn (Builder $q) => $q->where(
+                    'event_registrations.created_at',
+                    '<=',
+                    LocalDateRange::endsAt((string) $to),
+                ),
+            );
     }
 
     public static function money(float $amount): string

@@ -91,6 +91,26 @@ class LocalTime
     }
 
     /**
+     * Today's date on the office clock, as a bare Y-m-d.
+     *
+     * The one place that decides what "today" is, and the counterpart to
+     * LocalDateRange: that converts a picker's local day into UTC instants, because
+     * the column it filters holds instants. This is for the other kind of column —
+     * a wall-clock date somebody typed, which must NOT be shifted — where the bug
+     * runs the other way round. `whereDate('expires_at', '>=', now()->toDateString())`
+     * compares a typed date against the UTC date, and between local midnight and
+     * 08:00 the UTC date is still yesterday, so an expired coupon stayed on offer
+     * for eight hours every night and a finished event stayed current.
+     *
+     * Returned as a string rather than a Carbon so a caller cannot mutate it, and
+     * because every caller is comparing it against a date column.
+     */
+    public static function today(): string
+    {
+        return Carbon::now(self::zone())->toDateString();
+    }
+
+    /**
      * A stored instant, read on the display clock, in the chosen date+time format.
      *
      * With no explicit $format the admin's chosen date+time format is used; passing

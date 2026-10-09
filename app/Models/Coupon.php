@@ -259,9 +259,29 @@ class Coupon extends Model
         return ! $this->isUnlimited() && $this->redeemedCount() >= (int) $this->quantity;
     }
 
+    /**
+     * Whether the expiry date has passed, on the office clock.
+     *
+     * This is the one CouponRedeemer re-reads under its lock and the one
+     * CouponAvailability answers with, so it decides whether an expired code can
+     * still be CLAIMED rather than merely offered. It had the same eight-hour hole
+     * as scopeOffered(): expires_at is a typed date, cast to midnight UTC, and
+     * ->endOfDay()->isPast() asked whether 23:59 UTC on that date had passed — which
+     * it has not until 07:59 the next morning in Kuala Lumpur. A coupon that died
+     * last night was still being honoured at breakfast.
+     *
+     * Compared as dates rather than instants because that is what the column means:
+     * the batch is dead once the office is on a later day than the date that was
+     * typed. Y-m-d strings compare correctly in that order.
+     *
+     * endOfDay() is also gone for a second reason. Carbon 3 is mutable, so it was
+     * shifting the attribute instance on the model to 23:59:59 as a side effect of
+     * being asked a question.
+     */
     public function isExpired(): bool
     {
-        return $this->expires_at !== null && $this->expires_at->endOfDay()->isPast();
+        return $this->expires_at !== null
+            && $this->expires_at->toDateString() < LocalTime::today();
     }
 
     /**
@@ -484,9 +504,15 @@ class Coupon extends Model
      * refuses itself at redeem time. An exhausted batch is deliberately still
      * offered: the owner's intent is that a used-up batch falls back to the normal
      * price while a fresh batch can be created and ticked alongside it.
+     *
+     * Compared against today on the OFFICE clock, which is the same date
+     * isExpired() reads, so the list and the claim cannot disagree. Against
+     * now()->toDateString() — the UTC date — a batch that expired yesterday stayed
+     * on offer until eight the next morning, because UTC had not reached the new day
+     * yet. expires_at itself is a typed date and is not shifted.
      */
     public function scopeOffered(Builder $query): Builder
     {
-        return $query->whereDate('expires_at', '>=', now()->toDateString());
+        return $query->whereDate('expires_at', '>=', LocalTime::today());
     }
 }

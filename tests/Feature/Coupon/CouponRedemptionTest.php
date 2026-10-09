@@ -6,7 +6,9 @@ use App\Models\Coupon;
 use App\Models\CouponCode;
 use App\Services\Coupon\CouponOutcome;
 use App\Services\Coupon\CouponRedeemer;
+use App\Support\LocalTime;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 
 /**
  * Claiming a coupon: the name is the code, never past the cap, never after expiry.
@@ -174,10 +176,30 @@ class CouponRedemptionTest extends CouponTestCase
 
     public function test_a_coupon_expiring_today_still_works_until_the_end_of_the_day(): void
     {
-        $coupon = $this->coupon(['quantity' => 1, 'expires_at' => now()->toDateString()]);
+        /*
+         | "Today" is the day the OFFICE is on, which is the day printed on the
+         | coupon. expires_at is a date somebody typed, so it is never shifted — but
+         | what it is compared against is now the local date rather than the UTC one.
+         |
+         | Pinned to 16:30 UTC, which is already 00:30 the next day in Kuala Lumpur,
+         | so the two dates disagree on every run. Read off a bare now() this asked
+         | whether a coupon dated UTC-today still worked, and UTC-today is yesterday
+         | on the office clock between midnight and eight in the morning: the
+         | assertion passed all day and failed one evening. Keep the pin.
+         */
+        Carbon::setTestNow(Carbon::parse('2026-10-09 16:30:00', 'UTC'));
 
-        $this->assertFalse($coupon->isExpired());
-        $this->assertTrue($this->redeemer()->claim($coupon, 100)->succeeded());
+        try {
+            $coupon = $this->coupon(['quantity' => 1, 'expires_at' => LocalTime::today()]);
+
+            // The 10th locally, the 9th in UTC. Stored as typed.
+            $this->assertSame('2026-10-10', $coupon->expires_at->toDateString());
+
+            $this->assertFalse($coupon->isExpired());
+            $this->assertTrue($this->redeemer()->claim($coupon, 100)->succeeded());
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_an_exhausted_coupon_is_refused_at_redeem_time(): void

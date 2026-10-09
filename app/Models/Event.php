@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\LocalTime;
 use App\Support\ParticipantOptions;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -740,6 +741,12 @@ class Event extends Model
      * Where the event sits in its lifecycle, worked out from the dates rather
      * than stored, so it can never drift out of sync with them.
      *
+     * Compared as dates against today on the OFFICE clock, which is the same
+     * comparison the scopes below make, so the badge on a card and the tab it is
+     * listed under cannot say different things. Against UTC's today they did: at
+     * half past midnight local, UTC was still on yesterday, so an event that
+     * finished yesterday read "ongoing" until eight in the morning.
+     *
      * cancelled | completed | ongoing | upcoming
      */
     public function lifecycle(): string
@@ -748,13 +755,13 @@ class Event extends Model
             return 'cancelled';
         }
 
-        $today = now()->startOfDay();
+        $today = LocalTime::today();
 
-        if ($this->ends_at->lt($today)) {
+        if ($this->ends_at->toDateString() < $today) {
             return 'completed';
         }
 
-        if ($this->starts_at->lte($today)) {
+        if ($this->starts_at->toDateString() <= $today) {
             return 'ongoing';
         }
 
@@ -844,6 +851,14 @@ class Event extends Model
 
     /* ---------------------------------------------------------------------
      | Scopes used by the admin Registration tabs
+     |
+     | starts_at and ends_at are WALL CLOCK dates somebody typed: the 17th means the
+     | 17th wherever it is read, and nothing here shifts them. What was wrong was the
+     | other side of the comparison. now()->toDateString() is the UTC date, and
+     | between local midnight and 08:00 that is still yesterday — so an event that
+     | finished yesterday stayed "ongoing" until eight in the morning and one
+     | starting today appeared a day late. LocalTime::today() is the date the office
+     | is actually on, and it is the only thing these compare against now.
      * ------------------------------------------------------------------ */
 
     /** Not cancelled and not finished: the working list of events. */
@@ -851,7 +866,7 @@ class Event extends Model
     {
         return $query
             ->where('status', '!=', self::STATUS_CANCELLED)
-            ->whereDate('ends_at', '>=', now()->toDateString());
+            ->whereDate('ends_at', '>=', LocalTime::today());
     }
 
     /** Running right now. */
@@ -859,8 +874,8 @@ class Event extends Model
     {
         return $query
             ->where('status', '!=', self::STATUS_CANCELLED)
-            ->whereDate('starts_at', '<=', now()->toDateString())
-            ->whereDate('ends_at', '>=', now()->toDateString());
+            ->whereDate('starts_at', '<=', LocalTime::today())
+            ->whereDate('ends_at', '>=', LocalTime::today());
     }
 
     /** Finished, and was not cancelled. */
@@ -868,7 +883,7 @@ class Event extends Model
     {
         return $query
             ->where('status', '!=', self::STATUS_CANCELLED)
-            ->whereDate('ends_at', '<', now()->toDateString());
+            ->whereDate('ends_at', '<', LocalTime::today());
     }
 
     public function scopeCancelled(Builder $query): Builder
@@ -899,6 +914,6 @@ class Event extends Model
     {
         return $query
             ->where('status', '!=', self::STATUS_CANCELLED)
-            ->whereDate('starts_at', '>', now()->toDateString());
+            ->whereDate('starts_at', '>', LocalTime::today());
     }
 }
