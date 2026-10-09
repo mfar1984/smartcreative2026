@@ -39,8 +39,7 @@ class BackupRunner
     public function __construct(
         private readonly DatabaseDumper $dumper,
         private readonly BackupStore $store,
-    ) {
-    }
+    ) {}
 
     public function run(string $type = BackupStore::TYPE_MANUAL): BackupResult
     {
@@ -59,8 +58,8 @@ class BackupRunner
         }
 
         $stamp = uniqid('', false);
-        $dump = $directory . DIRECTORY_SEPARATOR . '.tmp-' . $stamp . '.sql.gz';
-        $archive = $directory . DIRECTORY_SEPARATOR . '.tmp-' . $stamp . '.zip';
+        $dump = $directory.DIRECTORY_SEPARATOR.'.tmp-'.$stamp.'.sql.gz';
+        $archive = $directory.DIRECTORY_SEPARATOR.'.tmp-'.$stamp.'.zip';
         $name = $this->store->nameFor($type);
 
         try {
@@ -75,13 +74,35 @@ class BackupRunner
 
             $this->pack($archive, $dump, $files, $manifest);
 
-            if (! @rename($archive, $directory . DIRECTORY_SEPARATOR . $name)) {
+            if (! @rename($archive, $directory.DIRECTORY_SEPARATOR.$name)) {
                 throw new BackupException('The archive was built but could not be moved into the backups folder.');
             }
 
+            /*
+             | Owner only, set here rather than left to the umask.
+             |
+             | The two archives taken on the live server came out 0644 and 0664,
+             | because one was written by the CLI and one by the queue worker and
+             | their umasks differ. Both ended in a world-readable bit, and an
+             | archive holds every participant's identity card number and every
+             | password hash in the system.
+             |
+             | The backups folder is 0700, so nothing was exposed — but that means
+             | the directory was doing all of the protecting on its own. On shared
+             | hosting, where every other account is a local user, one mode away
+             | from exposure is not far enough for this payload. The file protects
+             | itself now, and the folder is the second layer rather than the only
+             | one.
+             |
+             | Not fatal if it fails: the archive is written and the folder still
+             | stands in front of it, and throwing here would discard a good backup
+             | over a permission bit.
+             */
+            @chmod($directory.DIRECTORY_SEPARATOR.$name, 0600);
+
             return new BackupResult(
                 name: $name,
-                bytes: (int) (@filesize($directory . DIRECTORY_SEPARATOR . $name) ?: 0),
+                bytes: (int) (@filesize($directory.DIRECTORY_SEPARATOR.$name) ?: 0),
                 method: $method,
                 fileCount: count($files),
                 tableCount: (int) $manifest['database']['table_count'],
@@ -123,7 +144,7 @@ class BackupRunner
                 continue;
             }
 
-            $finder = (new Finder())
+            $finder = (new Finder)
                 ->files()
                 ->in((string) $root)
                 ->ignoreDotFiles(false)
@@ -139,7 +160,7 @@ class BackupRunner
             foreach ($finder as $file) {
                 $files[] = [
                     'path' => $file->getPathname(),
-                    'entry' => 'files/' . $label . '/' . str_replace('\\', '/', $file->getRelativePathname()),
+                    'entry' => 'files/'.$label.'/'.str_replace('\\', '/', $file->getRelativePathname()),
                     'bytes' => (int) ($file->getSize() ?: 0),
                 ];
             }
@@ -236,7 +257,7 @@ class BackupRunner
      */
     private function pack(string $archive, string $dump, array $files, array $manifest): void
     {
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
 
         if ($zip->open($archive, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
             throw new BackupException('The archive could not be created in the backups folder.');

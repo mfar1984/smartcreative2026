@@ -91,9 +91,9 @@ class BackupTest extends TestCase
     /** An archive on disk under a name of our choosing, with a readable manifest. */
     private function writeArchive(string $name): string
     {
-        $path = $this->backupsDirectory() . DIRECTORY_SEPARATOR . $name;
+        $path = $this->backupsDirectory().DIRECTORY_SEPARATOR.$name;
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
         $zip->addFromString('database.sql.gz', 'not-a-real-dump');
         $zip->addFromString('manifest.json', json_encode(['dump_method' => 'mysqldump']));
@@ -105,9 +105,9 @@ class BackupTest extends TestCase
     private function userWithRole(string $slug): User
     {
         return User::create([
-            'name' => 'Test ' . $slug,
-            'username' => $slug . '-' . uniqid(),
-            'email' => uniqid() . '@example.test',
+            'name' => 'Test '.$slug,
+            'username' => $slug.'-'.uniqid(),
+            'email' => uniqid().'@example.test',
             'password' => 'Backup-Pass-123!',
             'role_id' => Role::where('slug', $slug)->firstOrFail()->id,
             'is_active' => true,
@@ -123,7 +123,7 @@ class BackupTest extends TestCase
     private function userWith(array $permissions): User
     {
         $role = Role::create([
-            'slug' => 'custom-' . uniqid(),
+            'slug' => 'custom-'.uniqid(),
             'name' => 'Custom',
             'is_active' => true,
         ]);
@@ -132,8 +132,8 @@ class BackupTest extends TestCase
 
         return User::create([
             'name' => 'Custom',
-            'username' => 'custom-' . uniqid(),
-            'email' => uniqid() . '@example.test',
+            'username' => 'custom-'.uniqid(),
+            'email' => uniqid().'@example.test',
             'password' => 'Backup-Pass-123!',
             'role_id' => $role->id,
             'is_active' => true,
@@ -149,6 +149,37 @@ class BackupTest extends TestCase
      | The archive
      * ------------------------------------------------------------------ */
 
+    public function test_an_archive_is_readable_only_by_its_owner(): void
+    {
+        /*
+         | Windows has no POSIX mode: chmod() is a near no-op there and fileperms()
+         | reports 0666 or 0444 whatever was asked for, so asserting 0600 would fail
+         | on a developer machine while passing on the server it actually protects.
+         | The behaviour under test is the live host's, which is Linux.
+         */
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $this->markTestSkipped('File modes are a POSIX concept; this guards the Linux host.');
+        }
+
+        $this->artisan('backup:run')->assertSuccessful();
+
+        $names = $this->archives();
+        $this->assertCount(1, $names);
+
+        $path = $this->backupsDirectory().DIRECTORY_SEPARATOR.$names[0];
+
+        /*
+         | Owner only. The two archives taken on the live server came out 0644 and
+         | 0664 — one written by the CLI, one by the queue worker, each inheriting its
+         | own umask — and both carried a world-readable bit. An archive holds every
+         | participant's identity card number and every password hash in the system,
+         | and on shared hosting every other account is a local user. The folder is
+         | 0700 so nothing was exposed, but that left the directory doing all of the
+         | protecting by itself.
+         */
+        $this->assertSame('0600', substr(sprintf('%o', fileperms($path)), -4));
+    }
+
     public function test_a_run_writes_one_archive_with_the_documented_layout(): void
     {
         $this->artisan('backup:run')
@@ -159,8 +190,8 @@ class BackupTest extends TestCase
         $this->assertCount(1, $names);
         $this->assertMatchesRegularExpression('/^backup-\d{4}-\d{2}-\d{2}-\d{6}-manual\.zip$/', $names[0]);
 
-        $zip = new ZipArchive();
-        $this->assertTrue($zip->open($this->backupsDirectory() . DIRECTORY_SEPARATOR . $names[0]) === true);
+        $zip = new ZipArchive;
+        $this->assertTrue($zip->open($this->backupsDirectory().DIRECTORY_SEPARATOR.$names[0]) === true);
 
         $entries = [];
         for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -185,7 +216,7 @@ class BackupTest extends TestCase
             'format', 'app', 'type', 'created_at', 'created_at_local', 'display_timezone',
             'dump_method', 'database', 'files', 'latest_migration',
         ] as $key) {
-            $this->assertArrayHasKey($key, $manifest, $key . ' is missing from the manifest');
+            $this->assertArrayHasKey($key, $manifest, $key.' is missing from the manifest');
         }
 
         $this->assertSame('manual', $manifest['type']);
@@ -225,8 +256,8 @@ class BackupTest extends TestCase
 
         $fresh = collect($this->archives())->first(fn (string $name) => str_contains($name, 'manual'));
 
-        $zip = new ZipArchive();
-        $zip->open($this->backupsDirectory() . DIRECTORY_SEPARATOR . $fresh);
+        $zip = new ZipArchive;
+        $zip->open($this->backupsDirectory().DIRECTORY_SEPARATOR.$fresh);
 
         $entries = [];
         for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -479,7 +510,7 @@ class BackupTest extends TestCase
         // the system, so who fetched one is on record, as a warning.
         $this->assertDatabaseHas('activity_logs', [
             'action' => 'settings.backup.download',
-            'description' => 'Downloaded the backup ' . $name . '.',
+            'description' => 'Downloaded the backup '.$name.'.',
             'level' => 'warn',
         ]);
 
@@ -522,7 +553,7 @@ class BackupTest extends TestCase
 
         $this->assertDatabaseHas('activity_logs', [
             'action' => 'settings.backup.delete',
-            'description' => 'Deleted the backup ' . $gone . '.',
+            'description' => 'Deleted the backup '.$gone.'.',
         ]);
     }
 
@@ -548,7 +579,7 @@ class BackupTest extends TestCase
         ]);
 
         $this->actingAs($deleter)
-            ->get('/admin/settings/backup/' . $name)
+            ->get('/admin/settings/backup/'.$name)
             ->assertForbidden();
 
         $this->assertContains($name, $this->archives());
@@ -562,7 +593,7 @@ class BackupTest extends TestCase
     {
         // Real files, in places a traversal would be aiming at.
         Storage::disk('local')->put('ic/front.jpg', 'an-identity-card');
-        file_put_contents($this->backupsDirectory() . DIRECTORY_SEPARATOR . 'notes.txt', 'not an archive');
+        file_put_contents($this->backupsDirectory().DIRECTORY_SEPARATOR.'notes.txt', 'not an archive');
 
         $owner = $this->superAdmin();
 
@@ -580,17 +611,17 @@ class BackupTest extends TestCase
             'backup-2026-08-01-030000-other.zip', // not a type we write
         ] as $attempt) {
             $this->actingAs($owner)
-                ->get('/admin/settings/backup/' . $attempt)
+                ->get('/admin/settings/backup/'.$attempt)
                 ->assertNotFound();
 
             $this->actingAs($owner)
-                ->delete('/admin/settings/backup/' . $attempt)
+                ->delete('/admin/settings/backup/'.$attempt)
                 ->assertNotFound();
         }
 
         // Nothing was read and nothing was removed.
         $this->assertTrue(Storage::disk('local')->exists('ic/front.jpg'));
-        $this->assertFileExists($this->backupsDirectory() . DIRECTORY_SEPARATOR . 'notes.txt');
+        $this->assertFileExists($this->backupsDirectory().DIRECTORY_SEPARATOR.'notes.txt');
         $this->assertDatabaseMissing('activity_logs', ['action' => 'settings.backup.download']);
         $this->assertDatabaseMissing('activity_logs', ['action' => 'settings.backup.delete']);
     }
@@ -616,14 +647,14 @@ class BackupTest extends TestCase
          | refused — what matters is that none of them answers with the archive.
          */
         foreach ([
-            '/storage/app/private/backups/' . $name,
-            '/storage/private/backups/' . $name,
-            '/backups/' . $name,
-            '/storage/backups/' . $name,
+            '/storage/app/private/backups/'.$name,
+            '/storage/private/backups/'.$name,
+            '/backups/'.$name,
+            '/storage/backups/'.$name,
         ] as $url) {
             $status = $this->get($url)->getStatusCode();
 
-            $this->assertContains($status, [403, 404], $url . ' answered ' . $status);
+            $this->assertContains($status, [403, 404], $url.' answered '.$status);
         }
 
         // Still there: nothing above read, moved or removed it.
@@ -639,15 +670,15 @@ class BackupTest extends TestCase
         $this->assertNotNull($store->resolve($name));
 
         foreach ([
-            '../' . $name,
-            './' . $name,
-            '..\\' . $name,
-            $this->privateRoot . '/ic/front.jpg',
+            '../'.$name,
+            './'.$name,
+            '..\\'.$name,
+            $this->privateRoot.'/ic/front.jpg',
             'C:\\Windows\\win.ini',
             'manifest.json',
             '',
         ] as $attempt) {
-            $this->assertNull($store->resolve($attempt), $attempt . ' should not resolve');
+            $this->assertNull($store->resolve($attempt), $attempt.' should not resolve');
             $this->assertFalse($store->delete($attempt));
         }
 
@@ -665,9 +696,7 @@ class FakeDumper implements DatabaseDumper
 {
     public const SQL = "-- a dump\nSET FOREIGN_KEY_CHECKS=0;\n";
 
-    public function __construct(private readonly bool $fail = false)
-    {
-    }
+    public function __construct(private readonly bool $fail = false) {}
 
     public function dump(string $target): string
     {
