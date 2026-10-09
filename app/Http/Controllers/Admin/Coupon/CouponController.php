@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\CouponRequest;
 use App\Models\Coupon;
 use App\Services\AdminLogger;
+use App\Support\CouponDesignSample;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -68,7 +69,7 @@ class CouponController extends Controller
             $coupon->name,
             $coupon->discountLabel(),
             $coupon->kindLabel(),
-            $coupon->isUnlimited() ? 'unlimited uses' : $coupon->quantity . ' uses',
+            $coupon->isUnlimited() ? 'unlimited uses' : $coupon->quantity.' uses',
             $coupon->expiresLabel(),
         ));
 
@@ -185,60 +186,61 @@ class CouponController extends Controller
      */
     private function formData(Coupon $coupon, string $mode): array
     {
+        /*
+         | THE DESIGN PICKER RENDERS ONE GROUP, NOT ALL OF THEM.
+         |
+         | The form shows the current choice full size and the group that choice belongs
+         | to; every other group's previews are fetched by CouponDesignPickerController
+         | when the operator tabs to it or searches for it. So the Design section is the
+         | same height and the same weight whether there are six designs or six hundred,
+         | which is the thing the owner asked for.
+         |
+         | Read here rather than in the view because the view would otherwise have to
+         | work out the chosen design twice: once for the preview and once for the tab.
+         */
+        $design = (string) old('design', $coupon->design ?: 'classic');
+        $activeGroup = Coupon::designGroupFor($design);
+        $groupDesigns = Coupon::designsInGroup($activeGroup);
+
+        // The chosen design is drawn full size inline, and it is not always in the
+        // group on show — custom belongs to no group at all.
+        $previewed = array_values(array_unique([...array_keys($groupDesigns), $design, Coupon::DESIGN_CUSTOM]));
+
         return [
             'coupon' => $coupon,
             'mode' => $mode,
             'kinds' => Coupon::KINDS,
             'discountTypes' => Coupon::DISCOUNT_TYPES,
-            'designs' => Coupon::DESIGNS,
             'maxQuantity' => \App\Http\Requests\Admin\CouponRequest::MAX_QUANTITY,
 
             // Offered as a starting point so the operator can accept it or type over
             // it, which is the two ways the owner asked for in one field.
             'suggestedCode' => $mode === 'create' ? Coupon::generateCode() : $coupon->name,
 
-            // One sample batch per design, for the picker to draw. See designSample().
-            'designSamples' => array_map(
-                fn (string $design) => $this->designSample($coupon, $design),
-                array_combine(array_keys(Coupon::DESIGNS), array_keys(Coupon::DESIGNS)),
-            ),
-            'designSubject' => $coupon->isForShop()
-                ? 'Team Jersey 2026 · Home kit'
-                : 'Hari Sukan Negara 2026 · Bahagian Sibu',
-        ];
-    }
-
-    /**
-     * An unsaved batch for one design tile to draw.
-     *
-     * Not saved and never will be: the picker needs something with the right shape to
-     * render, and a sample is the honest way to show a design before the operator has
-     * decided what the coupon says.
-     *
-     * Editing an existing batch previews with ITS OWN figures, so the operator is
-     * choosing between pictures of the coupon he actually has rather than between
-     * pictures of a made-up one. Creating has nothing to read yet, so it falls back to
-     * representative values.
-     */
-    private function designSample(Coupon $coupon, string $design): Coupon
-    {
-        $sample = new Coupon([
-            'kind' => $coupon->kind ?: Coupon::KIND_EVENT,
-            // Drawn from the legible alphabet, so the sample looks like what Generate
-            // actually produces rather than teaching the eye the wrong shape.
-            'name' => $coupon->name ?: 'HC7K4M',
-            'quantity' => 0,
-            'expires_at' => $coupon->expires_at?->toDateString() ?? now()->addMonth()->toDateString(),
-            'discount_type' => $coupon->discount_type ?: Coupon::DISCOUNT_PERCENTAGE,
-            'discount_value' => (float) $coupon->discount_value > 0 ? $coupon->discount_value : 30,
             'design' => $design,
-        ]);
+            'designGroups' => Coupon::DESIGN_GROUPS,
+            'activeGroup' => $activeGroup,
+            'groupDesigns' => $groupDesigns,
 
-        // So the custom tile shows the artwork actually uploaded rather than a
-        // placeholder the operator cannot recognise.
-        $sample->design_path = $coupon->design_path;
+            /*
+             | Every design as key, label and group, for the search box to match
+             | against. Text only and a few bytes a design: this is the one thing the
+             | picker does need to know about designs it has not drawn, because
+             | searching for a design in a group nobody has opened has to find it.
+             */
+            'designIndex' => array_map(
+                fn (string $key) => [
+                    'key' => $key,
+                    'label' => Coupon::designLabelFor($key),
+                    'group' => Coupon::designGroup($key),
+                    'groupLabel' => Coupon::designGroupLabel(Coupon::designGroup($key)),
+                ],
+                array_keys(Coupon::groupedDesigns()),
+            ),
 
-        return $sample;
+            'designSamples' => CouponDesignSample::many($coupon, $previewed),
+            'designSubject' => CouponDesignSample::subject($coupon),
+        ];
     }
 
     /**

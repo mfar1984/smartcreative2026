@@ -34,6 +34,7 @@ use Illuminate\Support\Str;
 class Coupon extends Model
 {
     public const KIND_EVENT = 'event';
+
     public const KIND_SHOP = 'shop';
 
     /** Kind slug => label, as the radio on the form reads. */
@@ -43,6 +44,7 @@ class Coupon extends Model
     ];
 
     public const DISCOUNT_PERCENTAGE = 'percentage';
+
     public const DISCOUNT_FIXED = 'fixed';
 
     public const DISCOUNT_TYPES = [
@@ -63,13 +65,44 @@ class Coupon extends Model
      */
     public const DESIGN_CUSTOM = 'custom';
 
+    /**
+     * The groups the picker tabs between, slug => label, in the order it offers them.
+     *
+     * NAMED BY APPEARANCE, NOT BY THEME. An operator looking for a design is looking
+     * for the shape he wants, so "Stamp" and "Bold" are the questions he can answer.
+     * "Festive" or "Corporate" would be names we invented and he would have to guess
+     * at.
+     *
+     * The picker renders ONE group at a time, which is the whole point of grouping:
+     * at two hundred designs, rendering them all and hiding the rest behind a tab
+     * makes the form heavy whether anybody looks at them or not.
+     */
+    public const DESIGN_GROUPS = [
+        'ticket' => 'Ticket',
+        'bold' => 'Bold',
+        'minimal' => 'Minimal',
+        'stamp' => 'Stamp',
+        'modern' => 'Modern',
+    ];
+
+    /**
+     * Design key => its label and the group it is offered under.
+     *
+     * Adding a design is this one entry plus its component file. Nothing else: the
+     * form reads the groups from here, the picker reads the designs of a group from
+     * here, and the validation rule reads the keys from here.
+     *
+     * Custom carries a null group on purpose. It is "bring your own artwork" rather
+     * than a design, so it is not something to find among shapes — it sits on its own
+     * beside the groups, with the upload field.
+     */
     public const DESIGNS = [
-        'classic' => 'Classic — plain ticket',
-        'bold' => 'Bold — the discount is the hero',
-        'minimal' => 'Minimal — clean and spacious',
-        'stamp' => 'Stamp — rubber stamp on paper',
-        'gradient' => 'Gradient — modern, phone friendly',
-        self::DESIGN_CUSTOM => 'Custom — upload your own artwork',
+        'classic' => ['label' => 'Classic — plain ticket', 'group' => 'ticket'],
+        'bold' => ['label' => 'Bold — the discount is the hero', 'group' => 'bold'],
+        'minimal' => ['label' => 'Minimal — clean and spacious', 'group' => 'minimal'],
+        'stamp' => ['label' => 'Stamp — rubber stamp on paper', 'group' => 'stamp'],
+        'gradient' => ['label' => 'Gradient — modern, phone friendly', 'group' => 'modern'],
+        self::DESIGN_CUSTOM => ['label' => 'Custom — upload your own artwork', 'group' => null],
     ];
 
     /** Where uploaded coupon artwork lives on the public disk. */
@@ -278,7 +311,7 @@ class Coupon extends Model
     public function discountLabel(): string
     {
         return $this->isPercentage()
-            ? rtrim(rtrim(number_format((float) $this->discount_value, 2), '0'), '.') . '%'
+            ? rtrim(rtrim(number_format((float) $this->discount_value, 2), '0'), '.').'%'
             : PaymentFigures::money((float) $this->discount_value);
     }
 
@@ -303,7 +336,7 @@ class Coupon extends Model
 
     public function designLabel(): string
     {
-        return self::DESIGNS[$this->design] ?? $this->design;
+        return self::designLabelFor((string) $this->design);
     }
 
     public function hasCustomDesign(): bool
@@ -316,6 +349,78 @@ class Coupon extends Model
         return $this->hasCustomDesign()
             ? Storage::disk('public')->url($this->design_path)
             : null;
+    }
+
+    /* ---------------------------------------------------------------------
+     | Designs and their groups
+     |
+     | Read from DESIGNS rather than matched against a second list, so a design
+     | added there is offered, searchable and validated without another edit.
+     * ------------------------------------------------------------------ */
+
+    /** A stored key that no longer exists reads as itself rather than as nothing. */
+    public static function designLabelFor(string $design): string
+    {
+        return self::DESIGNS[$design]['label'] ?? $design;
+    }
+
+    /** The group a design is offered under, or null for custom and for strays. */
+    public static function designGroup(string $design): ?string
+    {
+        return self::DESIGNS[$design]['group'] ?? null;
+    }
+
+    public static function designGroupLabel(?string $group): ?string
+    {
+        return $group === null ? null : (self::DESIGN_GROUPS[$group] ?? $group);
+    }
+
+    /** The tab the picker opens on when the chosen design belongs to no group. */
+    public static function defaultDesignGroup(): string
+    {
+        return (string) array_key_first(self::DESIGN_GROUPS);
+    }
+
+    /** Which tab to open on for a given choice. Custom falls back to the first. */
+    public static function designGroupFor(string $design): string
+    {
+        return self::designGroup($design) ?? self::defaultDesignGroup();
+    }
+
+    /**
+     * The designs of one group, key => label.
+     *
+     * @return array<string, string>
+     */
+    public static function designsInGroup(string $group): array
+    {
+        $designs = [];
+
+        foreach (self::DESIGNS as $key => $design) {
+            if ($design['group'] === $group) {
+                $designs[$key] = $design['label'];
+            }
+        }
+
+        return $designs;
+    }
+
+    /**
+     * Everything the picker offers among the groups, key => label. Custom excluded.
+     *
+     * @return array<string, string>
+     */
+    public static function groupedDesigns(): array
+    {
+        $designs = [];
+
+        foreach (self::DESIGNS as $key => $design) {
+            if ($design['group'] !== null) {
+                $designs[$key] = $design['label'];
+            }
+        }
+
+        return $designs;
     }
 
     /* ---------------------------------------------------------------------

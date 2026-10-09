@@ -195,6 +195,13 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14m-7-7h14"/>
             @break
 
+        {{-- Dismiss, for a panel header. The bare cross rather than the circled one:
+             a circled cross reads as "error" wherever it is drawn, and the button it
+             sits on only closes a chooser. --}}
+        @case('close')
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            @break
+
         @default
             <circle cx="12" cy="12" r="3" stroke-width="2"/>
     @endswitch

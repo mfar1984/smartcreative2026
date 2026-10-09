@@ -20,8 +20,10 @@
 
         $kind = old('kind', $coupon->kind ?: Coupon::KIND_EVENT);
         $discountType = old('discount_type', $coupon->discount_type ?: Coupon::DISCOUNT_PERCENTAGE);
-        $design = old('design', $coupon->design ?: 'classic');
         $quantity = old('quantity', $coupon->quantity ?? 0);
+
+        // $design comes from the controller: the picker opens on the group that choice
+        // belongs to, so the chosen key has to be worked out before the view.
 
         // What it applies to is locked once anybody has used the coupon: it decides
         // which forms offer it and which records its uses point at. The limit is NOT
@@ -212,7 +214,7 @@
             <x-admin.panel title="Design" icon="photo">
                 <x-admin.field-row
                     label="Design Coupon"
-                    help="How it is drawn where the public can see it. Pick one to see it."
+                    help="How it is drawn where the public can see it. The one in use is shown; change it to pick another."
                     :required="true"
                     error="design">
 
@@ -220,42 +222,11 @@
                          one field on this form whose name tells you nothing about what you
                          are choosing.
 
-                         Every tile carries a real radio, so the keyboard reaches it, the
-                         group is announced, and the posted field is still `design` with the
-                         same values it always had. The preview beside it is decoration with
-                         a click handler, and is aria-hidden: a screen reader gets the
-                         label, not a second reading of the sample figures.
-
-                         Drawn from Coupon::DESIGNS, so a new design appears here the moment
-                         its key and component file exist. --}}
-                    <fieldset data-design-picker>
-                        <legend class="sr-only">Coupon design</legend>
-
-                        <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                            @foreach ($designs as $value => $label)
-                                <div @class([
-                                    'rounded-xl border-2 p-3 transition',
-                                    'has-checked:border-blue-600 has-checked:bg-blue-50/60',
-                                    'border-gray-200 hover:border-blue-300',
-                                ])>
-                                    <label for="design-{{ $value }}" class="flex items-start gap-2.5 cursor-pointer">
-                                        <input type="radio" id="design-{{ $value }}" name="design" value="{{ $value }}" required
-                                               @checked($design === $value)
-                                               data-design
-                                               class="mt-0.5 shrink-0 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
-                                        <span class="text-sm font-semibold text-gray-900">{{ $label }}</span>
-                                    </label>
-
-                                    <div class="mt-3 cursor-pointer" data-design-preview="{{ $value }}" aria-hidden="true">
-                                        <x-coupon.ticket
-                                            :coupon="$designSamples[$value]"
-                                            :subject="$designSubject"
-                                            :compact="true" />
-                                    </div>
-                                </div>
-                            @endforeach
-                        </div>
-                    </fieldset>
+                         The current choice is drawn here and the rest are behind a button,
+                         so this section is the same height at six designs as at six
+                         hundred. See the partial for why it is not a grid and not a scroll
+                         box. --}}
+                    @include('admin.coupon.partials.design-chooser')
 
                     <p class="text-xs text-gray-500 mt-2">
                         Drawn with sample figures. The real coupon shows its own discount, what
@@ -320,8 +291,6 @@
         const value = document.querySelector('[data-discount-value]');
         const percentageNote = document.querySelector('[data-percentage-note]');
         const fixedNote = document.querySelector('[data-fixed-note]');
-        const designs = Array.from(document.querySelectorAll('[data-design]'));
-        const customRow = document.querySelector('[data-custom-row]');
 
         generate?.addEventListener('click', function () {
             // crypto rather than Math.random: a guessable coupon code is money.
@@ -366,37 +335,15 @@
             fixedNote?.classList.toggle('hidden', isPercentage);
         }
 
-        function syncDesign() {
-            const chosen = designs.find((radio) => radio.checked)?.value;
-
-            customRow?.classList.toggle('hidden', chosen !== 'custom');
-        }
-
         quantity?.addEventListener('input', syncQuantity);
         document.querySelectorAll('[data-discount-type]').forEach((el) => el.addEventListener('change', syncDiscount));
-        designs.forEach((radio) => radio.addEventListener('change', syncDesign));
 
-        /*
-         | Clicking the preview picks that design.
-         |
-         | A convenience on top of the radio, never instead of it: the radio is what
-         | the keyboard reaches and what posts, and this only sets it. change has to
-         | be dispatched by hand because setting checked in script does not raise it.
-         */
-        document.querySelectorAll('[data-design-preview]').forEach(function (preview) {
-            preview.addEventListener('click', function () {
-                const radio = document.getElementById('design-' + preview.dataset.designPreview);
-
-                if (radio && !radio.checked) {
-                    radio.checked = true;
-                    radio.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            });
-        });
+        // The design field is the chooser's own: it owns the radios, the inline
+        // preview and the upload row that follows the choice. See
+        // admin/coupon/partials/design-chooser.blade.php.
 
         syncQuantity();
         syncDiscount();
-        syncDesign();
     })();
 </script>
 @endpush

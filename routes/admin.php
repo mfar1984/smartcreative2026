@@ -1,37 +1,38 @@
 <?php
 
 use App\Http\Controllers\Admin\Auth\LoginController;
-use App\Http\Controllers\Admin\DashboardController;
-use App\Http\Controllers\Admin\Event\AnalyticReportingController;
-use App\Http\Controllers\Admin\Event\AttendanceController;
-use App\Http\Controllers\Admin\Event\CollectionController;
 use App\Http\Controllers\Admin\Campaign\AudienceController;
 use App\Http\Controllers\Admin\Campaign\CampaignController;
 use App\Http\Controllers\Admin\Campaign\CampaignReportController;
 use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
 use App\Http\Controllers\Admin\Coupon\CouponController;
 use App\Http\Controllers\Admin\Coupon\CouponDesignController;
+use App\Http\Controllers\Admin\Coupon\CouponDesignPickerController;
 use App\Http\Controllers\Admin\Coupon\ReportController as CouponReportController;
 use App\Http\Controllers\Admin\Coupon\TrackingController as CouponTrackingController;
+use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\Event\AnalyticReportingController;
+use App\Http\Controllers\Admin\Event\AttendanceController;
+use App\Http\Controllers\Admin\Event\CollectionController;
 use App\Http\Controllers\Admin\Event\IdentityCardController;
 use App\Http\Controllers\Admin\Event\ParticipantController;
-use App\Http\Controllers\Admin\Payment\PaymentController;
-use App\Http\Controllers\Admin\Portfolio\GalleryController as PortfolioGalleryController;
-use App\Http\Controllers\Admin\Portfolio\ProjectController as PortfolioProjectController;
-use App\Http\Controllers\Admin\Shop\CategoryController as ShopCategoryController;
-use App\Http\Controllers\Admin\Shop\OrderController as ShopOrderController;
-use App\Http\Controllers\Admin\Shop\TrackingController as ShopTrackingController;
-use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
-use App\Http\Controllers\Admin\Shop\SettingsController as ShopSettingsController;
 use App\Http\Controllers\Admin\Event\RegistrationController as EventRegistrationController;
 use App\Http\Controllers\Admin\Event\SettingsController as EventSettingsController;
 use App\Http\Controllers\Admin\Event\WifiController as EventWifiController;
+use App\Http\Controllers\Admin\Payment\PaymentController;
+use App\Http\Controllers\Admin\Portfolio\GalleryController as PortfolioGalleryController;
+use App\Http\Controllers\Admin\Portfolio\ProjectController as PortfolioProjectController;
 use App\Http\Controllers\Admin\Settings\EasyParcelController;
 use App\Http\Controllers\Admin\Settings\GeneralConfigController;
 use App\Http\Controllers\Admin\Settings\IntegrationController;
 use App\Http\Controllers\Admin\Settings\LoggingController;
 use App\Http\Controllers\Admin\Settings\RoleController;
 use App\Http\Controllers\Admin\Settings\UserController;
+use App\Http\Controllers\Admin\Shop\CategoryController as ShopCategoryController;
+use App\Http\Controllers\Admin\Shop\OrderController as ShopOrderController;
+use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
+use App\Http\Controllers\Admin\Shop\SettingsController as ShopSettingsController;
+use App\Http\Controllers\Admin\Shop\TrackingController as ShopTrackingController;
 use App\Http\Controllers\Admin\Tournament\HallOfFameController;
 use App\Http\Controllers\Admin\Tournament\MatchController;
 use App\Http\Controllers\Admin\Tournament\PointRuleController;
@@ -140,6 +141,23 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('report', [CouponReportController::class, 'index'])
                 ->middleware('permission:coupons.view')
                 ->name('report');
+
+            /*
+            | The rest of the design picker, fetched a group at a time.
+            |
+            | The form renders the current choice and one group; this hands back the
+            | previews for another group, or one design drawn full size for the inline
+            | block. That is what keeps the form a constant size as designs are added.
+            |
+            | Declared before `{coupon}` so `designs` is not swallowed as a route
+            | parameter, and the coupon segment is optional because the create form has
+            | no coupon to draw figures from. On the create-or-update pair: it is a part
+            | of the coupon form, so whoever may open that form may load the rest of it.
+            */
+            Route::get('designs/{coupon?}', CouponDesignPickerController::class)
+                ->middleware('permission:coupons.create|coupons.update')
+                ->whereNumber('coupon')
+                ->name('designs');
 
             /*
             | The design as a file, on the view permission: it is the same four facts
@@ -594,7 +612,6 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('export', [PaymentController::class, 'export'])
                 ->middleware('permission:payments.export')
                 ->name('export');
-
 
             Route::post('{registration}/remind', [PaymentController::class, 'remind'])
                 ->middleware(['permission:participants.notify', 'throttle:20,1'])
