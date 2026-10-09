@@ -158,7 +158,7 @@ Route::prefix('c')->name('campaign.')->group(function () {
 Route::get('/registration', [RegistrationController::class, 'index'])->name('registration');
 // Throttled because it writes participant records from an unauthenticated form.
 Route::post('/registration/{event:slug}', [RegistrationController::class, 'store'])
-    ->middleware('throttle:10,1')
+    ->middleware('throttle:public-form')
     ->name('registration.store');
 /*
 | The payment pages sit above the catch all slug route below so a reference is
@@ -170,7 +170,7 @@ Route::middleware('signed')->group(function () {
         ->name('registration.payment');
 
     Route::post('/registration/payment/{reference}/pay', [RegistrationPaymentController::class, 'pay'])
-        ->middleware('throttle:10,1')
+        ->middleware('throttle:public-reference')
         ->name('registration.payment.pay');
 
     Route::get('/registration/payment/{reference}/return/{outcome}', [RegistrationPaymentController::class, 'handleReturn'])
@@ -197,7 +197,7 @@ Route::get('/registration/sizes/{reference}', [ParticipantSizeController::class,
     ->name('registration.sizes');
 
 Route::post('/registration/sizes/{reference}', [ParticipantSizeController::class, 'store'])
-    ->middleware('throttle:10,1')
+    ->middleware('throttle:public-reference')
     ->name('registration.sizes.store');
 
 Route::get('/registration/{slug}', [RegistrationController::class, 'show'])->name('registration.show');
@@ -241,19 +241,19 @@ Route::get('/shop/{slug}', [ShopController::class, 'show'])->name('shop.product'
 | call and is reachable without a login.
 */
 Route::post('/cart', [CartController::class, 'store'])
-    ->middleware('throttle:60,1')
+    ->middleware('throttle:public-cart')
     ->name('cart.store');
 Route::get('/cart', [CartController::class, 'index'])->name('cart');
 Route::put('/cart', [CartController::class, 'update'])
-    ->middleware('throttle:60,1')
+    ->middleware('throttle:public-cart')
     ->name('cart.update');
 Route::delete('/cart', [CartController::class, 'destroy'])
-    ->middleware('throttle:60,1')
+    ->middleware('throttle:public-cart')
     ->name('cart.clear');
 
 Route::get('/checkout', [CheckoutController::class, 'show'])->name('checkout');
 Route::post('/checkout', [CheckoutController::class, 'place'])
-    ->middleware('throttle:10,1')
+    ->middleware('throttle:public-form')
     ->name('checkout.place');
 
 /*
@@ -309,7 +309,7 @@ Route::post('/order/{reference}/receipt', [CheckoutController::class, 'storeRece
 | at all: the figure is recomputed from the database on every request.
 */
 Route::post('/order/{reference}/pay', [ShopOrderPaymentController::class, 'pay'])
-    ->middleware(['signed', 'throttle:10,1'])
+    ->middleware(['signed', 'throttle:public-reference'])
     ->name('shop.order.pay');
 
 /*
