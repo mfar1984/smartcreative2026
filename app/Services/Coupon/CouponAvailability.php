@@ -3,7 +3,6 @@
 namespace App\Services\Coupon;
 
 use App\Models\Coupon;
-use App\Models\CouponCode;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\ShopOrder;
@@ -18,10 +17,11 @@ use Illuminate\Support\Str;
  * one of those batches could still be used. No tick, no box — not a disabled box, not
  * a box that refuses everything.
  *
- * "Could still be used" is Coupon::isRedeemable(): not expired, and not every code
- * spent. An exhausted batch left ticked is deliberately NOT an offer, which is the
- * other half of the same rule: the price falls back to normal and the Payment button
- * comes back, rather than a visitor being invited to type a code that cannot work.
+ * "Could still be used" is Coupon::isRedeemable(): not expired, and not used as many
+ * times as it was allowed. An exhausted batch left ticked is deliberately NOT an
+ * offer, which is the other half of the same rule: the price falls back to normal and
+ * the Payment button comes back, rather than a visitor being invited to type a code
+ * that cannot work.
  *
  * NOTHING HERE CLAIMS ANYTHING
  *
@@ -140,9 +140,9 @@ class CouponAvailability
     /**
      * Resolve a typed string against the batches on offer.
      *
-     * Both namespaces are searched, because a visitor types into one box: a minted
-     * code for a limited batch, or the batch name itself for an unlimited one. The
-     * same rule CouponRedeemer follows.
+     * One namespace, because there is one kind of code: the batch name. Matched
+     * case-insensitively and with the whitespace trimmed, because the code is read off
+     * a poster or a phone and typed back in.
      *
      * A real code whose batch is not ticked here answers WRONG_KIND — "that coupon
      * cannot be used here" — rather than "not recognised". It is the truthful answer
@@ -159,63 +159,9 @@ class CouponAvailability
             return CouponLookup::failed(CouponOutcome::NOT_FOUND);
         }
 
-        $offeredIds = $offered->pluck('id')->all();
-
-        $minted = CouponCode::query()->with('coupon')->where('code', $typed)->first();
-
-        if ($minted !== null) {
-            $batch = $minted->coupon;
-
-            if ($batch === null) {
-                return CouponLookup::failed(CouponOutcome::NOT_FOUND);
-            }
-
-            if ($batch->kind !== $kind) {
-                return CouponLookup::failed(CouponOutcome::WRONG_KIND);
-            }
-
-            /*
-             | Already used and expired are answered BEFORE the offered check, and the
-             | order matters.
-             |
-             | A spent batch and an expired one have both dropped off the offer list,
-             | so testing that first would answer "cannot be used here" to somebody
-             | holding a code they used last week or one that ran out at midnight.
-             | Those are the two things they most need to be told, and neither reveals
-             | anything: they are holding the code.
-             |
-             | "Already used" comes first because it is the more specific fact about
-             | the code in their hand, rather than about the batch behind it.
-             */
-            if ($minted->isRedeemed()) {
-                return CouponLookup::failed(CouponOutcome::ALREADY_USED);
-            }
-
-            if ($batch->isExpired()) {
-                return CouponLookup::failed(CouponOutcome::EXPIRED);
-            }
-
-            // A live code whose batch is not ticked here: another event's coupon.
-            if (! in_array($batch->id, $offeredIds, true)) {
-                return CouponLookup::failed(CouponOutcome::WRONG_KIND);
-            }
-
-            return CouponLookup::found($batch, $minted);
-        }
-
         $batch = Coupon::query()->where('name', $typed)->first();
 
         if ($batch === null) {
-            return CouponLookup::failed(CouponOutcome::NOT_FOUND);
-        }
-
-        /*
-         | The batch name is only a usable code when the batch is unlimited. On a
-         | limited batch it labels the minted codes, so typing it is the same mistake
-         | as typing the event's name — and answering "not recognised" is what keeps
-         | the name of a 500-code batch from being a master key.
-         */
-        if (! $batch->isUnlimited()) {
             return CouponLookup::failed(CouponOutcome::NOT_FOUND);
         }
 
@@ -223,8 +169,15 @@ class CouponAvailability
             return CouponLookup::failed(CouponOutcome::WRONG_KIND);
         }
 
-        // Expiry before the offered check, for the reason set out above: an expired
-        // batch is no longer offered, and "it expired" is what the holder needs.
+        /*
+         | Expiry and exhaustion are answered BEFORE the offered check, and the order
+         | matters.
+         |
+         | A spent batch and an expired one have both dropped off the offer list, so
+         | testing that first would answer "cannot be used here" to somebody holding a
+         | code that ran out at midnight. Those are the two things they most need to be
+         | told, and neither reveals anything: they are holding the code.
+         */
         if ($batch->isExpired()) {
             return CouponLookup::failed(CouponOutcome::EXPIRED);
         }
@@ -233,7 +186,8 @@ class CouponAvailability
             return CouponLookup::failed(CouponOutcome::RAN_OUT);
         }
 
-        if (! in_array($batch->id, $offeredIds, true)) {
+        // A live code whose batch is not ticked here: another event's coupon.
+        if (! in_array($batch->id, $offered->pluck('id')->all(), true)) {
             return CouponLookup::failed(CouponOutcome::WRONG_KIND);
         }
 

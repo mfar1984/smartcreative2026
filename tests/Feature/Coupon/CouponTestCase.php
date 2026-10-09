@@ -3,7 +3,6 @@
 namespace Tests\Feature\Coupon;
 
 use App\Models\Coupon;
-use App\Models\CouponCode;
 use App\Models\Event;
 use App\Models\EventAddon;
 use App\Models\EventAddonVariant;
@@ -45,13 +44,16 @@ abstract class CouponTestCase extends TestCase
      * ------------------------------------------------------------------ */
 
     /**
-     * A batch, with its codes minted the way the controller mints them.
+     * A coupon. Its name is the code, and `quantity` is how many uses it allows.
+     *
+     * Nothing is written to coupon_codes: that table is a ledger now, and a row in it
+     * only exists once somebody has redeemed.
      *
      * @param  array<string, mixed>  $overrides
      */
     protected function coupon(array $overrides = []): Coupon
     {
-        $coupon = Coupon::create($overrides + [
+        return Coupon::create($overrides + [
             'kind' => Coupon::KIND_EVENT,
             'name' => strtoupper(substr(md5(uniqid('', true)), 0, 8)),
             'quantity' => 0,
@@ -60,13 +62,9 @@ abstract class CouponTestCase extends TestCase
             'discount_value' => 10,
             'design' => 'classic',
         ]);
-
-        CouponCode::mintFor($coupon);
-
-        return $coupon->fresh();
     }
 
-    /** A percentage batch, unlimited unless told otherwise. */
+    /** A percentage coupon, unlimited unless told otherwise. */
     protected function percentageCoupon(float $percent, array $overrides = []): Coupon
     {
         return $this->coupon($overrides + [
@@ -75,7 +73,7 @@ abstract class CouponTestCase extends TestCase
         ]);
     }
 
-    /** A fixed-ringgit batch, unlimited unless told otherwise. */
+    /** A fixed-ringgit coupon, unlimited unless told otherwise. */
     protected function fixedCoupon(float $ringgit, array $overrides = []): Coupon
     {
         return $this->coupon($overrides + [

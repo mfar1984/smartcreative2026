@@ -3,7 +3,6 @@
 namespace App\Services\Coupon;
 
 use App\Models\Coupon;
-use App\Models\CouponCode;
 
 /**
  * What a typed string turned out to be, before anything is claimed.
@@ -15,7 +14,7 @@ use App\Models\CouponCode;
  *
  * ADVISORY ONLY
  *
- * Everything this says can be stale by the time the form is submitted: the last code
+ * Everything this says can be stale by the time the form is submitted: the last use
  * can go, or the batch can be edited, in the seconds between. The claim re-reads all
  * of it inside its own transaction, so a lookup is never the authority on whether a
  * discount is given — only on what to show somebody now.
@@ -28,17 +27,12 @@ readonly class CouponLookup
     public function __construct(
         public string $status,
         public ?Coupon $coupon = null,
-        public ?CouponCode $code = null,
     ) {
     }
 
-    /**
-     * @param  CouponCode|null  $code  the minted row, or null for an unlimited batch
-     *         where the batch name is the shared code and there is no row until use.
-     */
-    public static function found(Coupon $coupon, ?CouponCode $code = null): self
+    public static function found(Coupon $coupon): self
     {
-        return new self(CouponOutcome::OK, $coupon, $code);
+        return new self(CouponOutcome::OK, $coupon);
     }
 
     public static function failed(string $status): self
@@ -51,10 +45,10 @@ readonly class CouponLookup
         return $this->status === CouponOutcome::OK && $this->coupon !== null;
     }
 
-    /** What somebody typed, or would type, to use this. */
+    /** What somebody typed, or would type, to use this: the batch name. */
     public function typedCode(): ?string
     {
-        return $this->code?->code ?? $this->coupon?->name;
+        return $this->coupon?->name;
     }
 
     /** What to tell whoever typed it, in the words CouponOutcome already uses. */

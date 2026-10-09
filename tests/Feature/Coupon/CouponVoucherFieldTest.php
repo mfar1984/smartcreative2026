@@ -205,7 +205,7 @@ class CouponVoucherFieldTest extends CouponTestCase
         $coupon = $this->percentageCoupon(30, ['quantity' => 5]);
         $event->coupons()->attach($coupon);
 
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $response = $this->postJson(route('voucher.check'), [
             'code' => $code,
@@ -245,7 +245,7 @@ class CouponVoucherFieldTest extends CouponTestCase
         $event->coupons()->attach($coupon);
 
         $this->postJson(route('voucher.check'), [
-            'code' => $coupon->codes()->first()->code,
+            'code' => $coupon->name,
             'scope' => Coupon::KIND_EVENT,
             'event' => $event->slug,
         ])->assertJson(['ok' => true, 'per_head' => true]);
@@ -267,7 +267,7 @@ class CouponVoucherFieldTest extends CouponTestCase
         $event->coupons()->attach($coupon);
 
         $this->postJson(route('voucher.check'), [
-            'code' => $coupon->codes()->first()->code,
+            'code' => $coupon->name,
             'scope' => Coupon::KIND_EVENT,
             'event' => $event->slug,
         ])->assertJson(['ok' => true, 'per_head' => false]);
@@ -282,7 +282,7 @@ class CouponVoucherFieldTest extends CouponTestCase
         $event->coupons()->attach($ticked);
 
         $response = $this->postJson(route('voucher.check'), [
-            'code' => $other->codes()->first()->code,
+            'code' => $other->name,
             'scope' => Coupon::KIND_EVENT,
             'event' => $event->slug,
         ]);
@@ -312,10 +312,10 @@ class CouponVoucherFieldTest extends CouponTestCase
 
         $cases = [
             // Each of these is told the specific thing it needs to know, even though
-            // an expired or spent batch has dropped off the offer list.
-            [$expired->codes()->first()->code, 'That coupon has expired, so the normal price applies.'],
-            [$spent->codes()->first()->code, 'That coupon code has already been used.'],
-            [$elsewhere->codes()->first()->code, 'That coupon cannot be used here.'],
+            // an expired or spent coupon has dropped off the offer list.
+            [$expired->name, 'That coupon has expired, so the normal price applies.'],
+            [$spent->name, 'That coupon has been fully used, so the normal price applies.'],
+            [$elsewhere->name, 'That coupon cannot be used here.'],
             ['NOSUCH', 'That coupon code was not recognised.'],
         ];
 
@@ -331,10 +331,9 @@ class CouponVoucherFieldTest extends CouponTestCase
         }
     }
 
-    public function test_the_name_of_a_limited_batch_is_not_a_usable_code(): void
+    public function test_the_name_of_a_capped_coupon_is_the_code_and_checks_out(): void
     {
-        // It labels the minted codes. Accepting it would make the name of a 500-code
-        // batch a master key.
+        // The reversal. A limit no longer means the name is not the code.
         $event = $this->event(['fee' => 100]);
         $coupon = $this->percentageCoupon(30, ['quantity' => 5]);
         $event->coupons()->attach($coupon);
@@ -343,10 +342,13 @@ class CouponVoucherFieldTest extends CouponTestCase
             'code' => $coupon->name,
             'scope' => Coupon::KIND_EVENT,
             'event' => $event->slug,
-        ])->assertJson(['ok' => false]);
+        ])->assertJson(['ok' => true, 'code' => $coupon->name]);
+
+        // Still a read: nothing was spent.
+        $this->assertSame(5, $coupon->fresh()->remaining());
     }
 
-    public function test_an_unlimited_batch_is_checked_by_its_name(): void
+    public function test_an_unlimited_coupon_is_checked_by_its_name(): void
     {
         $event = $this->event(['fee' => 100]);
         $coupon = $this->percentageCoupon(30, ['quantity' => 0]);
@@ -367,7 +369,7 @@ class CouponVoucherFieldTest extends CouponTestCase
         $coupon = $this->percentageCoupon(30, ['quantity' => 5]);
 
         $this->postJson(route('voucher.check'), [
-            'code' => $coupon->codes()->first()->code,
+            'code' => $coupon->name,
             'scope' => Coupon::KIND_EVENT,
             'event' => $event->slug,
         ])->assertJson(['ok' => false, 'message' => 'That coupon code was not recognised.']);
@@ -383,7 +385,7 @@ class CouponVoucherFieldTest extends CouponTestCase
 
         $this->withSession($this->basket($product))
             ->postJson(route('voucher.check'), [
-                'code' => $coupon->codes()->first()->code,
+                'code' => $coupon->name,
                 'scope' => Coupon::KIND_SHOP,
             ])
             ->assertJson([
@@ -408,7 +410,7 @@ class CouponVoucherFieldTest extends CouponTestCase
 
         $this->withSession($this->basket($product))
             ->postJson(route('voucher.check'), [
-                'code' => $eventBatch->codes()->first()->code,
+                'code' => $eventBatch->name,
                 'scope' => Coupon::KIND_SHOP,
             ])
             ->assertJson(['ok' => false, 'message' => 'That coupon cannot be used here.']);

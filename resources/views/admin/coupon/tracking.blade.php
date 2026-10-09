@@ -66,8 +66,8 @@
             <table class="w-full text-sm">
                 <thead class="bg-gray-50 text-left">
                     <tr>
-                        <th scope="col" class="{{ $head }}">Code</th>
-                        <th scope="col" class="{{ $head }}">Batch</th>
+                        <th scope="col" class="{{ $head }}">Code typed</th>
+                        <th scope="col" class="{{ $head }}">Coupon</th>
                         <th scope="col" class="{{ $head }}">Used on</th>
                         <th scope="col" class="{{ $head }}">Reference</th>
                         <th scope="col" class="{{ $head }} text-right">Discount</th>

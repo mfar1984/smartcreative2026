@@ -185,7 +185,7 @@ class CouponShopOrderTest extends CouponTestCase
         $this->fillBasket($product->id);
 
         $coupon = $this->fixedCoupon(15, ['kind' => Coupon::KIND_SHOP, 'quantity' => 2]);
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $outcome = app(CouponRedeemer::class)->claimByCode($code, Coupon::KIND_SHOP, 50.0);
 
@@ -215,7 +215,7 @@ class CouponShopOrderTest extends CouponTestCase
     public function test_an_event_coupon_cannot_be_claimed_for_the_shop(): void
     {
         $coupon = $this->fixedCoupon(15, ['kind' => Coupon::KIND_EVENT, 'quantity' => 1]);
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $outcome = app(CouponRedeemer::class)->claimByCode($code, Coupon::KIND_SHOP, 50.0);
 

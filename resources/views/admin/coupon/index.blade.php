@@ -18,7 +18,7 @@
 @section('content')
     <x-admin.page-card
         title="Coupons"
-        description="Each row is a batch. Tick it on an event or a product to let that discount be used there."
+        description="The code is the coupon's name, and Uses is how many times it may be typed. Tick it on an event or a product to let that discount be used there."
         :flush="true">
 
         <x-slot:actions>
@@ -47,9 +47,9 @@
                 <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">
                     <x-admin.icon name="search" class="w-4 h-4" />
                 </span>
-                <label for="q" class="sr-only">Search coupons</label>
+                <label for="q" class="sr-only">Search by coupon code</label>
                 <input type="search" id="q" name="q" value="{{ $search }}"
-                       placeholder="Coupon code..."
+                       placeholder="Coupon code people type..."
                        class="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
             </div>
 
@@ -66,7 +66,7 @@
             <table class="w-full text-sm">
                 <thead class="bg-gray-50 text-left">
                     <tr>
-                        <th scope="col" class="{{ $head }}">Coupon</th>
+                        <th scope="col" class="{{ $head }}">Coupon Code</th>
                         <th scope="col" class="{{ $head }}">Applies to</th>
                         <th scope="col" class="{{ $head }} text-right">Discount</th>
                         <th scope="col" class="{{ $head }} text-right">Uses</th>
@@ -102,16 +102,18 @@
                                 {{ $coupon->discountLabel() }}
                             </td>
 
-                            {{-- Used of minted, because "3 uses" answers nothing on its
-                                 own: the question is whether any are left. --}}
+                            {{-- Used of allowed, because "3 uses" answers nothing on its
+                                 own: the question is whether any are left. An unlimited
+                                 coupon has no denominator, so it is said in words rather
+                                 than drawn as a count against a sentinel. --}}
                             <td class="px-5 py-3 text-right text-gray-600 tabular-nums whitespace-nowrap">
                                 @if ($coupon->isUnlimited())
                                     {{ number_format($coupon->redeemed_count) }}
-                                    <span class="block text-xs text-gray-400">of unlimited</span>
+                                    <span class="block text-xs text-gray-400">no limit</span>
                                 @else
-                                    {{ number_format($coupon->redeemed_count) }} / {{ number_format($coupon->codes_count) }}
+                                    {{ number_format($coupon->redeemed_count) }} / {{ number_format($coupon->quantity) }}
                                     <span class="block text-xs text-gray-400">
-                                        {{ number_format(max(0, $coupon->codes_count - $coupon->redeemed_count)) }} left
+                                        {{ number_format(max(0, (int) $coupon->quantity - $coupon->redeemed_count)) }} uses left
                                     </span>
                                 @endif
                             </td>
@@ -138,11 +140,11 @@
                                         @endif
 
                                         @if ($canDelete)
-                                            {{-- A batch somebody has used is refused by the
-                                                 controller, because its redemption rows carry the
+                                            {{-- A coupon somebody has used is refused by the
+                                                 controller, because its ledger rows carry the
                                                  figure the books rest on. --}}
                                             <form action="{{ route('admin.coupons.destroy', $coupon) }}" method="POST"
-                                                  onsubmit="return confirm('Delete {{ addslashes($coupon->name) }}?\n\nEvery code minted for it goes too. A batch that has already been used cannot be deleted.');">
+                                                  onsubmit="return confirm('Delete {{ addslashes($coupon->name) }}?\n\nThe code stops working everywhere. A coupon that has already been used cannot be deleted.');">
                                                 @csrf
                                                 @method('DELETE')
                                                 <button type="submit"

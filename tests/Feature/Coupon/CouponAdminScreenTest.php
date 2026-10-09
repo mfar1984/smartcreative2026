@@ -142,6 +142,52 @@ class CouponAdminScreenTest extends CouponTestCase
     }
 
     /* ---------------------------------------------------------------------
+     | The list reads in uses, not in codes
+     * ------------------------------------------------------------------ */
+
+    public function test_the_list_counts_uses_and_calls_the_name_a_code(): void
+    {
+        $coupon = $this->coupon(['name' => 'USESBB', 'quantity' => 10]);
+
+        app(\App\Services\Coupon\CouponRedeemer::class)->claim($coupon, 100);
+
+        $response = $this->actingAs($this->userWith(['coupons.view']))
+            ->get(route('admin.coupons.index'));
+
+        $response->assertOk();
+        $response->assertSee('Coupon Code');
+        $response->assertSee('1 / 10');
+        $response->assertSee('9 uses left');
+        $response->assertDontSee('codes left');
+    }
+
+    public function test_an_unlimited_coupon_is_listed_as_unlimited_rather_than_as_a_count(): void
+    {
+        $coupon = $this->coupon(['name' => 'NOLIMT', 'quantity' => 0]);
+
+        app(\App\Services\Coupon\CouponRedeemer::class)->claim($coupon, 100);
+
+        $this->actingAs($this->userWith(['coupons.view']))
+            ->get(route('admin.coupons.index'))
+            ->assertOk()
+            ->assertSee('no limit')
+            ->assertDontSee('uses left');
+    }
+
+    public function test_the_form_asks_how_many_uses_rather_than_how_many_codes(): void
+    {
+        $response = $this->actingAs($this->couponAdmin())->get(route('admin.coupons.create'));
+
+        $response->assertOk();
+        $response->assertSee('How Many Uses');
+        $response->assertSee('How many times the code may be used. 0 means no limit.');
+
+        // The wording that caused the whole detour.
+        $response->assertDontSee('unique code');
+        $response->assertDontSee('Number of Coupon');
+    }
+
+    /* ---------------------------------------------------------------------
      | Creating
      * ------------------------------------------------------------------ */
 
@@ -161,7 +207,7 @@ class CouponAdminScreenTest extends CouponTestCase
         ];
     }
 
-    public function test_a_limited_batch_mints_its_codes_on_create(): void
+    public function test_a_capped_coupon_stores_its_limit_and_mints_nothing(): void
     {
         $this->actingAs($this->couponAdmin())
             ->post(route('admin.coupons.store'), $this->form(['name' => 'XYZ987', 'quantity' => 25]))
@@ -169,8 +215,9 @@ class CouponAdminScreenTest extends CouponTestCase
 
         $coupon = Coupon::query()->sole();
 
-        $this->assertSame(25, $coupon->codes()->count());
+        $this->assertSame(25, (int) $coupon->quantity);
         $this->assertSame(25, $coupon->remaining());
+        $this->assertSame(0, $coupon->codes()->count(), 'Nothing may be minted up front.');
         $this->assertDatabaseHas('activity_logs', ['action' => 'coupons.create']);
     }
 
@@ -192,19 +239,7 @@ class CouponAdminScreenTest extends CouponTestCase
         $this->assertSame(0, Coupon::query()->count());
     }
 
-    public function test_a_name_that_collides_with_a_minted_code_is_refused(): void
-    {
-        $existing = $this->coupon(['quantity' => 3]);
-        $minted = $existing->codes()->first()->code;
-
-        $this->actingAs($this->couponAdmin())
-            ->post(route('admin.coupons.store'), $this->form(['name' => $minted]))
-            ->assertSessionHasErrors('name');
-
-        $this->assertSame(1, Coupon::query()->count());
-    }
-
-    public function test_a_name_that_collides_with_another_batch_is_refused(): void
+    public function test_a_name_that_collides_with_another_coupon_is_refused(): void
     {
         $existing = $this->coupon();
 
@@ -305,8 +340,10 @@ class CouponAdminScreenTest extends CouponTestCase
      | Editing and deleting a used batch
      * ------------------------------------------------------------------ */
 
-    public function test_the_quantity_cannot_change_once_a_batch_has_been_used(): void
+    public function test_raising_the_limit_on_a_used_coupon_is_allowed(): void
     {
+        // Safe, and the whole reason the old refusal was wrong: more uses of the same
+        // code takes nothing away from the uses already honoured.
         $coupon = $this->coupon(['quantity' => 3]);
 
         app(\App\Services\Coupon\CouponRedeemer::class)->claim($coupon, 100);
@@ -316,34 +353,78 @@ class CouponAdminScreenTest extends CouponTestCase
                 'name' => $coupon->name,
                 'quantity' => 10,
             ]))
-            ->assertSessionHasErrors('quantity');
+            ->assertSessionHasNoErrors();
 
-        $this->assertSame(3, $coupon->fresh()->quantity);
+        $coupon = $coupon->fresh();
+
+        $this->assertSame(10, (int) $coupon->quantity);
+        $this->assertSame(9, $coupon->remaining());
+        $this->assertSame(1, $coupon->redeemedCount());
     }
 
-    public function test_raising_the_quantity_before_any_use_mints_only_the_shortfall(): void
+    public function test_dropping_the_limit_to_unlimited_on_a_used_coupon_is_allowed(): void
     {
-        $coupon = $this->coupon(['quantity' => 3]);
-        $before = $coupon->codes()->pluck('code')->all();
+        $coupon = $this->coupon(['quantity' => 2]);
+
+        app(\App\Services\Coupon\CouponRedeemer::class)->claim($coupon, 100);
 
         $this->actingAs($this->couponAdmin())
             ->put(route('admin.coupons.update', $coupon), $this->form([
                 'name' => $coupon->name,
-                'quantity' => 8,
+                'quantity' => 0,
             ]))
             ->assertSessionHasNoErrors();
 
-        $after = $coupon->fresh()->codes()->pluck('code')->all();
-
-        $this->assertCount(8, $after);
-
-        // Codes already printed keep working.
-        foreach ($before as $code) {
-            $this->assertContains($code, $after);
-        }
+        $this->assertTrue($coupon->fresh()->isUnlimited());
+        $this->assertNull($coupon->fresh()->remaining());
     }
 
-    public function test_a_used_batch_cannot_be_deleted(): void
+    public function test_lowering_the_limit_below_what_has_been_used_is_refused(): void
+    {
+        $coupon = $this->coupon(['quantity' => 5]);
+        $redeemer = app(\App\Services\Coupon\CouponRedeemer::class);
+
+        $redeemer->claim($coupon, 100);
+        $redeemer->claim($coupon->fresh(), 100);
+        $redeemer->claim($coupon->fresh(), 100);
+
+        $response = $this->actingAs($this->couponAdmin())
+            ->put(route('admin.coupons.update', $coupon), $this->form([
+                'name' => $coupon->name,
+                'quantity' => 2,
+            ]));
+
+        $response->assertSessionHasErrors('quantity');
+
+        // The message says what happened and why, rather than "cannot change".
+        $message = session('errors')->first('quantity');
+
+        $this->assertStringContainsString('already been used 3 times', $message);
+        $this->assertStringContainsString('cannot be set below 3', $message);
+
+        $this->assertSame(5, (int) $coupon->fresh()->quantity);
+    }
+
+    public function test_the_limit_may_be_set_exactly_to_what_has_been_used(): void
+    {
+        // Closing a coupon off at the uses it has already given is not a retroactive
+        // change: nothing already honoured is invalidated.
+        $coupon = $this->coupon(['quantity' => 5]);
+
+        app(\App\Services\Coupon\CouponRedeemer::class)->claim($coupon, 100);
+
+        $this->actingAs($this->couponAdmin())
+            ->put(route('admin.coupons.update', $coupon), $this->form([
+                'name' => $coupon->name,
+                'quantity' => 1,
+            ]))
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame(0, $coupon->fresh()->remaining());
+        $this->assertTrue($coupon->fresh()->isExhausted());
+    }
+
+    public function test_a_used_coupon_cannot_be_deleted(): void
     {
         $coupon = $this->coupon(['quantity' => 2]);
 
@@ -360,7 +441,7 @@ class CouponAdminScreenTest extends CouponTestCase
      | The tick lists
      * ------------------------------------------------------------------ */
 
-    public function test_only_event_batches_are_offered_on_the_event_form(): void
+    public function test_only_event_coupons_are_offered_on_the_event_form(): void
     {
         $eventCoupon = $this->coupon(['kind' => Coupon::KIND_EVENT, 'name' => 'EVENTA']);
         $shopCoupon = $this->coupon(['kind' => Coupon::KIND_SHOP, 'name' => 'SHOPAA']);
@@ -385,7 +466,7 @@ class CouponAdminScreenTest extends CouponTestCase
         $this->assertNotContains($shopCoupon->id, $offered->pluck('id')->all());
     }
 
-    public function test_only_shop_batches_are_offered_on_the_product_form(): void
+    public function test_only_shop_coupons_are_offered_on_the_product_form(): void
     {
         $shopCoupon = $this->coupon(['kind' => Coupon::KIND_SHOP, 'name' => 'SHOPBB']);
         $this->coupon(['kind' => Coupon::KIND_EVENT, 'name' => 'EVENTB']);
@@ -402,7 +483,7 @@ class CouponAdminScreenTest extends CouponTestCase
         $this->assertSame([$shopCoupon->id], $response->viewData('coupons')->pluck('id')->all());
     }
 
-    public function test_an_expired_batch_is_not_offered(): void
+    public function test_an_expired_coupon_is_not_offered(): void
     {
         $this->coupon(['kind' => Coupon::KIND_EVENT, 'name' => 'GONEAA', 'expires_at' => now()->subDay()->toDateString()]);
         $live = $this->coupon(['kind' => Coupon::KIND_EVENT, 'name' => 'LIVEAA']);
@@ -413,7 +494,7 @@ class CouponAdminScreenTest extends CouponTestCase
         $this->assertSame([$live->id], $response->viewData('coupons')->pluck('id')->all());
     }
 
-    public function test_an_exhausted_batch_is_still_offered_so_a_new_one_can_sit_beside_it(): void
+    public function test_an_exhausted_coupon_is_still_offered_so_a_new_one_can_sit_beside_it(): void
     {
         $used = $this->coupon(['kind' => Coupon::KIND_EVENT, 'name' => 'USEDUP', 'quantity' => 1]);
         app(\App\Services\Coupon\CouponRedeemer::class)->claim($used, 100);
@@ -424,7 +505,20 @@ class CouponAdminScreenTest extends CouponTestCase
             ->get(route('admin.event.registration.create'));
 
         $this->assertContains($used->id, $response->viewData('coupons')->pluck('id')->all());
-        $response->assertSee('Every code has been used.');
+        $response->assertSee('Every use has been taken.');
+    }
+
+    public function test_the_picker_counts_uses_rather_than_codes(): void
+    {
+        $batch = $this->coupon(['kind' => Coupon::KIND_EVENT, 'name' => 'USESAA', 'quantity' => 10]);
+
+        app(\App\Services\Coupon\CouponRedeemer::class)->claim($batch, 100);
+
+        $this->actingAs($this->userWith(['events.create', 'coupons.view']))
+            ->get(route('admin.event.registration.create'))
+            ->assertOk()
+            ->assertSee('9 of 10 uses left')
+            ->assertDontSee('codes left');
     }
 
     public function test_ticking_coupons_on_an_event_round_trips(): void
@@ -533,7 +627,7 @@ class CouponAdminScreenTest extends CouponTestCase
      | Tracking
      * ------------------------------------------------------------------ */
 
-    public function test_tracking_lists_a_redemption_with_its_code_batch_and_figure(): void
+    public function test_tracking_lists_a_redemption_with_its_code_coupon_and_figure(): void
     {
         $event = $this->event(['fee' => 200]);
         $registration = $this->registration($event);
@@ -555,7 +649,7 @@ class CouponAdminScreenTest extends CouponTestCase
         $this->assertSame(50.0, $response->viewData('discountTotal'));
     }
 
-    public function test_tracking_filters_by_batch(): void
+    public function test_tracking_filters_by_coupon(): void
     {
         $one = $this->coupon(['quantity' => 1, 'name' => 'BATCHA', 'discount_type' => Coupon::DISCOUNT_FIXED, 'discount_value' => 10]);
         $two = $this->coupon(['quantity' => 1, 'name' => 'BATCHB', 'discount_type' => Coupon::DISCOUNT_FIXED, 'discount_value' => 20]);

@@ -32,7 +32,7 @@ return new class extends Migration
                 ->after('addons_total');
 
             /*
-             | Which minted code paid for it. nullOnDelete rather than cascade: losing
+             | Which redemption paid for it. nullOnDelete rather than cascade: losing
              | the coupon must never take the registration with it, and the figure
              | above is the part that matters to the books.
              */

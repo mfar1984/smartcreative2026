@@ -44,7 +44,7 @@
             <div class="space-y-2" data-coupon-picker>
                 @foreach ($coupons as $batch)
                     @php
-                        // Asked once per row. isExhausted() calls remaining() itself, so
+                        // Asked once per row. isExhausted() counts the ledger itself, so
                         // reading both would be two counts per batch on a form that is
                         // drawn on every create and every edit.
                         $remaining = $batch->remaining();
@@ -79,18 +79,18 @@
                                 @if ($batch->isUnlimited())
                                     Unlimited uses
                                 @else
-                                    {{ number_format($remaining ?? 0) }} of {{ number_format($batch->quantity) }} codes left
+                                    {{ number_format($remaining ?? 0) }} of {{ number_format($batch->quantity) }} uses left
                                 @endif
                                 &middot; expires {{ $batch->expiresLabel() }}
                             </span>
 
                             @if ($exhausted)
-                                {{-- Still offered on purpose. A used-up batch left ticked is
+                                {{-- Still offered on purpose. A used-up coupon left ticked is
                                      what makes the price fall back to normal instead of the
                                      discount vanishing from the record. --}}
                                 <span class="block text-xs text-amber-700 font-semibold mt-1">
-                                    Every code has been used. Tick it and the normal price applies until
-                                    a new batch is created.
+                                    Every use has been taken. Tick it and the normal price applies until
+                                    the limit is raised or a new coupon is created.
                                 </span>
                             @endif
 
@@ -108,7 +108,7 @@
             <p class="text-xs text-gray-500 mt-2">
                 @if ($priceNoun === 'event')
                     Only coupons created for Event Registration are listed. A registrant types the
-                    code; several may be ticked so a batch that runs out can be left in place and a
+                    code; several may be ticked so a coupon that runs out can be left in place and a
                     fresh one added beside it.
                 @else
                     Only coupons created for the Shop are listed. The buyer types the code at

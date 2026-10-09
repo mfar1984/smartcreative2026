@@ -7,6 +7,12 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Coupons, as batches rather than as single codes.
  *
+ * SUPERSEDED. Everything below about minting is how the model worked when this
+ * migration was written. 2026_10_12_090000_make_coupon_codes_a_redemption_ledger
+ * reversed it: the batch name is the only code, `quantity` is how many times it may be
+ * used, and coupon_codes is a ledger written at the moment of use. Read that one for
+ * the current shape and why it changed. This is left as it ran.
+ *
  * A `coupons` row is a BATCH. "ABC123" is its name, and the two tables exist because
  * one row has to answer two different questions depending on how many uses it was
  * created with:

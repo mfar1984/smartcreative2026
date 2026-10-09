@@ -51,7 +51,7 @@ class CouponDesignRenderTest extends CouponTestCase
     public function test_a_percentage_coupon_renders_in_every_design(string $design): void
     {
         $coupon = $this->percentageCoupon(30, ['design' => $design, 'quantity' => 1]);
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $html = $this->render($coupon, self::LONG_TITLE, $code);
         $ticket = CouponTicket::for($coupon, self::LONG_TITLE, $code);
@@ -80,7 +80,7 @@ class CouponDesignRenderTest extends CouponTestCase
     public function test_a_ringgit_coupon_renders_in_every_design(string $design): void
     {
         $coupon = $this->fixedCoupon(25, ['design' => $design, 'quantity' => 1]);
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $html = $this->render($coupon, self::LONG_TITLE, $code);
 
@@ -102,7 +102,7 @@ class CouponDesignRenderTest extends CouponTestCase
         // number, so a four figure sum has to shrink to fit rather than spill out.
         $coupon = $this->fixedCoupon(1250, ['design' => $design, 'quantity' => 1]);
 
-        $html = $this->render($coupon, 'Hari Sukan Negara 2026', $coupon->codes()->first()->code);
+        $html = $this->render($coupon, 'Hari Sukan Negara 2026', $coupon->name);
         $ticket = CouponTicket::for($coupon);
 
         $this->assertStringContainsString('1,250.00', $html);
@@ -128,7 +128,7 @@ class CouponDesignRenderTest extends CouponTestCase
         $coupon->design_path = Coupon::DESIGN_DIRECTORY . '/sample.png';
         $coupon->save();
 
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
         $html = $this->render($coupon->fresh(), 'Hari Sukan Negara 2026', $code);
 
         $this->assertStringContainsString('sample.png', $html);
@@ -145,7 +145,7 @@ class CouponDesignRenderTest extends CouponTestCase
         // Saved as custom and the picture removed afterwards. Still has to be readable
         // by whoever is holding the code.
         $coupon = $this->percentageCoupon(15, ['design' => Coupon::DESIGN_CUSTOM, 'quantity' => 1]);
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $html = $this->render($coupon, 'Hari Sukan Negara 2026', $code);
 
@@ -183,7 +183,7 @@ class CouponDesignRenderTest extends CouponTestCase
     public function test_the_summary_spells_the_coupon_out_for_a_screen_reader(): void
     {
         $coupon = $this->fixedCoupon(25, ['quantity' => 1]);
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $summary = CouponTicket::for($coupon, 'Hari Sukan Negara 2026', $code)->summary();
 

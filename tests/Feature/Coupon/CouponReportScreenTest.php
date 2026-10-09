@@ -12,10 +12,10 @@ use Illuminate\Support\Carbon;
 /**
  * The Report screen's figures.
  *
- * Stock and activity are different questions and the screen answers both: minted and
- * left are for the whole life of a batch, redeemed and given follow the date range. A
- * test that only checked the unfiltered totals would miss the one bug this screen can
- * actually have.
+ * Stock and activity are different questions and the screen answers both: uses allowed
+ * and left are for the whole life of a coupon, redeemed and given follow the date
+ * range. A test that only checked the unfiltered totals would miss the one bug this
+ * screen can actually have.
  *
  * The date range is the other half. redeemed_at is stored in UTC and shown on the
  * office clock, so a redemption at 04:00 local sits on the previous UTC day — the bug
@@ -53,7 +53,7 @@ class CouponReportScreenTest extends CouponTestCase
      | The figures
      * ------------------------------------------------------------------ */
 
-    public function test_it_reports_minted_redeemed_and_remaining_for_a_batch(): void
+    public function test_it_reports_uses_allowed_redeemed_and_remaining_for_a_coupon(): void
     {
         $coupon = $this->fixedCoupon(15, ['quantity' => 10, 'name' => 'TENOFF']);
 
@@ -67,11 +67,12 @@ class CouponReportScreenTest extends CouponTestCase
 
         $response->assertOk();
         $response->assertSee('TENOFF');
+        $response->assertSee('Uses allowed');
 
-        // 10 minted, 3 used, 7 left, RM45 given.
+        // 10 allowed, 3 used, 7 left, RM45 given.
         $batch = $response->viewData('batches')->firstWhere('name', 'TENOFF');
 
-        $this->assertSame(10, (int) $batch->codes_count);
+        $this->assertSame(10, (int) $batch->quantity);
         $this->assertSame(3, (int) $batch->redeemed_total);
         $this->assertSame(3, (int) $batch->redeemed_in_range);
         $this->assertSame(45.0, (float) $batch->discount_in_range);
@@ -80,10 +81,10 @@ class CouponReportScreenTest extends CouponTestCase
 
         $this->assertSame(45.0, $summary['given']);
         $this->assertSame(3, $summary['redemptions']);
-        $this->assertSame(7, $summary['codes_left']);
+        $this->assertSame(7, $summary['uses_left']);
     }
 
-    public function test_an_unlimited_batch_has_no_stock_to_report(): void
+    public function test_an_unlimited_coupon_has_no_stock_to_report(): void
     {
         $coupon = $this->fixedCoupon(5, ['quantity' => 0, 'name' => 'ALWAYS']);
 
@@ -99,9 +100,9 @@ class CouponReportScreenTest extends CouponTestCase
         $this->assertSame(2, (int) $batch->redeemed_total);
         $this->assertSame(10.0, (float) $batch->discount_in_range);
 
-        // Its use rows are not stock, so they are left out of the codes-left figure
-        // rather than counted and turned into a negative.
-        $this->assertSame(0, $response->viewData('summary')['codes_left']);
+        // It has nothing to count down, so it is left out of the uses-left figure
+        // rather than folded in and turned into a negative.
+        $this->assertSame(0, $response->viewData('summary')['uses_left']);
     }
 
     public function test_it_splits_the_total_between_events_and_the_shop(): void
@@ -150,7 +151,7 @@ class CouponReportScreenTest extends CouponTestCase
         $this->assertSame(0.0, $summary['event_given']);
     }
 
-    public function test_a_batch_that_has_never_been_used_reports_zeroes_rather_than_nothing(): void
+    public function test_a_coupon_that_has_never_been_used_reports_zeroes_rather_than_nothing(): void
     {
         $this->fixedCoupon(15, ['quantity' => 4, 'name' => 'UNUSED']);
 
@@ -158,10 +159,10 @@ class CouponReportScreenTest extends CouponTestCase
 
         $batch = $response->viewData('batches')->firstWhere('name', 'UNUSED');
 
-        $this->assertSame(4, (int) $batch->codes_count);
+        $this->assertSame(4, (int) $batch->quantity);
         $this->assertSame(0, (int) $batch->redeemed_total);
         $this->assertSame(0.0, (float) ($batch->discount_in_range ?? 0));
-        $this->assertSame(4, $response->viewData('summary')['codes_left']);
+        $this->assertSame(4, $response->viewData('summary')['uses_left']);
     }
 
     /* ---------------------------------------------------------------------
@@ -192,10 +193,10 @@ class CouponReportScreenTest extends CouponTestCase
         $this->assertSame(1, (int) $batch->redeemed_in_range);
         $this->assertSame(10.0, (float) $batch->discount_in_range);
 
-        // Stock, not narrowed: a code spent last month is still gone.
-        $this->assertSame(10, (int) $batch->codes_count);
+        // Stock, not narrowed: a use spent last month is still gone.
+        $this->assertSame(10, (int) $batch->quantity);
         $this->assertSame(3, (int) $batch->redeemed_total);
-        $this->assertSame(7, $response->viewData('summary')['codes_left']);
+        $this->assertSame(7, $response->viewData('summary')['uses_left']);
 
         $this->assertSame(10.0, $response->viewData('summary')['given']);
         $this->assertSame(1, $response->viewData('summary')['redemptions']);

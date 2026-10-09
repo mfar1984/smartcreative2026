@@ -8,17 +8,16 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One coupon code, and the use it was put to.
+ * One use of a coupon: the redemption ledger.
  *
- * Two shapes live in this table, and the difference is which end of its life the row
- * is written at:
+ * A row here is written at the moment somebody redeems, never before. It records what
+ * was typed, when, what it came to in ringgit, and which registration or order it paid
+ * for — which is everything Tracking and Report read.
  *
- *   a minted code   exists from the moment the batch is created, carries a code, and
- *                   is stamped with redeemed_at when somebody claims it.
- *   a shared use    exists only once somebody has used an unlimited batch, carries no
- *                   code of its own, and reads its label off the batch name.
- *
- * See the migration for why `code` is nullable rather than repeating the batch name.
+ * `code` holds a copy of the string as it was typed, which under the current model is
+ * the batch name. Stored rather than read off the batch so the audit trail survives a
+ * rename, and so per-person codes could be added later without this table changing
+ * shape. It stays nullable for the rows written before the ledger existed.
  */
 class CouponCode extends Model
 {
@@ -68,10 +67,10 @@ class CouponCode extends Model
     }
 
     /**
-     * What somebody typed, or would type, to use this.
+     * What somebody typed to use this.
      *
-     * Falls back to the batch name, which is the shared code for an unlimited batch
-     * and the only sensible label for a row that has none of its own.
+     * Falls back to the batch name, which is the code, for a row stored before this
+     * column was filled in.
      */
     public function codeLabel(): string
     {
@@ -108,72 +107,11 @@ class CouponCode extends Model
     }
 
     /* ---------------------------------------------------------------------
-     | Minting
-     * ------------------------------------------------------------------ */
-
-    /**
-     * Mint the batch's unique codes, one per use it was created with.
-     *
-     * Nothing is minted for an unlimited batch: there is no number of codes to make,
-     * and the batch name is what people type. Codes are generated one at a time
-     * through Coupon::generateCode(), which checks both namespaces, and inserted in
-     * chunks so a batch of five hundred is a handful of writes rather than five
-     * hundred.
-     *
-     * @param  int|null  $count  how many to mint, when it is not the whole batch.
-     *         Used when a batch's quantity is raised: only the shortfall is minted,
-     *         so codes already printed and handed out keep working.
-     * @return int how many were minted
-     */
-    public static function mintFor(Coupon $coupon, ?int $count = null): int
-    {
-        if ($coupon->isUnlimited() && $count === null) {
-            return 0;
-        }
-
-        $wanted = max(0, $count ?? (int) $coupon->quantity);
-        $rows = [];
-        $seen = [];
-        $now = now();
-
-        for ($i = 0; $i < $wanted; $i++) {
-            do {
-                $code = Coupon::generateCode();
-            } while (isset($seen[$code]));
-
-            $seen[$code] = true;
-
-            $rows[] = [
-                'coupon_id' => $coupon->id,
-                'code' => $code,
-                'discount_amount' => 0,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-        }
-
-        if ($rows !== []) {
-            // Chunked because a large batch would otherwise build one statement with
-            // thousands of bound parameters, which SQLite refuses outright.
-            foreach (array_chunk($rows, 200) as $chunk) {
-                static::query()->insert($chunk);
-            }
-        }
-
-        return count($rows);
-    }
-
-    /* ---------------------------------------------------------------------
      | Scopes
      * ------------------------------------------------------------------ */
 
     public function scopeRedeemed(Builder $query): Builder
     {
         return $query->whereNotNull('redeemed_at');
-    }
-
-    public function scopeAvailable(Builder $query): Builder
-    {
-        return $query->whereNull('redeemed_at');
     }
 }

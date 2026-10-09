@@ -23,14 +23,16 @@
         $design = old('design', $coupon->design ?: 'classic');
         $quantity = old('quantity', $coupon->quantity ?? 0);
 
-        // Locked once anybody has used the batch: changing either would mean
-        // reprinting codes somebody is already holding. See CouponRequest.
-        $isUsed = $coupon->exists && $coupon->redeemedCount() > 0;
+        // What it applies to is locked once anybody has used the coupon: it decides
+        // which forms offer it and which records its uses point at. The limit is NOT
+        // locked — raising it is safe. See CouponRequest.
+        $used = $coupon->exists ? $coupon->redeemedCount() : 0;
+        $isUsed = $used > 0;
     @endphp
 
     <x-admin.page-card
         :title="$mode === 'create' ? 'New Coupon' : 'Edit ' . $coupon->name"
-        description="A coupon is a batch. Create it here, then tick it on the events or products it applies to."
+        description="The code below is what people type. Create it here, then tick it on the events or products it applies to."
         :back="route('admin.coupons.index')">
 
         @include('admin.partials.flash')
@@ -72,7 +74,7 @@
                              carried or the save would wipe it. --}}
                         <input type="hidden" name="kind" value="{{ $coupon->kind }}">
                         <p class="text-xs text-amber-700 mt-2 font-semibold">
-                            This batch has already been used, so what it applies to is fixed.
+                            This coupon has already been used, so what it applies to is fixed.
                         </p>
                     @endif
                 </x-admin.field-row>
@@ -81,8 +83,8 @@
             {{-- ---------------- The code ---------------- --}}
             <x-admin.panel title="The Code" icon="identification">
                 <x-admin.field-row
-                    label="Name of Coupon"
-                    help="Capital letters and digits only. Generate one or type your own."
+                    label="Coupon Code"
+                    help="This is what people type. Capital letters and digits only. Generate one or type your own."
                     for="name"
                     :required="true"
                     error="name">
@@ -93,10 +95,10 @@
                                data-code
                                class="{{ $input }} font-mono uppercase tracking-widest">
 
-                        {{-- The generator runs in the browser off the same alphabet the
-                             server uses, and the server still checks the result is free:
-                             a code that collides is refused on save rather than trusted
-                             because it came from a button. --}}
+                        {{-- The generator runs in the browser off the same legible
+                             alphabet the server uses, and the server still checks the
+                             result is free: a code that collides is refused on save
+                             rather than trusted because it came from a button. --}}
                         <button type="button" data-generate
                                 class="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
                             <x-admin.icon name="bolt" class="w-4 h-4" />
@@ -106,38 +108,37 @@
 
                     <p class="text-xs text-gray-500 mt-1.5" data-code-note>
                         @if ((int) $quantity > 0)
-                            This is the name of the batch. Each person gets their own unique code.
+                            Everybody types this same code, up to the limit below.
                         @else
-                            This is what people type, and it can be used without limit.
+                            Everybody types this same code, and there is no limit on it.
                         @endif
                     </p>
                 </x-admin.field-row>
 
                 <x-admin.field-row
-                    label="Number of Coupon"
-                    help="How many people may use it. 0 is unlimited."
+                    label="How Many Uses"
+                    help="How many times the code may be used. 0 means no limit."
                     for="quantity"
                     :required="true"
                     error="quantity">
 
                     <input type="number" id="quantity" name="quantity" required min="0" max="{{ $maxQuantity }}"
                            value="{{ $quantity }}"
-                           @disabled($isUsed)
                            data-quantity
                            class="{{ $input }}">
 
                     @if ($isUsed)
-                        <input type="hidden" name="quantity" value="{{ $coupon->quantity }}">
+                        {{-- Raising it is safe, so the field stays open. Only going below
+                             what has already been honoured is refused. --}}
                         <p class="text-xs text-amber-700 mt-1.5 font-semibold">
-                            {{ $coupon->redeemedCount() }} already used, so the number of coupons is fixed.
-                            Create a new batch instead.
+                            Used {{ $used }} {{ $used === 1 ? 'time' : 'times' }} already, so the limit
+                            cannot go below {{ $used }}. Raising it is fine.
                         </p>
                     @endif
 
                     <p class="text-xs text-gray-500 mt-1.5">
-                        Set 50 and fifty unique codes are minted, one each, each usable once.
-                        Set 0 and nothing is minted: the name above is the code and there is no
-                        limit on it.
+                        Set 50 and the code works for the first fifty people who type it.
+                        Set 0 and it works for everybody.
                     </p>
                 </x-admin.field-row>
 
@@ -306,7 +307,10 @@
 @push('scripts')
 <script>
     (function () {
-        const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        // The server's legible alphabet, read from it rather than retyped: the
+        // characters that get misread off a screen (0/O, 1/I/L, 8/B, 5/S, 2/Z, J/3)
+        // are left out of both. See Coupon::CODE_EXCLUDED.
+        const ALPHABET = @json(\App\Models\Coupon::CODE_ALPHABET);
 
         const code = document.querySelector('[data-code]');
         const generate = document.querySelector('[data-generate]');
@@ -341,8 +345,8 @@
             }
 
             codeNote.textContent = Number(quantity?.value || 0) > 0
-                ? 'This is the name of the batch. Each person gets their own unique code.'
-                : 'This is what people type, and it can be used without limit.';
+                ? 'Everybody types this same code, up to the limit below.'
+                : 'Everybody types this same code, and there is no limit on it.';
         }
 
         function syncDiscount() {

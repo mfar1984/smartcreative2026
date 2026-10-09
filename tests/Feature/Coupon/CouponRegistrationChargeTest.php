@@ -212,7 +212,7 @@ class CouponRegistrationChargeTest extends CouponTestCase
     {
         $registration = $this->registration($this->event(['fee' => 100]));
         $coupon = $this->fixedCoupon(20, ['quantity' => 2]);
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $outcome = $this->writer()->applyCode($registration, $code);
 

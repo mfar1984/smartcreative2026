@@ -20,7 +20,7 @@
 @section('content')
     <x-admin.page-card
         title="Coupon Report"
-        description="One row per batch: how many codes were minted, how many have been used, how many are left, and what they gave away."
+        description="One row per coupon: how many uses it allows, how many have been taken, how many are left, and what they gave away."
         :flush="true">
 
         <x-slot:actions>
@@ -90,15 +90,16 @@
             </div>
 
             <div class="bg-white px-5 py-4">
-                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Codes left</p>
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Uses left</p>
                 <p class="text-xl font-bold text-gray-900 tabular-nums mt-1">
-                    {{ number_format($summary['codes_left']) }}
+                    {{ number_format($summary['uses_left']) }}
                 </p>
-                {{-- Stock, not activity: a code spent in January is still gone in March,
-                     so this is never narrowed by the date range. --}}
+                {{-- Stock, not activity: a use spent in January is still gone in March,
+                     so this is never narrowed by the date range. Coupons with no limit
+                     are left out of it, having nothing to count down. --}}
                 <p class="text-xs text-gray-500 mt-0.5">
                     across {{ number_format($summary['batches']) }}
-                    {{ Str::plural('batch', $summary['batches']) }}, all time
+                    {{ Str::plural('coupon', $summary['batches']) }}, all time
                 </p>
             </div>
         </div>
@@ -106,16 +107,16 @@
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
                 <caption class="sr-only">
-                    Coupon batches, with the stock of each over its whole life and the
+                    Coupons, with how many uses each allows over its whole life and the
                     discount it gave inside the chosen date range.
                 </caption>
 
                 <thead class="bg-gray-50 text-left">
                     <tr>
-                        <th scope="col" class="{{ $head }}">Coupon</th>
+                        <th scope="col" class="{{ $head }}">Coupon Code</th>
                         <th scope="col" class="{{ $head }}">Applies to</th>
                         <th scope="col" class="{{ $head }} text-right">Discount</th>
-                        <th scope="col" class="{{ $head }} text-right">Minted</th>
+                        <th scope="col" class="{{ $head }} text-right">Uses allowed</th>
                         <th scope="col" class="{{ $head }} text-right">Redeemed</th>
                         <th scope="col" class="{{ $head }} text-right">Left</th>
                         <th scope="col" class="{{ $head }} text-right">Given</th>
@@ -127,14 +128,14 @@
                     @forelse ($batches as $batch)
                         @php
                             /*
-                             | An unlimited batch has no stock: nothing is minted for it and
-                             | its rows are records of uses, so counting them as codes would
-                             | report a remaining figure that falls below zero.
+                             | An unlimited coupon has nothing to count down, so both
+                             | figures are null and the cells say so rather than printing
+                             | a number that could only be wrong.
                              */
-                            $minted = $batch->isUnlimited() ? null : (int) $batch->codes_count;
-                            $left = $minted === null
+                            $allowed = $batch->isUnlimited() ? null : (int) $batch->quantity;
+                            $left = $allowed === null
                                 ? null
-                                : max(0, $minted - (int) $batch->redeemed_total);
+                                : max(0, $allowed - (int) $batch->redeemed_total);
                         @endphp
 
                         <tr class="hover:bg-blue-50/40 align-top">
@@ -154,7 +155,7 @@
                             </td>
 
                             <td class="px-5 py-3 text-right text-gray-600 tabular-nums whitespace-nowrap">
-                                {{ $minted === null ? 'Unlimited' : number_format($minted) }}
+                                {{ $allowed === null ? 'Unlimited' : number_format($allowed) }}
                             </td>
 
                             {{-- Activity: inside the range. The all-time figure is shown
@@ -194,7 +195,7 @@
 
                                 <p class="text-sm text-gray-500 mt-1 max-w-md mx-auto">
                                     @if ($isFiltered)
-                                        Clear the filters to see every batch.
+                                        Clear the filters to see every coupon.
                                     @else
                                         Create a coupon and this screen will report what it gives away.
                                     @endif
@@ -211,9 +212,9 @@
                 {{ $batches->links() }}
             @else
                 <p class="text-xs text-gray-500">
-                    Showing {{ $batches->count() }} {{ Str::plural('batch', $batches->count()) }}.
-                    Minted and Left are for the whole life of each batch; Redeemed and Given
-                    follow the date range.
+                    Showing {{ $batches->count() }} {{ Str::plural('coupon', $batches->count()) }}.
+                    Uses allowed and Left are for the whole life of each coupon; Redeemed and
+                    Given follow the date range.
                 </p>
             @endif
         </div>

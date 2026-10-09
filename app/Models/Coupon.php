@@ -14,11 +14,18 @@ use Illuminate\Support\Str;
 /**
  * One batch of coupons.
  *
- * The name is the batch, not a code somebody holds. What a person types depends on how
- * many uses the batch was created with, and the whole model follows from that:
+ * THE NAME IS THE CODE, and `quantity` is how many times that one code may be used:
  *
- *   quantity > 0  N unique codes minted up front, one each, one use each.
- *   quantity = 0  nothing minted, the batch name is the shared code, unlimited uses.
+ *   quantity > 0  the shared code may be used that many times, then it is spent.
+ *   quantity = 0  no limit at all.
+ *
+ * Nothing is minted up front, and that is a deliberate reversal. Handing out N unique
+ * codes only buys a per-person audit trail if there is a membership database to issue
+ * them against, and this system has none: a unique bearer code is used by whoever
+ * reads it, so the uniqueness bought nothing while being far harder to distribute
+ * than one shared code. If membership ever arrives, per-person codes can be added
+ * then — coupon_codes already records which registration or order each use belongs
+ * to, and those carry the person's details.
  *
  * Everything money-shaped is deliberately NOT here. What a batch takes off a charge is
  * CouponDiscount's job, and claiming a use of it is CouponRedeemer's, because that one
@@ -68,10 +75,40 @@ class Coupon extends Model
     /** Where uploaded coupon artwork lives on the public disk. */
     public const DESIGN_DIRECTORY = 'coupon-designs';
 
-    /** How long a generated code is, and the alphabet it is drawn from. */
+    /** How long a generated code is. */
     public const CODE_LENGTH = 6;
 
-    public const CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    /**
+     * Characters the generator will never emit, because they are misread off a screen.
+     *
+     * Not a theory. The owner read NG68BJ off his own screen and typed NG6883: the B
+     * became an 8 and the J became a 3. The batch name IS the code people type off a
+     * poster or a phone, so a legible alphabet is the difference between a coupon that
+     * works and a visitor told their code does not exist.
+     *
+     * Each confusable pair, and which half of it is dropped:
+     *
+     *   0 / O   both dropped — neither is safe next to the other
+     *   1 / I   both dropped
+     *   1 / L   L dropped with it, for the same reason
+     *   8 / B   both dropped — the pair that caused this
+     *   5 / S   both dropped
+     *   2 / Z   both dropped
+     *   J / 3   J dropped, 3 kept — 3 is the commoner character and reads cleanly
+     *
+     * This narrows ONLY what Generate produces. A name typed by hand may still use any
+     * capital letter or digit: a human-chosen SUKAN50 is clearer than anything random,
+     * and existing names such as NG68BJ must keep redeeming.
+     */
+    public const CODE_EXCLUDED = '0O1IL8B5S2ZJ';
+
+    /**
+     * The alphabet a generated code is drawn from: A-Z0-9 less CODE_EXCLUDED.
+     *
+     * 24 characters over 6 places is 191,102,976 combinations, which is ample for a
+     * giveaway and leaves nothing guessable.
+     */
+    public const CODE_ALPHABET = 'ACDEFGHKMNPQRTUVWXY34679';
 
     protected $fillable = [
         'kind',
@@ -97,6 +134,14 @@ class Coupon extends Model
      | Relations
      * ------------------------------------------------------------------ */
 
+    /**
+     * The redemption ledger: one row per use, written at the moment of use.
+     *
+     * Every row here is a use that happened. Nothing is pre-created, so this and
+     * redemptions() answer the same question — the second one is kept because
+     * Tracking and Report both read the stamped column explicitly and a row with no
+     * redeemed_at would be a bug worth seeing rather than silently counting.
+     */
     public function codes(): HasMany
     {
         return $this->hasMany(CouponCode::class)->orderBy('id');
@@ -147,10 +192,13 @@ class Coupon extends Model
     }
 
     /**
-     * Unused minted codes, or null when the batch is unlimited.
+     * Uses still allowed, or null when the batch is unlimited.
      *
      * Null rather than a large number, so a caller has to decide what unlimited means
      * for it rather than comparing against a sentinel that could be exceeded.
+     *
+     * Floored at zero: a cap lowered after the fact must read as nothing left rather
+     * than as a negative, and CouponRedeemer refuses on the same comparison.
      */
     public function remaining(): ?int
     {
@@ -158,7 +206,7 @@ class Coupon extends Model
             return null;
         }
 
-        return $this->codes()->whereNull('redeemed_at')->count();
+        return max(0, (int) $this->quantity - $this->redeemedCount());
     }
 
     public function redeemedCount(): int
@@ -167,13 +215,15 @@ class Coupon extends Model
     }
 
     /**
-     * Whether every minted code has been used.
+     * Whether the code has been used as many times as it was allowed.
      *
-     * An unlimited batch is never exhausted, which is the point of it.
+     * An unlimited batch is never exhausted, which is the point of it. Compared with
+     * >= rather than == so a cap lowered below what has already gone out still reads
+     * as spent instead of looping back round to usable.
      */
     public function isExhausted(): bool
     {
-        return ! $this->isUnlimited() && $this->remaining() === 0;
+        return ! $this->isUnlimited() && $this->redeemedCount() >= (int) $this->quantity;
     }
 
     public function isExpired(): bool
@@ -185,8 +235,8 @@ class Coupon extends Model
      * Whether a redemption could succeed right now.
      *
      * Advisory only. CouponRedeemer re-checks both of these inside the transaction
-     * that claims the code, because an answer worked out beforehand is worth nothing
-     * against the last remaining code and two simultaneous submissions.
+     * that claims the use, because an answer worked out beforehand is worth nothing
+     * against the last remaining use and two simultaneous submissions.
      */
     public function isRedeemable(): bool
     {
@@ -232,6 +282,7 @@ class Coupon extends Model
             : PaymentFigures::money((float) $this->discount_value);
     }
 
+    /** How many uses it allows, in words. */
     public function quantityLabel(): string
     {
         return $this->isUnlimited()
@@ -272,12 +323,10 @@ class Coupon extends Model
      * ------------------------------------------------------------------ */
 
     /**
-     * A random code nothing else is using.
+     * A random code nothing else is using, drawn from the legible alphabet.
      *
-     * Checked against both namespaces, because a buyer types into one box: a batch
-     * name and a minted code are the same kind of string as far as they are
-     * concerned. Attempts are bounded so a saturated alphabet cannot spin for ever —
-     * 36^6 is 2.1 billion, so reaching the ceiling means something else is wrong.
+     * Attempts are bounded so a saturated alphabet cannot spin for ever — 24^6 is 191
+     * million, so reaching the ceiling means something else is wrong.
      */
     public static function generateCode(): string
     {
@@ -296,23 +345,21 @@ class Coupon extends Model
         throw new \RuntimeException('Could not generate a coupon code that is not already in use.');
     }
 
-    /** Whether a string is already a batch name or a minted code. */
+    /**
+     * Whether a string is already some other batch's name, which is its code.
+     *
+     * One namespace now, because there is only one kind of code. The ledger's own
+     * `code` column is history rather than a namespace — it holds a copy of the name
+     * as it was typed — so it is deliberately not searched: a batch renamed after a
+     * use would otherwise block its old name for ever.
+     */
     public static function codeTaken(string $code, ?int $ignoreCouponId = null): bool
     {
         $code = Str::upper(trim($code));
 
-        $asBatch = self::query()
+        return self::query()
             ->where('name', $code)
             ->when($ignoreCouponId !== null, fn (Builder $query) => $query->whereKeyNot($ignoreCouponId))
-            ->exists();
-
-        if ($asBatch) {
-            return true;
-        }
-
-        return CouponCode::query()
-            ->where('code', $code)
-            ->when($ignoreCouponId !== null, fn (Builder $query) => $query->where('coupon_id', '!=', $ignoreCouponId))
             ->exists();
     }
 

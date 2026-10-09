@@ -65,7 +65,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $coupon = $this->percentageCoupon(30, ['quantity' => 5]);
         $event->coupons()->attach($coupon);
 
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $this->register($event, ['voucher_code' => $code])->assertSessionHasNoErrors();
 
@@ -92,7 +92,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $coupon = $this->fixedCoupon(25, ['quantity' => 2]);
         $event->coupons()->attach($coupon);
 
-        $this->register($event, ['voucher_code' => $coupon->codes()->first()->code])
+        $this->register($event, ['voucher_code' => $coupon->name])
             ->assertSessionHasNoErrors();
 
         $registration = EventRegistration::query()->sole();
@@ -110,7 +110,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $event->coupons()->attach($coupon);
 
         $this->register($event, [
-            'voucher_code' => $coupon->codes()->first()->code,
+            'voucher_code' => $coupon->name,
             'addons' => [$addon->id => ['choice' => (string) $small->id]],
         ])->assertSessionHasNoErrors();
 
@@ -138,7 +138,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $event->coupons()->attach($coupon);
 
         $this->post(route('registration.store', ['event' => $event->slug]), [
-            'voucher_code' => $coupon->codes()->first()->code,
+            'voucher_code' => $coupon->name,
             'team_name' => 'Kumpulan Sibu',
             'participants' => [
                 $this->participantFields(),
@@ -172,7 +172,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
 
         $this->withSession($this->basket($product, 2))
             ->post(route('checkout.place'), $this->checkoutFields([
-                'voucher_code' => $coupon->codes()->first()->code,
+                'voucher_code' => $coupon->name,
             ]));
 
         $order = ShopOrder::query()->sole();
@@ -202,7 +202,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
 
         $this->withSession($this->basket($product))
             ->post(route('checkout.place'), $this->checkoutFields([
-                'voucher_code' => $coupon->codes()->first()->code,
+                'voucher_code' => $coupon->name,
             ]));
 
         $order = ShopOrder::query()->sole();
@@ -227,7 +227,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $coupon = $this->percentageCoupon(100, ['quantity' => 2]);
         $event->coupons()->attach($coupon);
 
-        $response = $this->register($event, ['voucher_code' => $coupon->codes()->first()->code]);
+        $response = $this->register($event, ['voucher_code' => $coupon->name]);
 
         $response->assertSessionHasNoErrors();
 
@@ -283,7 +283,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $response = $this->withSession($this->basket($product))
             ->post(route('checkout.place'), $this->checkoutFields([
                 'identity_card' => '900101071234',
-                'voucher_code' => $coupon->codes()->first()->code,
+                'voucher_code' => $coupon->name,
             ]));
 
         $order = ShopOrder::query()->sole();
@@ -327,7 +327,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $coupon = $this->percentageCoupon(100, ['quantity' => 1]);
         $event->coupons()->attach($coupon);
 
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $this->register($event, ['voucher_code' => $code])->assertSessionHasNoErrors();
         $this->register($event, ['voucher_code' => $code])->assertSessionHasNoErrors();
@@ -359,16 +359,16 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $coupon = $this->percentageCoupon(50, ['quantity' => 1]);
         $event->coupons()->attach($coupon);
 
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $this->register($event, ['voucher_code' => $code]);
 
         $second = $this->register($event, ['voucher_code' => $code]);
 
-        $second->assertSessionHas('coupon_status', 'That coupon code has already been used.');
+        $second->assertSessionHas('coupon_status', 'That coupon has been fully used, so the normal price applies.');
     }
 
-    public function test_an_unlimited_batch_discounts_everybody_who_types_it(): void
+    public function test_an_unlimited_coupon_discounts_everybody_who_types_it(): void
     {
         $event = $this->event(['fee' => 100]);
         $coupon = $this->fixedCoupon(20, ['quantity' => 0]);
@@ -402,7 +402,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         // Ticked, so a stale page could well still be offering it.
         $event->coupons()->attach($coupon);
 
-        $response = $this->register($event, ['voucher_code' => $coupon->codes()->first()->code]);
+        $response = $this->register($event, ['voucher_code' => $coupon->name]);
 
         $response->assertSessionHasNoErrors();
         $response->assertSessionHas('coupon_status', 'That coupon has expired, so the normal price applies.');
@@ -415,18 +415,16 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $this->assertSame(5, $coupon->fresh()->remaining());
     }
 
-    public function test_an_exhausted_batch_is_refused_at_submit(): void
+    public function test_an_exhausted_coupon_is_refused_at_submit(): void
     {
         $event = $this->event(['fee' => 100]);
         $coupon = $this->fixedCoupon(20, ['quantity' => 1]);
         $event->coupons()->attach($coupon);
 
-        $first = $coupon->codes()->first();
-
-        $this->register($event, ['voucher_code' => $first->code]);
+        $this->register($event, ['voucher_code' => $coupon->name]);
 
         // A second visitor with the same code. Nothing is left to give.
-        $response = $this->register($event, ['voucher_code' => $first->code]);
+        $response = $this->register($event, ['voucher_code' => $coupon->name]);
 
         $response->assertSessionHasNoErrors();
 
@@ -435,6 +433,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $this->assertSame('100.00', $second->amount);
         $this->assertSame('0.00', $second->discount_amount);
         $this->assertSame(1, CouponCode::query()->redeemed()->count());
+        $this->assertSame(1, CouponCode::query()->count(), 'The ledger gains exactly one row.');
     }
 
     public function test_a_code_for_a_batch_that_is_not_ticked_here_is_refused_at_submit(): void
@@ -445,7 +444,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         // Another event's live batch, posted by hand at this one.
         $other = $this->percentageCoupon(100, ['quantity' => 5]);
 
-        $response = $this->register($event, ['voucher_code' => $other->codes()->first()->code]);
+        $response = $this->register($event, ['voucher_code' => $other->name]);
 
         $response->assertSessionHas('coupon_status', 'That coupon cannot be used here.');
 
@@ -461,7 +460,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $event = $this->event(['fee' => 100]);
         $coupon = $this->percentageCoupon(100, ['quantity' => 5]);
 
-        $this->register($event, ['voucher_code' => $coupon->codes()->first()->code]);
+        $this->register($event, ['voucher_code' => $coupon->name]);
 
         $registration = EventRegistration::query()->sole();
 
@@ -490,7 +489,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         // Ticked on the event, which the pivot allows and the rule does not.
         $event->coupons()->attach($shopBatch);
 
-        $this->register($event, ['voucher_code' => $shopBatch->codes()->first()->code]);
+        $this->register($event, ['voucher_code' => $shopBatch->name]);
 
         $this->assertSame('100.00', EventRegistration::query()->sole()->amount);
         $this->assertSame(5, $shopBatch->fresh()->remaining());

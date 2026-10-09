@@ -9,7 +9,6 @@ use App\Support\LocalDateRange;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 /**
  * What every batch has actually given away.
@@ -20,9 +19,9 @@ use Illuminate\Support\Facades\DB;
  *
  * TWO KINDS OF FIGURE, AND THEY ANSWER DIFFERENT QUESTIONS
  *
- *   stock      minted, redeemed in total, and left. Always for the whole life of the
- *              batch, because "how many are left" cannot be a figure for a date range:
- *              a code spent in January is still gone in March.
+ *   stock      uses allowed, uses spent in total, and uses left. Always for the whole
+ *              life of the batch, because "how many are left" cannot be a figure for a
+ *              date range: a use spent in January is still gone in March.
  *   activity   redemptions and the discount given. Inside the date range, because that
  *              is what the range is for.
  *
@@ -46,9 +45,11 @@ class ReportController extends Controller
              | Counted and summed in SQL rather than by asking each row. A page of
              | twenty-five batches would otherwise be a hundred queries, and
              | Coupon::remaining() is one of them per batch.
+             |
+             | There is no stock count to make: `quantity` IS the allowance, and what
+             | is left is that less the ledger rows counted here.
              */
             ->withCount([
-                'codes',
                 'codes as redeemed_total' => fn ($query) => $query->whereNotNull('redeemed_at'),
                 'codes as redeemed_in_range' => fn ($query) => $this->redeemedInRange($query, $from, $to),
             ])
@@ -151,17 +152,22 @@ class ReportController extends Controller
             'shop_given' => round($shopGiven, 2),
 
             /*
-             | Codes still to be given out, over the whole life of every batch the
-             | filters allow. Unlimited batches are left out of it: they have no
-             | remaining count, which is the point of them, and counting their use
-             | rows as stock would report a negative.
+             | Uses still to be given out, over the whole life of every batch the
+             | filters allow: each capped batch's allowance less what it has spent.
+             |
+             | Unlimited batches are left out of it. They have no remaining count,
+             | which is the point of them, and folding them in would need a sentinel
+             | that any real figure could exceed.
+             |
+             | Floored per batch rather than over the sum, so a cap that somehow sits
+             | below its own ledger cannot borrow headroom from the batch beside it.
              */
-            'codes_left' => (int) DB::table('coupon_codes')
-                ->join('coupons', 'coupons.id', '=', 'coupon_codes.coupon_id')
-                ->where('coupons.quantity', '>', 0)
-                ->when($kind !== '', fn ($query) => $query->where('coupons.kind', $kind))
-                ->whereNull('coupon_codes.redeemed_at')
-                ->count(),
+            'uses_left' => (int) Coupon::query()
+                ->where('quantity', '>', 0)
+                ->when($kind !== '', fn (Builder $query) => $query->where('kind', $kind))
+                ->withCount(['codes as spent' => fn ($query) => $query->whereNotNull('redeemed_at')])
+                ->get()
+                ->sum(fn (Coupon $batch) => max(0, (int) $batch->quantity - (int) $batch->spent)),
         ];
     }
 }

@@ -5,11 +5,9 @@ namespace App\Http\Controllers\Admin\Coupon;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\CouponRequest;
 use App\Models\Coupon;
-use App\Models\CouponCode;
 use App\Services\AdminLogger;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class CouponController extends Controller
@@ -24,11 +22,10 @@ class CouponController extends Controller
         $coupons = Coupon::query()
             /*
              | Counted in SQL rather than by asking each row, because the list shows
-             | how many of a batch are left and a page of fifteen batches would
-             | otherwise be thirty extra queries.
+             | how many uses a batch has left and a page of fifteen batches would
+             | otherwise be fifteen extra queries.
              */
             ->withCount([
-                'codes',
                 'codes as redeemed_count' => fn ($query) => $query->whereNotNull('redeemed_at'),
             ])
             ->when($search !== '', fn (Builder $query) => $query->where('name', 'like', "%{$search}%"))
@@ -64,24 +61,14 @@ class CouponController extends Controller
         $coupon = new Coupon($request->couponAttributes());
         $this->applyDesignImage($request, $coupon);
 
-        $minted = DB::transaction(function () use ($coupon) {
-            $coupon->save();
-
-            /*
-             | The codes are minted here and nowhere else, inside the same transaction
-             | as the batch. A batch that exists with no codes behind it would offer a
-             | discount nobody can claim, and the only way to tell would be a visitor
-             | being refused.
-             */
-            return CouponCode::mintFor($coupon);
-        });
+        $coupon->save();
 
         AdminLogger::activity('coupons.create', sprintf(
             'Created coupon %s: %s off %s, %s, expires %s.',
             $coupon->name,
             $coupon->discountLabel(),
             $coupon->kindLabel(),
-            $coupon->isUnlimited() ? 'unlimited uses' : $minted . ' unique codes',
+            $coupon->isUnlimited() ? 'unlimited uses' : $coupon->quantity . ' uses',
             $coupon->expiresLabel(),
         ));
 
@@ -92,14 +79,19 @@ class CouponController extends Controller
             'discount_type' => $coupon->discount_type,
             'discount_value' => (float) $coupon->discount_value,
             'expires_at' => $coupon->expires_at?->toDateString(),
-            'codes_minted' => $minted,
         ]);
 
         return redirect()
             ->route('admin.coupons.index')
             ->with('status', $coupon->isUnlimited()
                 ? sprintf('Coupon %s created. It can be used without limit until %s.', $coupon->name, $coupon->expiresLabel())
-                : sprintf('Coupon %s created with %d unique codes.', $coupon->name, $minted));
+                : sprintf(
+                    'Coupon %s created. It can be used %d %s until %s.',
+                    $coupon->name,
+                    $coupon->quantity,
+                    (int) $coupon->quantity === 1 ? 'time' : 'times',
+                    $coupon->expiresLabel(),
+                ));
     }
 
     public function edit(Coupon $coupon)
@@ -118,28 +110,10 @@ class CouponController extends Controller
             'expires_at' => $coupon->expires_at?->toDateString(),
         ];
 
-        $wasQuantity = (int) $coupon->quantity;
-
         $coupon->fill($request->couponAttributes());
         $this->applyDesignImage($request, $coupon);
 
-        $minted = DB::transaction(function () use ($coupon, $wasQuantity) {
-            $coupon->save();
-
-            /*
-             | Mint only the shortfall, and only when nothing has been used yet — the
-             | request refuses a quantity change on a batch somebody has redeemed from,
-             | for the reasons set out there. Topping up rather than re-minting means
-             | codes already printed keep working.
-             */
-            if ($coupon->isUnlimited() || (int) $coupon->quantity <= $wasQuantity) {
-                return 0;
-            }
-
-            $shortfall = (int) $coupon->quantity - $coupon->codes()->count();
-
-            return $shortfall > 0 ? CouponCode::mintFor($coupon, $shortfall) : 0;
-        });
+        $coupon->save();
 
         AdminLogger::activity('coupons.update', sprintf('Updated coupon %s.', $coupon->name));
         AdminLogger::audit($coupon, 'updated', $before, [
@@ -149,7 +123,6 @@ class CouponController extends Controller
             'discount_type' => $coupon->discount_type,
             'discount_value' => (float) $coupon->discount_value,
             'expires_at' => $coupon->expires_at?->toDateString(),
-            'codes_minted' => $minted,
         ]);
 
         return redirect()
@@ -162,9 +135,9 @@ class CouponController extends Controller
         /*
          | A batch somebody has used is not deleted.
          |
-         | The redemption rows are the record of a discount that was actually given,
-         | and they carry the figure the books rest on. Deleting the batch takes them
-         | with it through the cascade, which would leave a registration reading
+         | The ledger rows are the record of a discount that was actually given, and
+         | they carry the figure the books rest on. Deleting the batch takes them with
+         | it through the cascade, which would leave a registration reading
          | "RM 40.00 discount" with nothing left to say where it came from.
          */
         $used = $coupon->redeemedCount();
@@ -251,7 +224,9 @@ class CouponController extends Controller
     {
         $sample = new Coupon([
             'kind' => $coupon->kind ?: Coupon::KIND_EVENT,
-            'name' => $coupon->name ?: 'SC7K2M',
+            // Drawn from the legible alphabet, so the sample looks like what Generate
+            // actually produces rather than teaching the eye the wrong shape.
+            'name' => $coupon->name ?: 'HC7K4M',
             'quantity' => 0,
             'expires_at' => $coupon->expires_at?->toDateString() ?? now()->addMonth()->toDateString(),
             'discount_type' => $coupon->discount_type ?: Coupon::DISCOUNT_PERCENTAGE,

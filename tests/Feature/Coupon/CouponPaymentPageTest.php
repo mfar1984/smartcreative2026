@@ -78,7 +78,7 @@ class CouponPaymentPageTest extends CouponTestCase
         $event->coupons()->attach($coupon);
 
         $registration = $this->registration($event);
-        $code = $coupon->codes()->first()->code;
+        $code = $coupon->name;
 
         $response = $this->applyTo($registration, $code);
 
@@ -116,7 +116,7 @@ class CouponPaymentPageTest extends CouponTestCase
 
         $registration = $this->registration($event);
 
-        $this->applyTo($registration, $coupon->codes()->first()->code)->assertSessionHasNoErrors();
+        $this->applyTo($registration, $coupon->name)->assertSessionHasNoErrors();
 
         $registration->refresh();
 
@@ -160,7 +160,7 @@ class CouponPaymentPageTest extends CouponTestCase
             ->assertDontSee('name="voucher_code"', false);
 
         // And refused even when posted directly at a valid signed URL.
-        $response = $this->applyTo($registration, $coupon->codes()->first()->code);
+        $response = $this->applyTo($registration, $coupon->name);
 
         $response->assertSessionHasErrors('voucher_code');
 
@@ -194,7 +194,7 @@ class CouponPaymentPageTest extends CouponTestCase
             ->assertOk()
             ->assertDontSee('name="voucher_code"', false);
 
-        $this->applyTo($registration, $coupon->codes()->first()->code)
+        $this->applyTo($registration, $coupon->name)
             ->assertSessionHasErrors('voucher_code');
 
         $registration->refresh();
@@ -217,7 +217,7 @@ class CouponPaymentPageTest extends CouponTestCase
             'payment_status' => EventRegistration::PAYMENT_PARTIAL,
         ])->save();
 
-        $this->applyTo($registration, $coupon->codes()->first()->code)
+        $this->applyTo($registration, $coupon->name)
             ->assertSessionHasErrors([
                 'voucher_code' => 'We have already received RM 80.00 against this registration, so a coupon cannot be applied to it now. Contact us quoting ' . $registration->reference . '.',
             ]);
@@ -232,9 +232,9 @@ class CouponPaymentPageTest extends CouponTestCase
 
         $registration = $this->registration($event);
 
-        $this->applyTo($registration, $first->codes()->first()->code)->assertSessionHasNoErrors();
+        $this->applyTo($registration, $first->name)->assertSessionHasNoErrors();
 
-        $this->applyTo($registration->fresh(), $second->codes()->first()->code)
+        $this->applyTo($registration->fresh(), $second->name)
             ->assertSessionHasErrors('voucher_code');
 
         $this->assertSame('50.00', $registration->fresh()->discount_amount);
@@ -251,7 +251,7 @@ class CouponPaymentPageTest extends CouponTestCase
 
         $this->post(
             route('registration.payment.coupon', ['reference' => $registration->reference]),
-            ['voucher_code' => $coupon->codes()->first()->code],
+            ['voucher_code' => $coupon->name],
         )->assertForbidden();
 
         $this->assertSame('200.00', $registration->fresh()->amount);
@@ -335,7 +335,7 @@ class CouponPaymentPageTest extends CouponTestCase
 
         $order = $this->orderFor($product);
 
-        $this->applyToOrder($order, $coupon->codes()->first()->code)->assertSessionHasNoErrors();
+        $this->applyToOrder($order, $coupon->name)->assertSessionHasNoErrors();
 
         $order->refresh();
 
@@ -372,7 +372,7 @@ class CouponPaymentPageTest extends CouponTestCase
             'collection_at' => now()->addWeek()->setTime(10, 0),
         ]);
 
-        $this->applyToOrder($order, $coupon->codes()->first()->code)->assertSessionHasNoErrors();
+        $this->applyToOrder($order, $coupon->name)->assertSessionHasNoErrors();
 
         $order->refresh();
 
@@ -403,7 +403,7 @@ class CouponPaymentPageTest extends CouponTestCase
             ->assertOk()
             ->assertDontSee('name="voucher_code"', false);
 
-        $this->applyToOrder($order, $coupon->codes()->first()->code)
+        $this->applyToOrder($order, $coupon->name)
             ->assertSessionHasErrors('voucher_code');
 
         $order->refresh();
@@ -425,7 +425,7 @@ class CouponPaymentPageTest extends CouponTestCase
         $order = $this->orderFor($product);
         $order->forceFill(['status' => ShopOrder::STATUS_CANCELLED])->save();
 
-        $this->applyToOrder($order, $coupon->codes()->first()->code)
+        $this->applyToOrder($order, $coupon->name)
             ->assertSessionHasErrors('voucher_code');
 
         $this->assertSame('110.00', $order->fresh()->grand_total);
@@ -445,7 +445,7 @@ class CouponPaymentPageTest extends CouponTestCase
             ->assertOk()
             ->assertDontSee('name="voucher_code"', false);
 
-        $this->applyToOrder($order, $coupon->codes()->first()->code)
+        $this->applyToOrder($order, $coupon->name)
             ->assertSessionHasErrors('voucher_code');
 
         $this->assertSame('110.00', $order->fresh()->grand_total);

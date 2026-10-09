@@ -11,10 +11,11 @@ use Illuminate\Validation\Validator;
 class CouponRequest extends FormRequest
 {
     /**
-     * How many unique codes one batch may mint.
+     * How many times one coupon code may be used.
      *
-     * Generous for a real giveaway and low enough that a slip of the keyboard cannot
-     * write a hundred thousand rows in one press.
+     * Generous for a real giveaway, and a ceiling rather than a storage concern:
+     * nothing is written up front, so this only stops a slip of the keyboard turning
+     * a fifty-use coupon into a fifty-thousand-use one.
      */
     public const MAX_QUANTITY = 5000;
 
@@ -35,14 +36,14 @@ class CouponRequest extends FormRequest
             'kind' => ['required', Rule::in(array_keys(Coupon::KINDS))],
 
             /*
-             | Uppercase letters and digits only. Not a cosmetic rule: the code is
-             | read off a printed ticket and typed back in, and allowing spaces,
+             | Uppercase letters and digits only. Not a cosmetic rule: the name IS the
+             | code, read off a printed ticket and typed back in, and allowing spaces,
              | hyphens or lowercase would mean a visitor who types what they see is
              | told their coupon does not exist.
              |
-             | Uniqueness against the batch names is here; the collision check against
-             | minted codes is in after(), because the two namespaces share one box as
-             | far as whoever types it is concerned.
+             | Deliberately NOT narrowed to the generator's legible alphabet. Generate
+             | avoids the characters that get misread, but a human-chosen SUKAN50 is
+             | clearer than anything random, and existing names have to keep working.
              */
             'name' => [
                 'required',
@@ -53,7 +54,8 @@ class CouponRequest extends FormRequest
                 Rule::unique('coupons', 'name')->ignore($coupon?->id),
             ],
 
-            // 0 is unlimited, which is why min is 0 rather than 1.
+            // How many times the code may be used. 0 is unlimited, which is why min
+            // is 0 rather than 1.
             'quantity' => ['required', 'integer', 'min:0', 'max:' . self::MAX_QUANTITY],
 
             'expires_at' => ['required', 'date'],
@@ -81,7 +83,7 @@ class CouponRequest extends FormRequest
         return [
             'name.regex' => 'A coupon code may only contain capital letters and digits, with no spaces.',
             'name.unique' => 'That coupon code is already in use.',
-            'quantity.max' => 'A batch can mint at most ' . number_format(self::MAX_QUANTITY) . ' codes.',
+            'quantity.max' => 'A coupon can allow at most ' . number_format(self::MAX_QUANTITY) . ' uses.',
             'design_image.image' => 'The coupon design must be an image.',
             'design_image.max' => 'The coupon design must be 4 MB or smaller.',
         ];
@@ -163,9 +165,9 @@ class CouponRequest extends FormRequest
                 $coupon = $this->route('coupon');
 
                 /*
-                 | A typed name must not collide with a code already minted for another
-                 | batch. Whoever types it cannot tell the two apart, and a duplicate
-                 | would make a lookup ambiguous in the one place that must not be.
+                 | The same check the unique rule above makes, kept because the name is
+                 | folded and trimmed in prepareForValidation() and this is the one
+                 | place that reads it the way a visitor would type it.
                  */
                 if (Coupon::codeTaken($name, $coupon?->id)) {
                     $validator->errors()->add('name', 'That code is already in use by another coupon.');
@@ -179,28 +181,37 @@ class CouponRequest extends FormRequest
                     return;
                 }
 
+                $used = $coupon->redeemedCount();
+                $wanted = (int) $this->input('quantity');
+
                 /*
-                 | How many codes a batch has is not editable once any of them have
-                 | been used. Lowering it would mean deleting codes somebody is holding,
-                 | and raising it would quietly mint more against a batch whose printed
-                 | run is already out. A new batch is the answer, which is exactly what
-                 | the owner asked for: a used-up coupon is left in place and a fresh one
-                 | created beside it.
+                 | RAISING the cap on a coupon people are already using is safe and
+                 | allowed: it simply means the same code works a few more times.
+                 | Unlimited (0) is the extreme of the same move.
+                 |
+                 | LOWERING it below what has already gone out is not. Those uses
+                 | happened and moved money, and a cap under the count would make
+                 | isExhausted() true on redemptions that were honoured — retroactively
+                 | invalidating discounts that are already on registrations and orders.
                  */
-                if ((int) $this->input('quantity') !== (int) $coupon->quantity
-                    && $coupon->redeemedCount() > 0) {
+                if ($wanted > 0 && $used > $wanted) {
                     $validator->errors()->add(
                         'quantity',
-                        'This batch has already been used, so the number of coupons cannot change. Create a new batch instead.',
+                        sprintf(
+                            'This coupon has already been used %d %s, so the limit cannot be set below %d. Those uses have already been honoured. Raise the limit, set 0 for no limit, or create a new coupon.',
+                            $used,
+                            $used === 1 ? 'time' : 'times',
+                            $used,
+                        ),
                     );
                 }
 
-                // Same reasoning: the kind decides which forms offer it and which
-                // records its redemptions point at.
-                if ($this->input('kind') !== $coupon->kind && $coupon->redeemedCount() > 0) {
+                // The kind is still fixed once used: it decides which forms offer the
+                // coupon and which records its redemptions point at.
+                if ($this->input('kind') !== $coupon->kind && $used > 0) {
                     $validator->errors()->add(
                         'kind',
-                        'This batch has already been used, so what it applies to cannot change.',
+                        'This coupon has already been used, so what it applies to cannot change.',
                     );
                 }
             },
