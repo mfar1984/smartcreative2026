@@ -23,7 +23,9 @@ use Tests\Feature\Shop\ShopPaymentTestCase;
  * is the worst case: banned AND outside a non-empty allowlist, at the same time.
  * From it, the public homepage, a public registration and a signed CHIP webhook must
  * all behave exactly as they would from anywhere else, and none of those requests
- * may so much as query the ban table or the security settings.
+ * may so much as query the ban table. Reading the security settings group is
+ * allowed since Part 3 put the logging switches in it — see the comment on that
+ * assertion below.
  *
  * Built on the shop payment fixtures for the CHIP keypair and gateway settings.
  * Mail, the queue and outbound HTTP are faked, so nothing can reach a participant.
@@ -117,10 +119,23 @@ class SecurityScopeTest extends ShopPaymentTestCase
 
         $this->assertSame(EventRegistration::PAYMENT_PAID, $registration->fresh()->payment_status);
 
-        // Not one of those requests looked at a ban or a security setting.
+        /*
+         | Not one of those requests looked at the ban table. The ban, the sign-in
+         | limiter and the allowlist are each decided from it or from admin-only
+         | middleware, so a request that never reads it can never be refused by one
+         | — which the four registrations above, from an address that is banned AND
+         | outside a non-empty allowlist, already show.
+         |
+         | The security SETTINGS group is a different matter since Part 3. The two
+         | logging switches live in that group and AdminLogger reads them wherever
+         | it writes, the public side included, because one place deciding whether
+         | a row is written is the whole point of having a switch. That is a single
+         | memoised read per request and it cannot refuse anybody anything, so it
+         | is allowed here. The ban and allowlist keys sitting in the same group
+         | are still never acted on outside the admin door.
+         */
         foreach ($queries as $sql) {
             $this->assertStringNotContainsString('banned_ips', $sql);
-            $this->assertStringNotContainsString('"security"', $sql);
         }
 
         // The ban itself is still there for the admin sign in.

@@ -7,6 +7,7 @@ use App\Http\Middleware\EnforceIpAllowlist;
 use App\Http\Requests\Admin\LoginRequest;
 use App\Services\AdminLogger;
 use App\Services\Security\LoginBanService;
+use App\Services\Security\LoginLocationService;
 use App\Support\SessionGuard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -40,7 +41,7 @@ class LoginController extends Controller
     /**
      * @throws ValidationException
      */
-    public function store(LoginRequest $request)
+    public function store(LoginRequest $request, LoginLocationService $locations)
     {
         $request->authenticate();
 
@@ -85,6 +86,19 @@ class LoginController extends Controller
         ])->save();
 
         AdminLogger::activity('auth.login', 'Signed in to the admin area.');
+
+        /*
+         | Remember the address this sign in came from, and warn the account by
+         | email if it has never been used from it before. After the auth.login row
+         | so the two read in order on the Logging screen.
+         |
+         | It reads its own user_known_ips table rather than last_login_ip, which the
+         | lines above have just overwritten, and rather than the activity log, which
+         | the Security tab can now switch off. Nothing in it can throw: the email is
+         | queued and the dispatch is wrapped, so a mail server that is down cannot
+         | stop somebody signing in.
+         */
+        $locations->record($user, (string) $request->ip(), $request->userAgent());
 
         // A handler holds only the Tournament permissions, so the dashboard would
         // open near-empty for them. Land them on the tournaments list instead, the

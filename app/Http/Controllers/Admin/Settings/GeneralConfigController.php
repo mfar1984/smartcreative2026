@@ -232,10 +232,22 @@ class GeneralConfigController extends Controller
         // next click.
         SecuritySettings::flush();
 
+        /*
+         | Both of these are written even when this very save switched logging off.
+         | The action and the audit event both begin with "settings.security.",
+         | which is on AdminLogger::ALWAYS_RECORDED, so neither switch can silence
+         | them. That is deliberate: otherwise somebody could turn the audit trail
+         | off, act, and turn it back on with nothing recording that they had.
+         |
+         | The audit event is "settings.security.updated" rather than the generic
+         | "settings.updated" the other tabs use precisely so it carries that
+         | prefix, and so the Security tab's own history is identifiable on the
+         | Audit Log screen.
+         */
         AdminLogger::activity('settings.security.update', 'Updated security settings.');
         AdminLogger::audit(
             new Setting(['key' => 'security.*', 'group' => 'security']),
-            'settings.updated',
+            'settings.security.updated',
             $before,
             $validated,
         );

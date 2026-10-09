@@ -21,6 +21,9 @@ use Illuminate\Foundation\Http\FormRequest;
  * front of it), and a post that leaves one out keeps what is stored rather than
  * resetting it. Every number has a floor that keeps it clear of an instant
  * lockout, and every allowlist line must be a real IP or CIDR range.
+ *
+ * Part 3 adds the two logging switches and the new sign-in location warning,
+ * following the same `sometimes` pattern.
  */
 class UpdateSecurityConfigRequest extends FormRequest
 {
@@ -95,6 +98,10 @@ class UpdateSecurityConfigRequest extends FormRequest
                 },
             ],
 
+            'activity_log_enabled' => ['sometimes', 'required', 'boolean'],
+            'audit_log_enabled' => ['sometimes', 'required', 'boolean'],
+            'new_location_warning' => ['sometimes', 'required', 'boolean'],
+
             'ip_allowlist' => [
                 'sometimes', 'bail', 'nullable', 'string',
                 'max:' . SecuritySettings::MAX_IP_ALLOWLIST_LENGTH,
@@ -131,10 +138,12 @@ class UpdateSecurityConfigRequest extends FormRequest
             'destroy_session_on_logout' => $this->boolean('destroy_session_on_logout') ? '1' : '0',
         ]);
 
-        // Only when posted: the form always sends it, behind a hidden 0, and a post
-        // without it must not switch bans off by accident.
-        if ($this->has('ban_enabled')) {
-            $this->merge(['ban_enabled' => $this->boolean('ban_enabled') ? '1' : '0']);
+        // Only when posted: the form always sends these, behind a hidden 0, and a
+        // post without one must not switch it off by accident.
+        foreach (['ban_enabled', 'activity_log_enabled', 'audit_log_enabled', 'new_location_warning'] as $toggle) {
+            if ($this->has($toggle)) {
+                $this->merge([$toggle => $this->boolean($toggle) ? '1' : '0']);
+            }
         }
     }
 

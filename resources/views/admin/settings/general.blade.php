@@ -227,9 +227,9 @@
         @endif
 
         {{-- ==================== Security ====================
-             Password policy and session controls. Grouped under clear section
-             headings so Parts 2 and 3 (banned IPs, rate limit, IP allowlist,
-             audit toggle) can be appended as further panels on this same tab. --}}
+             Password policy, session controls, the sign-in ban, the rate limits,
+             the IP allowlist, the two logging switches and the new sign-in
+             location warning, each under its own section heading. --}}
         @if ($activeTab === 'security')
             <x-admin.section-intro
                 title="Security"
@@ -423,6 +423,66 @@
                             signed out, unless their IP is on it. Add your own address before saving. A super
                             admin is never blocked by this list, and failed sign ins from a listed address are
                             never counted towards a ban.
+                        </p>
+                    </x-admin.field-row>
+                </x-admin.panel>
+
+                {{-- Part 3. Two switches that stop log rows being written, and the
+                     warning that goes out when an account signs in from an address
+                     it has not been used from before. --}}
+                <x-admin.panel title="Activity and Audit Logging" icon="clipboard">
+                    <x-admin.field-row label="Activity Logging" help="Record who did what. On by default, which is the current behaviour." for="activity_log_enabled" error="activity_log_enabled">
+                        <div class="md:pt-2">
+                            <label for="activity_log_enabled" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="activity_log_enabled" value="0">
+                                <input type="checkbox" id="activity_log_enabled" name="activity_log_enabled" value="1"
+                                       @checked(old('activity_log_enabled', $security['activity_log_enabled']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Write activity log entries</span>
+                            </label>
+                        </div>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Audit Logging" help="Record the before and after values of each change. On by default, which is the current behaviour." for="audit_log_enabled" error="audit_log_enabled">
+                        <div class="md:pt-2">
+                            <label for="audit_log_enabled" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="audit_log_enabled" value="0">
+                                <input type="checkbox" id="audit_log_enabled" name="audit_log_enabled" value="1"
+                                       @checked(old('audit_log_enabled', $security['audit_log_enabled']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Write audit log entries</span>
+                            </label>
+                        </div>
+
+                        <p class="text-xs text-amber-700 mt-3">
+                            Switching either off never silences the sign-in trail, the ban and unban
+                            events, or this tab's own save. Turning logging off is itself recorded, and so
+                            is turning it back on, so the record cannot be switched off and back on with
+                            nothing left to show what happened in between.
+                        </p>
+                    </x-admin.field-row>
+                </x-admin.panel>
+
+                <x-admin.panel title="New Sign-in Location Warning" icon="mail">
+                    <x-admin.field-row label="Warn On A New Address" help="Email the account when it signs in from an IP address it has not been used from before." for="new_location_warning" error="new_location_warning">
+                        <div class="md:pt-2">
+                            <label for="new_location_warning" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="new_location_warning" value="0">
+                                <input type="checkbox" id="new_location_warning" name="new_location_warning" value="1"
+                                       @checked(old('new_location_warning', $security['new_location_warning']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Email the account about a sign in from a new address</span>
+                            </label>
+                        </div>
+
+                        <p class="text-xs text-gray-500 mt-1.5">
+                            The email goes to the account's own address and names the time, the IP and the
+                            browser. A first-ever sign in is not warned about, and neither is the address an
+                            account was already last seen on. Addresses are recorded either way, so switching
+                            this off silences the email and nothing else.
                         </p>
                     </x-admin.field-row>
                 </x-admin.panel>

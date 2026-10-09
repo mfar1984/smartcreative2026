@@ -29,6 +29,14 @@ use App\Models\Setting;
  * today's behaviour for the limits (10 sign-in attempts per minute, no admin
  * request limit, no allowlist); the ban itself is new by design, with generous
  * defaults of ten failures inside fifteen minutes.
+ *
+ * Part 3 adds the two logging switches and the new sign-in location warning.
+ * Both logging switches default ON, because writing both logs is exactly what
+ * the system does today. The location warning also defaults ON: its first
+ * impression is silent, not noisy — its migration seeds every account's stored
+ * last_login_ip, so an account signing in from the address it last used is not
+ * warned, and an account that has never signed in has nothing to compare
+ * against and is recorded silently.
  */
 final class SecuritySettings
 {
@@ -73,6 +81,24 @@ final class SecuritySettings
 
         // Empty means no restriction, which is today's behaviour.
         'ip_allowlist' => '',
+
+        /*
+         | Logging. Both ON, because writing both logs is what the system does
+         | today and first deploy must change nothing. Switching either off never
+         | silences the sign-in trail, the ban events or the Security tab's own
+         | save — see AdminLogger::ALWAYS_RECORDED for the reason.
+         */
+        'activity_log_enabled' => '1',
+        'audit_log_enabled' => '1',
+
+        /*
+         | Email the account when it signs in from an IP address never recorded
+         | for it before. ON: the warning only protects anybody if it is already
+         | running when an account is taken, it cannot block signing in, and the
+         | address is recorded either way, so switching it off silences the email
+         | and nothing else.
+         */
+        'new_location_warning' => '1',
     ];
 
     /**
@@ -310,6 +336,34 @@ final class SecuritySettings
         return self::allowlistLines((string) self::get('ip_allowlist'));
     }
 
+    /* ---------------------------------------------------------------------
+     | Typed accessors — logging and sign-in warnings
+     * ------------------------------------------------------------------ */
+
+    /** Whether AdminLogger writes activity rows. Exempt actions are written anyway. */
+    public static function activityLogEnabled(): bool
+    {
+        return self::bool('activity_log_enabled');
+    }
+
+    /** Whether AdminLogger writes audit rows. Exempt events are written anyway. */
+    public static function auditLogEnabled(): bool
+    {
+        return self::bool('audit_log_enabled');
+    }
+
+    /**
+     * Whether a sign in from an unrecognised IP address emails the account.
+     *
+     * Governs the EMAIL only. The address itself is recorded whichever way this
+     * is set, so switching it back on does not then treat every known address as
+     * new and send a burst of warnings about addresses it was watching all along.
+     */
+    public static function newLocationWarningEnabled(): bool
+    {
+        return self::bool('new_location_warning');
+    }
+
     /**
      * Split allowlist text into its trimmed, non-empty lines.
      *
@@ -357,6 +411,9 @@ final class SecuritySettings
             'login_attempts_per_minute' => (string) self::loginAttemptsPerMinute(),
             'admin_requests_per_minute' => (string) self::adminRequestsPerMinute(),
             'ip_allowlist' => implode("\n", self::ipAllowlist()),
+            'activity_log_enabled' => self::activityLogEnabled() ? '1' : '0',
+            'audit_log_enabled' => self::auditLogEnabled() ? '1' : '0',
+            'new_location_warning' => self::newLocationWarningEnabled() ? '1' : '0',
         ];
     }
 

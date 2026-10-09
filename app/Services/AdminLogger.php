@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ActivityLog;
 use App\Models\AuditLog;
+use App\Support\SecuritySettings;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Request;
@@ -44,10 +45,42 @@ class AdminLogger
     ];
 
     /**
+     * The one named place that says what the logging switches may NOT silence.
+     *
+     * Prefix-matched against an activity action AND against an audit event, so a
+     * single list governs both logs and the two cannot drift apart.
+     *
+     *   auth.              Every sign in, sign out, refusal, inactivity logout,
+     *                      ban, super-admin ban bypass and new-location warning.
+     *                      Who got into the admin area, and who was stopped at the
+     *                      door, is where any investigation starts.
+     *   settings.security. The Security tab itself: the save that flips these very
+     *                      switches, and every unban. A switch that can erase the
+     *                      record of its own use is worse than no switch — it lets
+     *                      somebody turn logging off, act, and turn it back on with
+     *                      nothing left to show that any of it happened. So the
+     *                      Security save is recorded REGARDLESS of these switches.
+     *
+     * Deliberately short. Everything else — users, roles, payments, registrations,
+     * backups, the other settings tabs — obeys the switches, which is the point of
+     * having them.
+     */
+    public const ALWAYS_RECORDED = [
+        'auth.',
+        'settings.security.',
+    ];
+
+    /**
      * Record something a person did.
      *
      * actor_label is stored alongside the foreign key so history stays
      * readable after a user is deleted.
+     *
+     * Returns the row that was written, or an UNSAVED ActivityLog when the switch
+     * suppressed it. Never null: the return type has always been a model, callers
+     * are free to read it, and handing back null here would turn a disabled log
+     * into a fatal error somewhere unrelated. An unsaved instance carries the same
+     * attributes, answers exists === false and has no key.
      */
     public static function activity(
         string $action,
@@ -58,7 +91,7 @@ class AdminLogger
     ): ActivityLog {
         $user = Auth::user();
 
-        return ActivityLog::create([
+        $attributes = [
             'user_id' => $userId ?? $user?->id,
             'actor_label' => $actorLabel ?? $user?->logLabel(),
             'action' => $action,
@@ -77,11 +110,23 @@ class AdminLogger
 
             'ip_address' => Request::ip(),
             'user_agent' => substr((string) Request::userAgent(), 0, 512),
-        ]);
+        ];
+
+        // The switch is read here and nowhere else. There are over two hundred
+        // call sites; a check at each of them is a check one of them would be
+        // missing.
+        if (! self::isAlwaysRecorded($action) && ! SecuritySettings::activityLogEnabled()) {
+            return new ActivityLog($attributes);
+        }
+
+        return ActivityLog::create($attributes);
     }
 
     /**
      * Record a change to a record, keeping the before and after values.
+     *
+     * Same return contract as activity(): the written row, or an unsaved AuditLog
+     * when the switch suppressed it, never null.
      *
      * @param  array<string, mixed>|null  $oldValues
      * @param  array<string, mixed>|null  $newValues
@@ -90,7 +135,7 @@ class AdminLogger
     {
         $user = Auth::user();
 
-        return AuditLog::create([
+        $attributes = [
             'user_id' => $user?->id,
             'actor_label' => $user?->logLabel(),
             'actor_role' => $user?->role?->name,
@@ -100,7 +145,22 @@ class AdminLogger
             'old_values' => self::redact($oldValues),
             'new_values' => self::redact($newValues),
             'ip_address' => Request::ip(),
-        ]);
+        ];
+
+        // As above: one place reads the switch, and ALWAYS_RECORDED overrides it.
+        if (! self::isAlwaysRecorded($event) && ! SecuritySettings::auditLogEnabled()) {
+            return new AuditLog($attributes);
+        }
+
+        return AuditLog::create($attributes);
+    }
+
+    /**
+     * Whether this action or audit event is one the switches cannot silence.
+     */
+    public static function isAlwaysRecorded(string $actionOrEvent): bool
+    {
+        return Str::startsWith($actionOrEvent, self::ALWAYS_RECORDED);
     }
 
     /**
