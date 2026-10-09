@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\Campaign\CampaignController;
 use App\Http\Controllers\Admin\Campaign\CampaignReportController;
 use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
 use App\Http\Controllers\Admin\Coupon\CouponController;
+use App\Http\Controllers\Admin\Coupon\CouponDesignController;
 use App\Http\Controllers\Admin\Coupon\ReportController as CouponReportController;
 use App\Http\Controllers\Admin\Coupon\TrackingController as CouponTrackingController;
 use App\Http\Controllers\Admin\Event\IdentityCardController;
@@ -139,6 +140,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('report', [CouponReportController::class, 'index'])
                 ->middleware('permission:coupons.view')
                 ->name('report');
+
+            /*
+            | The design as a file, on the view permission: it is the same four facts
+            | the list already shows, drawn instead of tabulated. A preset design comes
+            | back as self-contained SVG; a custom one is the uploaded image itself.
+            */
+            Route::get('{coupon}/design.svg', CouponDesignController::class)
+                ->middleware('permission:coupons.view')
+                ->whereNumber('coupon')
+                ->name('design');
 
             Route::get('{coupon}/edit', [CouponController::class, 'edit'])
                 ->middleware('permission:coupons.update')

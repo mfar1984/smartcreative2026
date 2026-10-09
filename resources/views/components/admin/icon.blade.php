@@ -144,6 +144,13 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
             @break
 
+        {{-- A tray with an arrow dropping into it, for "save this to your machine".
+             Deliberately not a bare down arrow: that reads as sort or collapse in a
+             table row, which is exactly where this one is drawn. --}}
+        @case('download')
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/>
+            @break
+
         {{-- Dashboard. `pulse` is referenced by the activity panel; without a case
              here it fell through to the default circle. --}}
         @case('pulse')

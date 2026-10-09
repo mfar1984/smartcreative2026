@@ -72,9 +72,11 @@
                         <th scope="col" class="{{ $head }} text-right">Uses</th>
                         <th scope="col" class="{{ $head }}">Expires</th>
                         <th scope="col" class="{{ $head }} text-center">State</th>
-                        @if ($canUpdate || $canDelete)
-                            <th scope="col" class="{{ $head }} text-center">Actions</th>
-                        @endif
+
+                        {{-- Always drawn. The design download lives in this column and
+                             asks only for the view permission, which everybody reading
+                             this page already holds. --}}
+                        <th scope="col" class="{{ $head }} text-center">Actions</th>
                     </tr>
                 </thead>
 
@@ -128,35 +130,43 @@
                                 </x-admin.badge>
                             </td>
 
-                            @if ($canUpdate || $canDelete)
-                                <td class="px-5 py-3 whitespace-nowrap">
-                                    <div class="flex items-center justify-center gap-1">
-                                        @if ($canUpdate)
-                                            <a href="{{ route('admin.coupons.edit', $coupon) }}"
-                                               class="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition"
-                                               title="Edit {{ $coupon->name }}" aria-label="Edit {{ $coupon->name }}">
-                                                <x-admin.icon name="pencil" class="w-4 h-4" />
-                                            </a>
-                                        @endif
+                            <td class="px-5 py-3 whitespace-nowrap">
+                                <div class="flex items-center justify-center gap-1">
+                                    @if ($canUpdate)
+                                        <a href="{{ route('admin.coupons.edit', $coupon) }}"
+                                           class="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition"
+                                           title="Edit {{ $coupon->name }}" aria-label="Edit {{ $coupon->name }}">
+                                            <x-admin.icon name="pencil" class="w-4 h-4" />
+                                        </a>
+                                    @endif
 
-                                        @if ($canDelete)
-                                            {{-- A coupon somebody has used is refused by the
-                                                 controller, because its ledger rows carry the
-                                                 figure the books rest on. --}}
-                                            <form action="{{ route('admin.coupons.destroy', $coupon) }}" method="POST"
-                                                  onsubmit="return confirm('Delete {{ addslashes($coupon->name) }}?\n\nThe code stops working everywhere. A coupon that has already been used cannot be deleted.');">
-                                                @csrf
-                                                @method('DELETE')
-                                                <button type="submit"
-                                                        class="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
-                                                        title="Delete {{ $coupon->name }}" aria-label="Delete {{ $coupon->name }}">
-                                                    <x-admin.icon name="trash" class="w-4 h-4" />
-                                                </button>
-                                            </form>
-                                        @endif
-                                    </div>
-                                </td>
-                            @endif
+                                    @if ($canDelete)
+                                        {{-- A coupon somebody has used is refused by the
+                                             controller, because its ledger rows carry the
+                                             figure the books rest on. --}}
+                                        <form action="{{ route('admin.coupons.destroy', $coupon) }}" method="POST"
+                                              onsubmit="return confirm('Delete {{ addslashes($coupon->name) }}?\n\nThe code stops working everywhere. A coupon that has already been used cannot be deleted.');">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit"
+                                                    class="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
+                                                    title="Delete {{ $coupon->name }}" aria-label="Delete {{ $coupon->name }}">
+                                                <x-admin.icon name="trash" class="w-4 h-4" />
+                                            </button>
+                                        </form>
+                                    @endif
+
+                                    {{-- The artwork, to keep. Three bare icons in a row
+                                         are indistinguishable to a screen reader, so the
+                                         label names the coupon as well as the action. --}}
+                                    <a href="{{ route('admin.coupons.design', $coupon) }}"
+                                       class="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition"
+                                       title="Download the {{ $coupon->name }} design"
+                                       aria-label="Download the {{ $coupon->name }} coupon design">
+                                        <x-admin.icon name="download" class="w-4 h-4" />
+                                    </a>
+                                </div>
+                            </td>
                         </tr>
                     @empty
                         <tr>
