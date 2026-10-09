@@ -5,9 +5,13 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Payment\RegistrationPaymentController;
 use App\Http\Requests\StoreEventRegistrationRequest;
 use App\Models\CampaignContact;
+use App\Models\Coupon;
 use App\Models\Event;
 use App\Models\EventAddonVariant;
 use App\Models\EventRegistration;
+use App\Services\Coupon\CouponAvailability;
+use App\Services\Coupon\CouponOutcome;
+use App\Services\Coupon\RegistrationCouponWriter;
 use App\Services\EventNotifier;
 use App\Services\Messaging\StaffAlerts;
 use App\Support\AddonOrder;
@@ -23,6 +27,12 @@ use Throwable;
 
 class RegistrationController extends Controller
 {
+    public function __construct(
+        private readonly CouponAvailability $coupons,
+        private readonly RegistrationCouponWriter $couponWriter,
+    ) {
+    }
+
     /** Where logos uploaded with a registration live on the public disk. */
     private const LOGO_DIRECTORY = 'registration-logos';
 
@@ -66,7 +76,14 @@ class RegistrationController extends Controller
         $events = $this->scoped($tab)
             // The modal prices its add-on picker from these, so they are loaded
             // once here rather than per card.
-            ->with(['addons' => fn ($query) => $query->active(), 'addons.variants'])
+            ->with([
+                'addons' => fn ($query) => $query->active(),
+                'addons.variants',
+
+                // The ticked batches, loaded here so deciding whether each modal
+                // shows a Voucher Code box is one query rather than one per event.
+                'coupons',
+            ])
             ->orderBy($tab === 'past' ? 'ends_at' : 'starts_at', $tab === 'past' ? 'desc' : 'asc')
             ->get();
 
@@ -80,6 +97,18 @@ class RegistrationController extends Controller
 
             // Only reopen a modal for an event actually on this tab.
             'openSlug' => $events->contains('slug', $requestedSlug) ? $requestedSlug : null,
+
+            /*
+             | The usable coupons ticked on each event, keyed by event id.
+             |
+             | Whether a Voucher Code box appears at all, and the owner's rule in one
+             | place: no tick, no box. Worked out here rather than in the view so the
+             | expired and used-up batches are filtered by the same code the submit
+             | path checks against.
+             */
+            'eventCoupons' => $events->mapWithKeys(
+                fn (Event $event) => [$event->id => $this->coupons->forEvent($event)]
+            ),
 
             // Roles are decided by each event's mode, not chosen by the
             // visitor, so no role list is handed to the view.
@@ -347,7 +376,22 @@ class RegistrationController extends Controller
                 $locked->increment('seats_taken', $seatsWanted);
             }
 
-            return ['registration' => $registration];
+            /*
+             | The coupon, claimed here and nowhere else.
+             |
+             | Inside the same transaction that writes the entry, and after the
+             | add-on lines, so the charge it reduces is the charge that was actually
+             | worked out. A claim made earlier would be against a figure that had not
+             | been settled yet; one made afterwards could spend a code against an
+             | entry the transaction then rolled back.
+             |
+             | A refusal is NOT an error. The outcome is carried out of here and the
+             | entry stands at the normal price: losing the race for the last code
+             | must cost a visitor the discount, never their place.
+             */
+            $coupon = $this->claimCoupon($registration, $locked, (string) $request->input('voucher_code'));
+
+            return ['registration' => $registration, 'coupon' => $coupon];
         });
 
         if (isset($outcome['error'])) {
@@ -412,18 +456,88 @@ class RegistrationController extends Controller
         // Tells the office. Swallows its own failures.
         $alerts->registrationReceived($registration);
 
+        /** @var CouponOutcome|null $coupon */
+        $coupon = $outcome['coupon'] ?? null;
+
         // Anything with a balance goes to the payment page rather than straight
-        // to a confirmation, because nothing has been collected yet.
+        // to a confirmation, because nothing has been collected yet. A coupon that
+        // covered the charge in full leaves nothing owed, so the entry falls past
+        // this and never goes near the gateway.
         if ($registration->awaitingPayment()) {
             // Signed, because the page shows the invoice and the reference is a
             // guessable sequence.
-            return redirect()->to(RegistrationPaymentController::urlFor($registration));
+            return redirect()
+                ->to(RegistrationPaymentController::urlFor($registration))
+                ->with('coupon_status', $this->couponMessage($coupon));
         }
 
         return redirect()
             ->route('registration')
             ->with('registration_reference', $registration->reference)
-            ->with('registration_status', $this->confirmationMessage($registration, $event));
+            ->with('registration_status', $this->confirmationMessage($registration, $event))
+            ->with('coupon_status', $this->couponMessage($coupon));
+    }
+
+    /* ---------------------------------------------------------------------
+     | Coupons
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Claim the typed code against this entry, or say why it could not be.
+     *
+     * Returns null when nothing was typed, so "no coupon" and "a coupon that was
+     * refused" stay different facts: one has nothing to report and the other has to
+     * tell the visitor what happened to the discount they expected.
+     *
+     * Two checks, and both are needed. The lookup decides whether the code belongs to
+     * a batch actually ticked on THIS event — without it a code for another event
+     * would be spent here. The claim then re-reads the expiry and the remaining count
+     * under a lock, which is the only thing that can decide the last code safely.
+     */
+    private function claimCoupon(EventRegistration $registration, Event $event, string $typed): ?CouponOutcome
+    {
+        $typed = trim($typed);
+
+        if ($typed === '') {
+            return null;
+        }
+
+        /*
+         | The batches on offer, which may well be none: nothing ticked, or everything
+         | ticked has expired or run out. An empty list is handed to the lookup rather
+         | than short-circuited, because the lookup is what can tell an expired code
+         | from a spent one from a code for another event — and a visitor who typed a
+         | code deserves to be told which of those it was.
+         */
+        $lookup = $this->coupons->lookup($typed, $this->coupons->forEvent($event), Coupon::KIND_EVENT);
+
+        if (! $lookup->succeeded()) {
+            return CouponOutcome::failed($lookup->status);
+        }
+
+        // Handed over rather than reloaded: this is the locked row the charge was
+        // worked out against, and the writer reads the per-participant rule off it.
+        $registration->setRelation('event', $event);
+
+        return $this->couponWriter->applyCode($registration, $typed);
+    }
+
+    /**
+     * What to tell the visitor about their coupon, or null when there is nothing.
+     *
+     * Every outcome gets its own words, taken from CouponOutcome so the wording is
+     * the same wherever a code is refused. A failure is phrased as the normal price
+     * applying rather than as an error, because the entry itself went through.
+     */
+    private function couponMessage(?CouponOutcome $coupon): ?string
+    {
+        if ($coupon === null) {
+            return null;
+        }
+
+        return $coupon->succeeded()
+            ? sprintf('Coupon applied: %s', $coupon->message())
+            : $coupon->message();
     }
 
     /* ---------------------------------------------------------------------

@@ -46,15 +46,22 @@ class Coupon extends Model
     /**
      * How a coupon is drawn where the public can see it.
      *
-     * Part A stores the choice and the uploaded file. Rendering them publicly is Part
-     * B, so these are a list of keys and labels and nothing more: the point of fixing
-     * them now is that a batch created today still names a design the renderer will
-     * understand later.
+     * A key here is the name of an anonymous Blade component under
+     * resources/views/components/coupon/designs. Nothing switches on these values:
+     * CouponTicket resolves the component from the key, so adding a design is one
+     * line here plus one file, and no second list anywhere has to be kept in step.
+     *
+     * Order is the order they are offered in on the form. Custom stays last because
+     * it is the one that asks for a file rather than drawing anything itself.
      */
     public const DESIGN_CUSTOM = 'custom';
 
     public const DESIGNS = [
         'classic' => 'Classic — plain ticket',
+        'bold' => 'Bold — the discount is the hero',
+        'minimal' => 'Minimal — clean and spacious',
+        'stamp' => 'Stamp — rubber stamp on paper',
+        'gradient' => 'Gradient — modern, phone friendly',
         self::DESIGN_CUSTOM => 'Custom — upload your own artwork',
     ];
 

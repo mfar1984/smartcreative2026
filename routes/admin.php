@@ -10,6 +10,7 @@ use App\Http\Controllers\Admin\Campaign\CampaignController;
 use App\Http\Controllers\Admin\Campaign\CampaignReportController;
 use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
 use App\Http\Controllers\Admin\Coupon\CouponController;
+use App\Http\Controllers\Admin\Coupon\ReportController as CouponReportController;
 use App\Http\Controllers\Admin\Coupon\TrackingController as CouponTrackingController;
 use App\Http\Controllers\Admin\Event\IdentityCardController;
 use App\Http\Controllers\Admin\Event\ParticipantController;
@@ -128,6 +129,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('tracking', [CouponTrackingController::class, 'index'])
                 ->middleware('permission:coupons.view')
                 ->name('tracking');
+
+            /*
+            | The summary to Tracking's list, on the same permission: it is the same
+            | batches read from the other end, so there is nothing on it somebody with
+            | the coupon list cannot already see. Declared before `{coupon}` for the
+            | reason given above.
+            */
+            Route::get('report', [CouponReportController::class, 'index'])
+                ->middleware('permission:coupons.view')
+                ->name('report');
 
             Route::get('{coupon}/edit', [CouponController::class, 'edit'])
                 ->middleware('permission:coupons.update')

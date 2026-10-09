@@ -33,14 +33,6 @@ class CouponShopOrderTest extends CouponTestCase
         ShopSettings::flush();
     }
 
-    /** A flat postage charge with no free-delivery threshold in the way. */
-    private function flatShipping(float $rate = 10.0): void
-    {
-        Setting::write('integration.shipping.flat_rate_west', (string) $rate, 'integration.shipping');
-        Setting::write('integration.shipping.flat_rate_east', (string) $rate, 'integration.shipping');
-        Setting::write('integration.shipping.free_shipping_threshold', null, 'integration.shipping');
-    }
-
     /**
      * @return array<string, mixed>
      */

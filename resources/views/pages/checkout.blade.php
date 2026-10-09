@@ -251,6 +251,17 @@
                                     </dd>
                                 </div>
 
+                                {{-- Filled in once a code has been checked. A preview: the
+                                     order is priced again on the server when it is placed,
+                                     and the discount comes off the goods only. --}}
+                                <div class="hidden justify-between gap-4 text-sm" data-checkout-voucher-line>
+                                    <dt class="text-green-700">
+                                        Voucher
+                                        <span class="font-mono font-semibold" data-checkout-voucher-code></span>
+                                    </dt>
+                                    <dd class="font-semibold text-green-700 tabular-nums" data-checkout-voucher-amount></dd>
+                                </div>
+
                                 <div class="flex justify-between gap-4 text-sm">
                                     <dt class="text-gray-600">{{ $isOffline ? 'Collection' : 'Delivery' }}</dt>
                                     @if ($isOffline)
@@ -270,9 +281,19 @@
                                 </span>
                             </div>
 
+                            @if ($coupons->isNotEmpty())
+                                {{-- Something in the basket carries a usable ticked coupon,
+                                     which is the only thing that puts this box on screen. --}}
+                                <div class="mt-5">
+                                    <x-voucher-field
+                                        :scope="\App\Models\Coupon::KIND_SHOP"
+                                        uid="checkout" />
+                                </div>
+                            @endif
+
                             <button type="submit"
                                     class="mt-5 flex items-center justify-center gap-2 w-full bg-blue-600 text-white px-6 py-3.5 rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
-                                Place order
+                                <span data-checkout-submit-label>Place order</span>
                             </button>
 
                             <a href="{{ route('cart') }}" class="block text-center text-sm font-semibold text-gray-600 hover:text-blue-700 transition mt-3">
@@ -300,55 +321,132 @@
     </section>
 @endsection
 
-@unless ($isOffline)
 @push('scripts')
 <script>
     /*
-     | Previews the postage as soon as a state is chosen, so the total is not a
-     | surprise on the next page.
-     |
-     | Not emitted at all for a collected order. There is no postage to preview and no
-     | element to write it into, so the script would only sit there doing nothing.
+     | The running total: the postage as soon as a state is chosen, and the voucher as
+     | soon as one has been checked, so neither is a surprise on the next page.
      |
      | Only a preview. The order is priced again on the server when it is placed, so
      | editing these numbers in the page changes nothing that is charged.
+     |
+     | Money is added up in cents. Summing floats would drift, and these figures sit
+     | next to the ones the server charges.
      */
     (function () {
-        const state = document.querySelector('[data-checkout-state]');
-        const shippingCell = document.querySelector('[data-checkout-shipping]');
         const totalCell = document.querySelector('[data-checkout-total]');
 
-        if (!state || !shippingCell || !totalCell) {
+        if (!totalCell) {
             return;
         }
 
+        const state = document.querySelector('[data-checkout-state]');
+        const shippingCell = document.querySelector('[data-checkout-shipping]');
+        const submitLabel = document.querySelector('[data-checkout-submit-label]');
+        const voucherLine = document.querySelector('[data-checkout-voucher-line]');
+        const voucherAmount = document.querySelector('[data-checkout-voucher-amount]');
+        const voucherCode = document.querySelector('[data-checkout-voucher-code]');
+
+        // A collected order is never posted, so no postage is quoted for it at all.
+        const isOffline = @json($isOffline);
         const east = @json(App\Support\ShippingSettings::EAST_MALAYSIA);
         const rates = { west: {{ $flatRateWest }}, east: {{ $flatRateEast }} };
-        const goods = {{ $itemsTotal }};
+        const goodsCents = Math.round({{ $itemsTotal }} * 100);
         const threshold = {{ $freeShippingThreshold === null ? 'null' : $freeShippingThreshold }};
 
-        function money(value) {
-            return 'RM ' + value.toFixed(2);
+        /*
+         | The checked voucher's terms, or null. Never a finished figure: see the note
+         | in the voucher-field component.
+         */
+        let voucher = null;
+
+        function money(cents) {
+            return 'RM ' + (cents / 100).toFixed(2);
+        }
+
+        /** What the voucher takes off the GOODS, in cents, capped at them. */
+        function discountCents() {
+            if (!voucher || goodsCents <= 0 || !(voucher.value > 0)) {
+                return 0;
+            }
+
+            if (voucher.type === 'percentage') {
+                const percent = Math.min(100, voucher.value);
+
+                return Math.min(goodsCents, Math.round(goodsCents * percent / 100));
+            }
+
+            return Math.min(goodsCents, Math.round(voucher.value * 100));
+        }
+
+        /** The postage in cents, or null while it is not known yet. */
+        function postageCents() {
+            if (isOffline) {
+                return 0;
+            }
+
+            if (!state || state.value === '') {
+                return null;
+            }
+
+            /*
+             | Banded on the FULL goods total, not the discounted one. Quoting it after
+             | the discount would hand a buyer free delivery they had not reached: the
+             | coupon is a reduction on the goods, not a second promotion on the
+             | postage. Same rule as ShopOrderWriter.
+             */
+            const free = threshold !== null && goodsCents >= Math.round(threshold * 100);
+
+            return free ? 0 : Math.round((east.includes(state.value) ? rates.east : rates.west) * 100);
         }
 
         function render() {
-            if (state.value === '') {
-                shippingCell.textContent = 'Choose a state';
-                totalCell.textContent = money(goods);
+            const discount = discountCents();
 
-                return;
+            if (voucherLine) {
+                voucherLine.classList.toggle('hidden', discount === 0);
+                voucherLine.classList.toggle('flex', discount > 0);
+
+                if (voucherAmount) {
+                    voucherAmount.textContent = '\u2212 ' + money(discount);
+                }
+
+                if (voucherCode) {
+                    voucherCode.textContent = (voucher && voucher.code) || '';
+                }
             }
 
-            const free = threshold !== null && goods >= threshold;
-            const postage = free ? 0 : (east.includes(state.value) ? rates.east : rates.west);
+            const postage = postageCents();
 
-            shippingCell.textContent = postage === 0 ? 'Free' : money(postage);
-            totalCell.textContent = money(goods + postage);
+            if (shippingCell) {
+                shippingCell.textContent = postage === null
+                    ? 'Choose a state'
+                    : (postage === 0 ? 'Free' : money(postage));
+            }
+
+            const total = Math.max(0, goodsCents - discount) + (postage || 0);
+
+            totalCell.textContent = money(total);
+
+            /*
+             | Nothing left to pay, so the button must not promise a payment page. The
+             | order is placed and settles itself; see CheckoutController::place().
+             */
+            if (submitLabel) {
+                submitLabel.textContent = total === 0 && discount > 0 ? 'Free Submission' : 'Place order';
+            }
         }
 
-        state.addEventListener('change', render);
+        state?.addEventListener('change', render);
+
+        document.querySelectorAll('[data-voucher]').forEach(function (box) {
+            box.addEventListener('voucher:changed', function (event) {
+                voucher = event.detail;
+                render();
+            });
+        });
+
         render();
     })();
 </script>
 @endpush
-@endunless

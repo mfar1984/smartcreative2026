@@ -3,7 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Payment\ShopOrderPaymentController;
+use App\Models\Coupon;
 use App\Models\ShopOrder;
+use App\Services\Coupon\CouponAvailability;
+use App\Services\Coupon\CouponOutcome;
+use App\Services\Coupon\CouponRedeemer;
+use App\Services\Coupon\ShopOrderCouponWriter;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\ShopCheckoutStarter;
@@ -39,8 +44,11 @@ class CheckoutController extends Controller
 
     private const RECEIPT_MAX_KB = 4096;
 
-    public function __construct(private ShopOrderNotifier $notifier)
-    {
+    public function __construct(
+        private ShopOrderNotifier $notifier,
+        private CouponAvailability $coupons,
+        private ShopOrderCouponWriter $couponWriter,
+    ) {
     }
 
     public function show()
@@ -96,10 +104,17 @@ class CheckoutController extends Controller
             'bankAccount' => PaymentSettings::bankAccount(),
             'bankNote' => PaymentSettings::bankTransferNote(),
             'codNote' => PaymentSettings::codNote(),
+
+            /*
+             | The usable coupons ticked on anything in this basket, which is the only
+             | thing that decides whether a Voucher Code box is drawn at all. No tick,
+             | no box.
+             */
+            'coupons' => $this->coupons->forCart($lines),
         ]);
     }
 
-    public function place(Request $request, ShopOrderWriter $writer, ShopCheckoutStarter $starter)
+    public function place(Request $request, ShopOrderWriter $writer, ShopCheckoutStarter $starter, CouponRedeemer $redeemer)
     {
         $lines = Cart::lines();
 
@@ -148,6 +163,14 @@ class CheckoutController extends Controller
             // Validated against what is switched on, not against every method that
             // exists in the code.
             'payment_method' => ['required', Rule::in(array_keys($methods))],
+
+            /*
+             | A coupon code, when the buyer had one. Only a shape check: whether it
+             | exists, is for the shop, has expired or has gone is decided at claim
+             | time under a lock, and a validation failure here would throw a whole
+             | order out over a coupon.
+             */
+            'voucher_code' => ['nullable', 'string', 'max:64'],
         ], [
             'identity_card.required' => 'Enter your identity card or passport number. It is what the counter checks before handing the order over.',
             'identity_card.min' => 'That looks too short to be an identity card or passport number.',
@@ -155,9 +178,53 @@ class CheckoutController extends Controller
             'payment_method.in' => 'Choose one of the payment methods offered.',
         ]);
 
-        $order = $writer->place($validated, $validated['payment_method'], $request->ip());
+        /*
+         | The coupon, claimed before the order is written.
+         |
+         | It has to be this way round: the discount is part of the total the order row
+         | is created with, so the code is stamped first and ShopOrderWriter points it
+         | at the order inside the same transaction. The claim is race-safe in
+         | CouponRedeemer, and a refusal is NOT an error — the order is placed at the
+         | normal price and the buyer is told what happened to their code.
+         |
+         | Priced against the GOODS, never the grand total: a coupon never reaches the
+         | postage. ShopOrderWriter caps it at the goods as well.
+         */
+        $coupon = $this->claimCoupon(
+            $redeemer,
+            $lines,
+            (string) ($validated['voucher_code'] ?? ''),
+            round((float) $lines->sum('line_total'), 2),
+        );
+
+        $order = $writer->place(
+            $validated,
+            $validated['payment_method'],
+            $request->ip(),
+            $coupon?->succeeded() ? $coupon->discount : 0.0,
+            $coupon?->succeeded() ? $coupon->code?->id : null,
+        );
 
         Cart::clear();
+
+        /*
+         | Covered in full by a coupon, so there is no payment step at all.
+         |
+         | Settled through the same ShopOrderWriter::moveTo() every other payment goes
+         | through, which stamps paid_at, takes the stock and writes the trail entry.
+         | Nothing reaches the gateway: ShopOrderChargeBuilder throws on a zero total,
+         | and that is a backstop rather than the path.
+         |
+         | Guarded on the coupon having actually been claimed, so an order that costs
+         | nothing for some other reason keeps exactly the behaviour it had before
+         | coupons existed, and the trail entry below cannot credit a coupon that was
+         | never used.
+         */
+        if ($coupon?->succeeded() && $this->couponWriter->settleIfCovered($order)) {
+            $order = $order->fresh();
+        }
+
+        $couponStatus = $this->couponMessage($coupon);
 
         /*
          | A bank transfer is the one method that needs the buyer to go and do something
@@ -175,7 +242,7 @@ class CheckoutController extends Controller
          | they have always had: nothing reaches the gateway, no checkout row is
          | written, and the redirect below is unchanged.
          */
-        if ($order->payment_method === ShopOrder::METHOD_GATEWAY) {
+        if ($order->payment_method === ShopOrder::METHOD_GATEWAY && $order->awaitsGatewayPayment()) {
             try {
                 return redirect()->away(
                     $starter->start($order, ShopOrderPaymentController::returnUrls($order))
@@ -200,8 +267,14 @@ class CheckoutController extends Controller
         /*
          | Signed, because references run in sequence and an unsigned link would let
          | anybody count upwards through other people's names and addresses.
+         |
+         | Also where a gateway order with nothing left to pay lands: awaitsGatewayPayment()
+         | is false once a coupon has covered it, so the hand-off above is skipped and
+         | the buyer goes straight to a confirmation that reads as settled.
          */
-        return redirect()->to(URL::signedRoute('shop.order', ['reference' => $order->reference]));
+        return redirect()
+            ->to(URL::signedRoute('shop.order', ['reference' => $order->reference]))
+            ->with('coupon_status', $couponStatus);
     }
 
     public function confirmation(string $reference, PaymentGatewayManager $gateways)
@@ -221,6 +294,14 @@ class CheckoutController extends Controller
             // Decides whether a Pay Now button is shown at all. Offering one that
             // cannot work would be worse than saying so plainly.
             'gatewayReady' => $gateways->isUsable(),
+
+            /*
+             | Whether a Voucher Code box is drawn. Asked of the payment controller,
+             | which is also what enforces it, so the field and the endpoint can never
+             | disagree: only while nothing has been paid.
+             */
+            'canApplyCoupon' => ShopOrderPaymentController::canApplyCoupon($order, $this->coupons),
+            'couponUrl' => ShopOrderPaymentController::couponUrl($order),
 
             'paymentOutcome' => session('payment_outcome'),
         ]);
@@ -324,6 +405,70 @@ class CheckoutController extends Controller
         return redirect()
             ->to(self::receiptUrl($order))
             ->with('status', 'Thank you. We will check it against our account and email you once your order is confirmed.');
+    }
+
+    /* ---------------------------------------------------------------------
+     | Coupons
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Claim the typed code against this basket, or say why it could not be.
+     *
+     * Null when nothing was typed, so "no coupon" and "a coupon that was refused"
+     * stay different facts: one has nothing to report, the other has to tell the
+     * buyer what happened to the discount they expected.
+     *
+     * Two checks, and both are needed. The lookup decides whether the code belongs to
+     * a batch actually ticked on something in this basket — without it a code for
+     * another product, or for an event, would be spent here. The claim then re-reads
+     * the expiry and the remaining count under a lock, which is the only thing that
+     * can decide the last code safely.
+     *
+     * @param  Collection<int, array<string, mixed>>  $lines
+     */
+    private function claimCoupon(
+        CouponRedeemer $redeemer,
+        Collection $lines,
+        string $typed,
+        float $goods,
+    ): ?CouponOutcome {
+        $typed = trim($typed);
+
+        if ($typed === '') {
+            return null;
+        }
+
+        /*
+         | The batches on offer, which may well be none: nothing ticked, or everything
+         | ticked has expired or run out. An empty list is handed to the lookup rather
+         | than short-circuited, because the lookup is what can tell an expired code
+         | from a spent one from a code for another product.
+         */
+        $lookup = $this->coupons->lookup($typed, $this->coupons->forCart($lines), Coupon::KIND_SHOP);
+
+        if (! $lookup->succeeded()) {
+            return CouponOutcome::failed($lookup->status);
+        }
+
+        return $redeemer->claimByCode($typed, Coupon::KIND_SHOP, $goods);
+    }
+
+    /**
+     * What to tell the buyer about their coupon, or null when there is nothing.
+     *
+     * A failure is phrased as the normal price applying rather than as an error,
+     * because the order itself went through. The wording comes from CouponOutcome so
+     * a refusal reads the same wherever it happens.
+     */
+    private function couponMessage(?CouponOutcome $coupon): ?string
+    {
+        if ($coupon === null) {
+            return null;
+        }
+
+        return $coupon->succeeded()
+            ? sprintf('Coupon applied: %s', $coupon->message())
+            : $coupon->message();
     }
 
     /**

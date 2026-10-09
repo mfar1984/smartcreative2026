@@ -77,6 +77,18 @@ class AdminNavigation
                                 'active' => 'admin.coupons.tracking',
                                 'permission' => 'coupons.view',
                             ],
+                            /*
+                            | Report is Tracking summed up, so it sits under it and
+                            | shares the one coupon view permission: the same batches
+                            | read from the other end, with nothing on it somebody
+                            | with the list cannot already see.
+                            */
+                            [
+                                'label' => 'Report',
+                                'route' => 'admin.coupons.report',
+                                'active' => 'admin.coupons.report',
+                                'permission' => 'coupons.view',
+                            ],
                         ],
                     ],
 

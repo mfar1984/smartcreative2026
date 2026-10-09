@@ -38,7 +38,23 @@
                     </p>
                 @endif
 
+                {{-- What became of a voucher code, whether it was typed at checkout or
+                     on this page. Its own banner for the same reason the error below has
+                     one: the order going through and the coupon being accepted are two
+                     different facts. --}}
+                @if (session('coupon_status'))
+                    <p role="status" class="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-base text-green-800 mb-6">
+                        {{ session('coupon_status') }}
+                    </p>
+                @endif
+
                 @error('payment')
+                    <p role="alert" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-base text-red-800 mb-6">
+                        {{ $message }}
+                    </p>
+                @enderror
+
+                @error('voucher_code')
                     <p role="alert" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-base text-red-800 mb-6">
                         {{ $message }}
                     </p>
@@ -105,10 +121,21 @@
                             </p>
                         </div>
                     @elseif ($order->isPaid())
+                        @php
+                            // A coupon that covered the order in full settles it without a
+                            // sen arriving, so "we have your RM 0.00" would be nonsense.
+                            // Both are settled; the total is what tells them apart.
+                            $nothingWasOwed = (float) $order->grand_total <= 0;
+                        @endphp
+
                         <div role="status" class="rounded-lg border border-green-200 bg-green-50 p-6 mb-8">
-                            <h2 class="text-lg font-bold text-green-900 mb-2">Payment received</h2>
+                            <h2 class="text-lg font-bold text-green-900 mb-2">
+                                {{ $nothingWasOwed ? 'Nothing left to pay' : 'Payment received' }}
+                            </h2>
                             <p class="text-base text-green-800 leading-relaxed">
-                                We have your {{ $order->grandTotalLabel() }}.
+                                {{ $nothingWasOwed
+                                    ? 'Your coupon covered this order in full.'
+                                    : 'We have your ' . $order->grandTotalLabel() . '.' }}
                                 {{ $order->isOffline()
                                     ? 'We will email you the collection details.'
                                     : 'Your order is being prepared for dispatch.' }}
@@ -186,6 +213,21 @@
                             <dt class="text-gray-600">Goods</dt>
                             <dd class="font-semibold text-gray-900 tabular-nums">{{ $order->itemsTotalLabel() }}</dd>
                         </div>
+
+                        @if ($order->hasDiscount())
+                            {{-- What the coupon took off the goods. Never off the postage,
+                                 which is the line below and is unchanged by it. --}}
+                            <div class="flex justify-between gap-4 text-sm">
+                                <dt class="text-green-700">
+                                    Coupon
+                                    @if ($order->couponCode)
+                                        <span class="font-mono font-semibold">{{ $order->couponCode->codeLabel() }}</span>
+                                    @endif
+                                </dt>
+                                <dd class="font-semibold text-green-700 tabular-nums">&minus; {{ $order->discountTotalLabel() }}</dd>
+                            </div>
+                        @endif
+
                         <div class="flex justify-between gap-4 text-sm">
                             <dt class="text-gray-600">
                                 Delivery
@@ -201,6 +243,17 @@
                         </div>
                     </dl>
                 </div>
+
+                {{-- ---------------- Voucher code ----------------
+                     Only while nothing has been paid. Once an order is settled the field
+                     is not drawn and the endpoint refuses, because reducing a total below
+                     money already received would create a credit nobody has decided how
+                     to refund. --}}
+                @if ($canApplyCoupon)
+                    <div class="mb-8">
+                        <x-voucher-apply :action="$couponUrl" noun="order" />
+                    </div>
+                @endif
 
                 {{-- ---------------- Where it goes ---------------- --}}
                 @if ($order->isOffline())

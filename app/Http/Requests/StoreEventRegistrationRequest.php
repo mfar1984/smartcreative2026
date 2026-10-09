@@ -36,6 +36,16 @@ class StoreEventRegistrationRequest extends FormRequest
             'team_name' => [$event->usesGroupName() ? 'required' : 'nullable', 'string', 'max:150'],
             'notes' => ['nullable', 'string', 'max:1000'],
 
+            /*
+             | A coupon code, when the visitor had one.
+             |
+             | Deliberately only a shape check. Whether the code exists, is for this
+             | event, has expired or has already gone is decided at claim time under a
+             | lock, and a validation failure here would throw the whole entry out
+             | over a coupon. A bad code must cost the normal price, not the place.
+             */
+            'voucher_code' => ['nullable', 'string', 'max:64'],
+
             // One image for the whole entry. Required from the event's setting
             // rather than a posted flag, so a tampered form cannot skip it.
             // SVG is allowed through mimetypes because it is not a raster image

@@ -3,13 +3,17 @@
 namespace App\Http\Controllers\Payment;
 
 use App\Http\Controllers\Controller;
+use App\Models\Coupon;
 use App\Models\EventRegistration;
+use App\Services\Coupon\CouponAvailability;
+use App\Services\Coupon\RegistrationCouponWriter;
 use App\Services\Payment\CheckoutUrls;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\RegistrationBalanceCharge;
 use App\Services\Payment\RegistrationPaymentUpdater;
 use App\Support\PaymentSettings;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 
@@ -35,6 +39,8 @@ class RegistrationPaymentController extends Controller
         private readonly PaymentGatewayManager $gateways,
         private readonly RegistrationPaymentUpdater $updater,
         private readonly RegistrationBalanceCharge $balance,
+        private readonly CouponAvailability $coupons,
+        private readonly RegistrationCouponWriter $couponWriter,
     ) {
     }
 
@@ -51,6 +57,16 @@ class RegistrationPaymentController extends Controller
         );
     }
 
+    /** POST only. The action of the Voucher Code form on the payment page. */
+    public static function couponUrl(EventRegistration $registration): string
+    {
+        return URL::temporarySignedRoute(
+            'registration.payment.coupon',
+            now()->addDays(self::LINK_DAYS),
+            ['reference' => $registration->reference],
+        );
+    }
+
     public function show(string $reference)
     {
         $registration = $this->find($reference);
@@ -60,6 +76,70 @@ class RegistrationPaymentController extends Controller
         $this->reconcile($registration);
 
         return view('pages.registration-payment', $this->viewData($registration));
+    }
+
+    /**
+     * Apply a voucher code to an entry that has already been submitted.
+     *
+     * ONLY WHILE NOTHING HAS BEEN PAID, and that is the whole rule here.
+     *
+     * A discount on a part-paid or settled entry would reduce the charge below money
+     * already received, which creates a credit nobody has decided how to refund — so
+     * the field is not drawn and this endpoint refuses. The refusal is checked here
+     * and not only in the view, because a signed link lives for thirty days and the
+     * page it was drawn from can be long out of date by the time it is posted.
+     *
+     * A refusal is not an error in the entry: the figures are left exactly as they
+     * were and the payer is told why, beside a Pay button that still works.
+     */
+    public function applyCoupon(Request $request, string $reference)
+    {
+        $registration = $this->find($reference);
+
+        $validated = $request->validate([
+            'voucher_code' => ['required', 'string', 'max:64'],
+        ]);
+
+        if (! $this->canApplyCoupon($registration)) {
+            return redirect()
+                ->to(self::urlFor($registration))
+                ->withErrors(['voucher_code' => $this->whyCouponRefused($registration)]);
+        }
+
+        $offered = $this->coupons->forRegistration($registration);
+        $lookup = $this->coupons->lookup($validated['voucher_code'], $offered, Coupon::KIND_EVENT);
+
+        if (! $lookup->succeeded()) {
+            return redirect()
+                ->to(self::urlFor($registration))
+                ->withErrors(['voucher_code' => $lookup->message()]);
+        }
+
+        // The claim re-reads the expiry and the remaining count under a lock, so this
+        // is where the last code is actually decided.
+        $outcome = $this->couponWriter->applyCode($registration, $validated['voucher_code']);
+
+        if (! $outcome->succeeded()) {
+            return redirect()
+                ->to(self::urlFor($registration))
+                ->withErrors(['voucher_code' => $outcome->message()]);
+        }
+
+        /*
+         | Nothing further is needed when the coupon covered it. The writer has
+         | already settled the entry through paymentStatusFromLedger(), which answers
+         | PAID for a free one, so the page draws itself as settled and stops offering
+         | payment without a single new status rule.
+         */
+        return redirect()
+            ->to(self::urlFor($registration))
+            ->with('coupon_status', sprintf(
+                '%s %s',
+                sprintf('Coupon applied: %s', $outcome->message()),
+                $registration->fresh()?->isFree()
+                    ? 'There is nothing left to pay.'
+                    : 'The amount due has been updated.',
+            ));
     }
 
     /**
@@ -274,7 +354,69 @@ class RegistrationPaymentController extends Controller
             'gatewayReady' => $this->gateways->isUsable(),
             'gatewayLabel' => PaymentSettings::providerLabel(),
 
+            /*
+             | Whether a Voucher Code box is drawn. Three things have to be true: a
+             | coupon is ticked on this event and still usable, nothing has been paid,
+             | and no coupon is on the entry already. See canApplyCoupon().
+             */
+            'canApplyCoupon' => $this->canApplyCoupon($registration),
+            'couponUrl' => self::couponUrl($registration),
+
             'outcome' => null,
         ];
+    }
+
+    /* ---------------------------------------------------------------------
+     | Coupons
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Whether a code may still be applied to this entry.
+     *
+     * The money rule first: nothing may be taken off a charge once money has arrived
+     * against it. `amount_paid` is asked directly rather than trusted to the status,
+     * because a payment recorded by hand and a status that has not caught up are two
+     * different things and only one of them is the ledger.
+     *
+     * awaitingPayment() then rules out the rest — settled, refunded, cancelled, free
+     * — on the same terms the Pay button uses, so the two controls on this page can
+     * never disagree about where the entry stands.
+     */
+    private function canApplyCoupon(EventRegistration $registration): bool
+    {
+        if ($registration->amountPaid() > 0.005) {
+            return false;
+        }
+
+        if ($registration->hasDiscount() || ! $registration->awaitingPayment()) {
+            return false;
+        }
+
+        return $this->coupons->forRegistration($registration)->isNotEmpty();
+    }
+
+    /** Why a code cannot be applied, in words rather than a silent no-op. */
+    private function whyCouponRefused(EventRegistration $registration): string
+    {
+        if ($registration->amountPaid() > 0.005) {
+            return sprintf(
+                'We have already received %s against this registration, so a coupon cannot be applied to it now. Contact us quoting %s.',
+                $registration->amountPaidLabel(),
+                $registration->reference,
+            );
+        }
+
+        if ($registration->hasDiscount()) {
+            return 'A coupon has already been applied to this registration.';
+        }
+
+        if ($registration->isFree()) {
+            return 'There is nothing to discount on this registration.';
+        }
+
+        return sprintf(
+            'A coupon cannot be applied to this registration. Contact us quoting %s if you think that is wrong.',
+            $registration->reference,
+        );
     }
 }

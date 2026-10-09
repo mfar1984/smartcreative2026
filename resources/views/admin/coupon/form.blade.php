@@ -211,20 +211,55 @@
             <x-admin.panel title="Design" icon="photo">
                 <x-admin.field-row
                     label="Design Coupon"
-                    help="How it is drawn where the public can see it."
-                    for="design"
+                    help="How it is drawn where the public can see it. Pick one to see it."
                     :required="true"
                     error="design">
 
-                    <select id="design" name="design" required data-design class="{{ $input }} bg-white">
-                        @foreach ($designs as $value => $label)
-                            <option value="{{ $value }}" @selected($design === $value)>{{ $label }}</option>
-                        @endforeach
-                    </select>
+                    {{-- A visual chooser rather than a dropdown, because a design is the
+                         one field on this form whose name tells you nothing about what you
+                         are choosing.
 
-                    <p class="text-xs text-gray-500 mt-1.5">
-                        More presets are coming. The choice is stored now so a coupon created
-                        today still names a design the public page will understand later.
+                         Every tile carries a real radio, so the keyboard reaches it, the
+                         group is announced, and the posted field is still `design` with the
+                         same values it always had. The preview beside it is decoration with
+                         a click handler, and is aria-hidden: a screen reader gets the
+                         label, not a second reading of the sample figures.
+
+                         Drawn from Coupon::DESIGNS, so a new design appears here the moment
+                         its key and component file exist. --}}
+                    <fieldset data-design-picker>
+                        <legend class="sr-only">Coupon design</legend>
+
+                        <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                            @foreach ($designs as $value => $label)
+                                <div @class([
+                                    'rounded-xl border-2 p-3 transition',
+                                    'has-checked:border-blue-600 has-checked:bg-blue-50/60',
+                                    'border-gray-200 hover:border-blue-300',
+                                ])>
+                                    <label for="design-{{ $value }}" class="flex items-start gap-2.5 cursor-pointer">
+                                        <input type="radio" id="design-{{ $value }}" name="design" value="{{ $value }}" required
+                                               @checked($design === $value)
+                                               data-design
+                                               class="mt-0.5 shrink-0 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                        <span class="text-sm font-semibold text-gray-900">{{ $label }}</span>
+                                    </label>
+
+                                    <div class="mt-3 cursor-pointer" data-design-preview="{{ $value }}" aria-hidden="true">
+                                        <x-coupon.ticket
+                                            :coupon="$designSamples[$value]"
+                                            :subject="$designSubject"
+                                            :compact="true" />
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </fieldset>
+
+                    <p class="text-xs text-gray-500 mt-2">
+                        Drawn with sample figures. The real coupon shows its own discount, what
+                        it is for, its code and its expiry, whichever design is chosen. More
+                        designs will be added over time.
                     </p>
                 </x-admin.field-row>
 
@@ -281,7 +316,7 @@
         const value = document.querySelector('[data-discount-value]');
         const percentageNote = document.querySelector('[data-percentage-note]');
         const fixedNote = document.querySelector('[data-fixed-note]');
-        const design = document.querySelector('[data-design]');
+        const designs = Array.from(document.querySelectorAll('[data-design]'));
         const customRow = document.querySelector('[data-custom-row]');
 
         generate?.addEventListener('click', function () {
@@ -328,12 +363,32 @@
         }
 
         function syncDesign() {
-            customRow?.classList.toggle('hidden', design?.value !== 'custom');
+            const chosen = designs.find((radio) => radio.checked)?.value;
+
+            customRow?.classList.toggle('hidden', chosen !== 'custom');
         }
 
         quantity?.addEventListener('input', syncQuantity);
         document.querySelectorAll('[data-discount-type]').forEach((el) => el.addEventListener('change', syncDiscount));
-        design?.addEventListener('change', syncDesign);
+        designs.forEach((radio) => radio.addEventListener('change', syncDesign));
+
+        /*
+         | Clicking the preview picks that design.
+         |
+         | A convenience on top of the radio, never instead of it: the radio is what
+         | the keyboard reaches and what posts, and this only sets it. change has to
+         | be dispatched by hand because setting checked in script does not raise it.
+         */
+        document.querySelectorAll('[data-design-preview]').forEach(function (preview) {
+            preview.addEventListener('click', function () {
+                const radio = document.getElementById('design-' + preview.dataset.designPreview);
+
+                if (radio && !radio.checked) {
+                    radio.checked = true;
+                    radio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            });
+        });
 
         syncQuantity();
         syncDiscount();

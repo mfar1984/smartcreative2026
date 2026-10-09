@@ -47,7 +47,10 @@ class CouponAdminScreenTest extends CouponTestCase
         $group = collect($modules['items'])->firstWhere('key', 'coupons');
 
         $this->assertSame('Coupon', $group['label']);
-        $this->assertSame(['Coupon', 'Tracking'], collect($group['children'])->pluck('label')->all());
+        $this->assertSame(
+            ['Coupon', 'Tracking', 'Report'],
+            collect($group['children'])->pluck('label')->all(),
+        );
     }
 
     public function test_the_coupon_group_is_hidden_without_the_view_permission(): void

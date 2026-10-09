@@ -3,12 +3,16 @@
 namespace App\Http\Controllers\Payment;
 
 use App\Http\Controllers\Controller;
+use App\Models\Coupon;
 use App\Models\ShopOrder;
+use App\Services\Coupon\CouponAvailability;
+use App\Services\Coupon\ShopOrderCouponWriter;
 use App\Services\Payment\CheckoutUrls;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\ShopCheckoutStarter;
 use App\Services\Payment\ShopOrderPaymentUpdater;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 
@@ -36,6 +40,8 @@ class ShopOrderPaymentController extends Controller
         private readonly PaymentGatewayManager $gateways,
         private readonly ShopOrderPaymentUpdater $updater,
         private readonly ShopCheckoutStarter $starter,
+        private readonly CouponAvailability $coupons,
+        private readonly ShopOrderCouponWriter $couponWriter,
     ) {
     }
 
@@ -60,6 +66,42 @@ class ShopOrderPaymentController extends Controller
             now()->addDays(self::LINK_DAYS),
             ['reference' => $order->reference],
         );
+    }
+
+    /** POST only. The action of the Voucher Code form on the confirmation page. */
+    public static function couponUrl(ShopOrder $order): string
+    {
+        return URL::temporarySignedRoute(
+            'shop.order.coupon',
+            now()->addDays(self::LINK_DAYS),
+            ['reference' => $order->reference],
+        );
+    }
+
+    /**
+     * Whether a code may still be applied to this order.
+     *
+     * Static, because the confirmation page is drawn by CheckoutController and the
+     * rule has to be the same one this controller enforces. Two places asking the
+     * same question is how a field ends up on screen beside an endpoint that refuses
+     * it.
+     *
+     * ONLY WHILE NOTHING HAS BEEN PAID. A discount on a settled order would reduce
+     * the charge below money already received, which creates a credit nobody has
+     * decided how to refund. An order has no part-payment ledger — it is pending or
+     * it is paid — so those two checks are the whole of it.
+     */
+    public static function canApplyCoupon(ShopOrder $order, CouponAvailability $coupons): bool
+    {
+        if ($order->isPaid() || ! $order->isPendingPayment() || $order->hasDiscount()) {
+            return false;
+        }
+
+        if ((float) $order->items_total <= 0) {
+            return false;
+        }
+
+        return $coupons->forOrder($order)->isNotEmpty();
     }
 
     /**
@@ -130,6 +172,65 @@ class ShopOrderPaymentController extends Controller
     }
 
     /**
+     * Apply a voucher code to an order that has already been placed.
+     *
+     * Refused once anything has been paid, on the same terms canApplyCoupon() draws
+     * the field on. Checked here and not only in the view, because a signed link
+     * lives for thirty days and the page it was drawn from can be long out of date by
+     * the time it is posted.
+     *
+     * A refusal leaves every figure exactly as it was and says why, beside a Pay
+     * button that still works.
+     */
+    public function applyCoupon(Request $request, string $reference)
+    {
+        $order = $this->find($reference);
+
+        $validated = $request->validate([
+            'voucher_code' => ['required', 'string', 'max:64'],
+        ]);
+
+        if (! self::canApplyCoupon($order, $this->coupons)) {
+            return redirect()
+                ->to(self::urlFor($order))
+                ->withErrors(['voucher_code' => $this->whyCouponRefused($order)]);
+        }
+
+        $offered = $this->coupons->forOrder($order);
+        $lookup = $this->coupons->lookup($validated['voucher_code'], $offered, Coupon::KIND_SHOP);
+
+        if (! $lookup->succeeded()) {
+            return redirect()
+                ->to(self::urlFor($order))
+                ->withErrors(['voucher_code' => $lookup->message()]);
+        }
+
+        // The claim re-reads the expiry and the remaining count under a lock, so this
+        // is where the last code is actually decided.
+        $outcome = $this->couponWriter->applyCode($order, $validated['voucher_code']);
+
+        if (! $outcome->succeeded()) {
+            return redirect()
+                ->to(self::urlFor($order))
+                ->withErrors(['voucher_code' => $outcome->message()]);
+        }
+
+        /*
+         | Covered in full, so the order settles itself and stops offering payment.
+         | Through ShopOrderWriter::moveTo(), the one place an order becomes paid.
+         */
+        $settled = $this->couponWriter->settleIfCovered($order->refresh());
+
+        return redirect()
+            ->to(self::urlFor($order))
+            ->with('coupon_status', sprintf(
+                'Coupon applied: %s %s',
+                $outcome->message(),
+                $settled ? 'There is nothing left to pay.' : 'The total has been updated.',
+            ));
+    }
+
+    /**
      * Where the gateway sends the buyer back to.
      *
      * The outcome in the URL is treated as a hint only. What marks an order paid is
@@ -196,6 +297,34 @@ class ShopOrderPaymentController extends Controller
         } catch (PaymentGatewayException) {
             // Nothing to learn right now. The page draws from what is stored.
         }
+    }
+
+    /** Why a code cannot be applied, in words rather than a silent no-op. */
+    private function whyCouponRefused(ShopOrder $order): string
+    {
+        if ($order->isPaid()) {
+            return sprintf(
+                'Order %s has already been paid, so a coupon cannot be applied to it now. Contact us quoting that reference.',
+                $order->reference,
+            );
+        }
+
+        if ($order->hasDiscount()) {
+            return 'A coupon has already been applied to this order.';
+        }
+
+        if (! $order->isPendingPayment()) {
+            return sprintf(
+                'Order %s is %s, so a coupon cannot be applied to it.',
+                $order->reference,
+                strtolower($order->statusLabel()),
+            );
+        }
+
+        return sprintf(
+            'A coupon cannot be applied to order %s. Contact us quoting that reference if you think that is wrong.',
+            $order->reference,
+        );
     }
 
     /**

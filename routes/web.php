@@ -19,6 +19,7 @@ use App\Http\Controllers\Public\TournamentPublicController;
 use App\Http\Controllers\RegistrationController;
 use App\Http\Controllers\ServiceController;
 use App\Http\Controllers\ShopController;
+use App\Http\Controllers\VoucherController;
 use App\Http\Controllers\WifiProvisionController;
 
 // Home route
@@ -173,6 +174,17 @@ Route::middleware('signed')->group(function () {
         ->middleware('throttle:public-reference')
         ->name('registration.payment.pay');
 
+    /*
+    | Applying a voucher code to an entry that has already been submitted.
+    |
+    | POST, because it claims a code and moves money. The controller refuses it once
+    | anything has been paid, whatever this link says, because a signed link lives
+    | thirty days and the page it came from can be long out of date.
+    */
+    Route::post('/registration/payment/{reference}/coupon', [RegistrationPaymentController::class, 'applyCoupon'])
+        ->middleware('throttle:public-reference')
+        ->name('registration.payment.coupon');
+
     Route::get('/registration/payment/{reference}/return/{outcome}', [RegistrationPaymentController::class, 'handleReturn'])
         ->name('registration.payment.return');
 });
@@ -257,6 +269,21 @@ Route::post('/checkout', [CheckoutController::class, 'place'])
     ->name('checkout.place');
 
 /*
+| Checking a voucher code before anybody commits to it.
+|
+| Read only: it claims nothing and changes nothing. The claim happens when the
+| registration or the checkout form is actually submitted, so a visitor who checks a
+| code and walks away has not spent it.
+|
+| On the basket's own throttle rather than the form one. It is pressed while somebody
+| is still filling a form in, so it must not use up the budget that submitting the
+| form itself depends on.
+*/
+Route::post('/voucher/check', [VoucherController::class, 'check'])
+    ->middleware('throttle:public-cart')
+    ->name('voucher.check');
+
+/*
 | Order confirmation. Signed, because references run in sequence: without a
 | signature anybody could count upwards and read a stranger's name, address and
 | phone number.
@@ -311,6 +338,17 @@ Route::post('/order/{reference}/receipt', [CheckoutController::class, 'storeRece
 Route::post('/order/{reference}/pay', [ShopOrderPaymentController::class, 'pay'])
     ->middleware(['signed', 'throttle:public-reference'])
     ->name('shop.order.pay');
+
+/*
+| Applying a voucher code to an order that has already been placed.
+|
+| POST for the same reasons as paying: it claims a code and moves the total, and a
+| prefetched GET would spend somebody's coupon on a link preview. The controller
+| refuses it once anything has been paid.
+*/
+Route::post('/order/{reference}/coupon', [ShopOrderPaymentController::class, 'applyCoupon'])
+    ->middleware(['signed', 'throttle:public-reference'])
+    ->name('shop.order.coupon');
 
 /*
 | Where the gateway sends the buyer back. The outcome in the URL is a hint only; the

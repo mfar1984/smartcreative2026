@@ -32,6 +32,20 @@
                     </div>
                 @endif
 
+                {{-- What became of a voucher code, when one was typed.
+                     Separate from the banner above because the entry going through
+                     and the coupon being accepted are two different facts: a code
+                     that ran out must still report itself on a registration that
+                     was saved at the normal price. --}}
+                @if (session('coupon_status'))
+                    <div role="status" class="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-5 mb-10 -mt-4">
+                        <svg class="w-6 h-6 shrink-0 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"/>
+                        </svg>
+                        <p class="text-sm text-blue-800">{{ session('coupon_status') }}</p>
+                    </div>
+                @endif
+
                 {{-- Errors from a failed submission. The modal reopens below. --}}
                 @if ($errors->any())
                     <div role="alert" class="bg-red-50 border border-red-200 rounded-lg p-5 mb-10">
@@ -608,6 +622,31 @@
                             'isOpenModal' => $isOpenModal,
                         ])
 
+                        @php
+                            /*
+                             | The Voucher Code box, and the two conditions for it.
+                             |
+                             | A coupon has to be ticked on this event and still usable —
+                             | the controller works that out through CouponAvailability —
+                             | and there has to be something to discount. Offering the box
+                             | on an entry that costs nothing would invite a code that
+                             | could only answer "there is nothing to discount", and would
+                             | spend nothing even if it were accepted.
+                             */
+                            $offeredCoupons = $eventCoupons[$event->id] ?? collect();
+                            $showsVoucher = $offeredCoupons->isNotEmpty()
+                                && (! $event->isFree() || $event->hasAddons());
+                        @endphp
+
+                        @if ($showsVoucher)
+                            <div class="mt-5">
+                                <x-voucher-field
+                                    :scope="\App\Models\Coupon::KIND_EVENT"
+                                    :uid="$event->slug"
+                                    :event-slug="$event->slug" />
+                            </div>
+                        @endif
+
                         {{-- Amount due. Rebuilt by JS as extras are chosen; the
                              figures the server charges come from the database. --}}
                         @if (! $event->isFree() || $event->hasAddons())
@@ -629,6 +668,18 @@
                                         @endunless
                                     </tbody>
                                     <tfoot>
+                                        {{-- Filled in by the script below once a code has
+                                             been checked. A preview of what the server will
+                                             work out again when the form is posted; the
+                                             figure charged never comes from this page. --}}
+                                        <tr class="hidden" data-voucher-line>
+                                            <td class="py-1 text-green-700">
+                                                Voucher
+                                                <span class="font-mono font-semibold" data-voucher-code-label></span>
+                                            </td>
+                                            <td class="py-1 text-right font-semibold text-green-700 tabular-nums whitespace-nowrap w-28" data-voucher-amount></td>
+                                        </tr>
+
                                         <tr class="border-t border-gray-300">
                                             <td class="pt-2 text-base font-bold text-gray-900">Amount due</td>
                                             <td class="pt-2 text-right text-base font-bold text-blue-700 tabular-nums whitespace-nowrap w-28" data-fee-total>
@@ -1060,6 +1111,55 @@
             const lines = summary.querySelector('[data-fee-lines]');
             const totalCell = summary.querySelector('[data-fee-total]');
             const submitLabel = form.querySelector('[data-submit-label]');
+
+            /*
+             | The checked voucher, or null.
+             |
+             | Terms only — percentage or ringgit, and whether a fixed amount is owed
+             | per head — never a finished figure. The discount is worked out against
+             | the running total below so it stays right as extras are ticked, and the
+             | server works it out again from the database when the form is posted.
+             | Nothing here decides what is charged.
+             */
+            let voucher = null;
+
+            const voucherLine = summary.querySelector('[data-voucher-line]');
+            const voucherAmount = summary.querySelector('[data-voucher-amount]');
+            const voucherCodeLabel = summary.querySelector('[data-voucher-code-label]');
+
+            form.querySelectorAll('[data-voucher]').forEach(function (box) {
+                box.addEventListener('voucher:changed', function (event) {
+                    voucher = event.detail;
+                    refreshTotal();
+                });
+            });
+
+            /** What the voucher takes off a charge, in cents, capped at it. */
+            function voucherCents(chargeCents) {
+                if (!voucher || chargeCents <= 0 || !(voucher.value > 0)) {
+                    return 0;
+                }
+
+                if (voucher.type === 'percentage') {
+                    /*
+                     | Never multiplied per head, even on an event that charges extras
+                     | per participant. A percentage is already proportional to what
+                     | the group is charged, so multiplying it again would turn 34%
+                     | into 102%. The same rule, and the same reasoning, as
+                     | CouponDiscount.
+                     */
+                    const percent = Math.min(100, voucher.value);
+
+                    return Math.min(chargeCents, Math.round(chargeCents * percent / 100));
+                }
+
+                const heads = voucher.perHead
+                    ? Math.max(1, form.querySelectorAll('[data-participant]').length)
+                    : 1;
+
+                return Math.min(chargeCents, Math.round(voucher.value * 100) * heads);
+            }
+
             function addonInputs() {
                 return Array.from(form.querySelectorAll('[data-addon-qty], [data-addon-choice]'));
             }
@@ -1221,16 +1321,39 @@
                     lines.appendChild(row);
                 });
 
-                const total = feeCents + addonCents;
+                const charge = feeCents + addonCents;
+                const discount = voucherCents(charge);
+                const total = Math.max(0, charge - discount);
+
+                if (voucherLine) {
+                    voucherLine.classList.toggle('hidden', discount === 0);
+
+                    if (voucherAmount) {
+                        voucherAmount.textContent = '\u2212 ' + money(discount);
+                    }
+
+                    if (voucherCodeLabel) {
+                        voucherCodeLabel.textContent = voucher?.code || '';
+                    }
+                }
 
                 if (totalCell) {
                     totalCell.textContent = money(total);
                 }
 
-                // A registration that costs nothing does not go to a payment page,
-                // so the button must not promise one.
+                /*
+                 | A registration that costs nothing does not go to a payment page,
+                 | so the button must not promise one.
+                 |
+                 | A coupon covering the whole charge is the same position arrived at
+                 | a different way, and it says so: "Free Registration" rather than
+                 | the plain submit wording, because the visitor is being told what
+                 | their code did.
+                 */
                 if (submitLabel) {
-                    submitLabel.textContent = total > 0 ? 'Continue to Payment' : 'Submit Registration';
+                    submitLabel.textContent = total > 0
+                        ? 'Continue to Payment'
+                        : (discount > 0 ? 'Free Registration' : 'Submit Registration');
                 }
 
                 refreshCaps();

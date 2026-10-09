@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Admin\Coupon;
 use App\Http\Controllers\Controller;
 use App\Models\Coupon;
 use App\Models\CouponCode;
-use App\Support\LocalTime;
+use App\Support\LocalDateRange;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -23,8 +23,8 @@ class TrackingController extends Controller
     public function index(Request $request)
     {
         $couponId = (int) $request->query('coupon', 0);
-        $from = $this->parseDate($request->query('from'));
-        $to = $this->parseDate($request->query('to'));
+        $from = LocalDateRange::parse($request->query('from'));
+        $to = LocalDateRange::parse($request->query('to'));
 
         $redemptions = CouponCode::query()
             ->redeemed()
@@ -76,35 +76,15 @@ class TrackingController extends Controller
      | Internals
      * ------------------------------------------------------------------ */
 
-    /**
-     * A picker value normalised to a bare Y-m-d, or null when it is not a date.
-     *
-     * The day it names is a LOCAL day. Which UTC instants that covers is decided
-     * below, not here. A malformed value is dropped rather than guessed at, so a bad
-     * string cannot widen the range to something nobody asked for.
-     */
-    private function parseDate(mixed $value): ?string
-    {
-        if (! is_string($value) || $value === '') {
-            return null;
-        }
-
-        try {
-            return Carbon::parse($value)->toDateString();
-        } catch (\Throwable) {
-            return null;
-        }
-    }
-
     /** The UTC instant a local 'from' day begins at. */
     private function fromInstant(string $date): Carbon
     {
-        return Carbon::parse($date, LocalTime::zone())->startOfDay()->utc();
+        return LocalDateRange::startsAt($date);
     }
 
     /** The UTC instant a local 'to' day ends at, so the range is inclusive. */
     private function toInstant(string $date): Carbon
     {
-        return Carbon::parse($date, LocalTime::zone())->endOfDay()->utc();
+        return LocalDateRange::endsAt($date);
     }
 }

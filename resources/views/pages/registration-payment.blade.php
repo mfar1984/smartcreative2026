@@ -50,7 +50,13 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
                         <div>
-                            <p class="text-base font-bold text-green-900 mb-1">Payment received</p>
+                            {{-- "Nothing left to pay" rather than "Payment received" when a
+                                 coupon covered the whole charge: no money arrived, and
+                                 saying it did would be plainly wrong on a free entry. Both
+                                 are settled, which is what isFree() tells these apart by. --}}
+                            <p class="text-base font-bold text-green-900 mb-1">
+                                {{ $registration->isFree() ? 'Nothing left to pay' : 'Payment received' }}
+                            </p>
                             <p class="text-sm text-green-800">
                                 Your place at {{ $event->title }} is confirmed under reference
                                 <strong>{{ $registration->reference }}</strong>. Keep this reference for your records.
@@ -125,9 +131,22 @@
                     </div>
                 @endif
 
+                {{-- What became of a voucher code. Its own banner, because a coupon
+                     being accepted and the payment going through are different facts. --}}
+                @if (session('coupon_status'))
+                    <div role="status" class="flex items-start gap-3 bg-green-50 border border-green-200 rounded-lg p-5 mb-8">
+                        <svg class="w-6 h-6 shrink-0 text-green-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"/>
+                        </svg>
+                        <p class="text-sm text-green-800">{{ session('coupon_status') }}</p>
+                    </div>
+                @endif
+
                 @if ($errors->any())
                     <div role="alert" class="bg-red-50 border border-red-200 rounded-lg p-5 mb-8">
-                        <p class="text-base font-bold text-red-900 mb-1">Payment could not be started</p>
+                        <p class="text-base font-bold text-red-900 mb-1">
+                            {{ $errors->has('voucher_code') ? 'That coupon was not applied' : 'Payment could not be started' }}
+                        </p>
                         <ul class="text-sm text-red-800 space-y-0.5">
                             @foreach ($errors->all() as $message)
                                 <li>{{ $message }}</li>
@@ -218,6 +237,24 @@
                                         <td class="pt-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">{{ $registration->addonsTotalLabel() }}</td>
                                     </tr>
                                 @endif
+
+                                @if ($registration->hasDiscount())
+                                    {{-- What the coupon took off. The discount is already
+                                         inside the total below; this says where it came from
+                                         rather than being a figure anything subtracts again. --}}
+                                    <tr>
+                                        <td colspan="3" class="pt-3 text-right text-green-700">
+                                            Coupon
+                                            @if ($registration->couponCode)
+                                                <span class="font-mono font-semibold">{{ $registration->couponCode->codeLabel() }}</span>
+                                            @endif
+                                        </td>
+                                        <td class="pt-3 text-right font-semibold text-green-700 tabular-nums whitespace-nowrap">
+                                            &minus; {{ $registration->discountLabel() }}
+                                        </td>
+                                    </tr>
+                                @endif
+
                                 <tr>
                                     <td colspan="3" class="pt-3 text-right text-base font-bold text-gray-900">
                                         {{ $isPaid ? 'Total paid' : 'Total' }}
@@ -244,6 +281,17 @@
                             </tfoot>
                         </table>
                     </div>
+
+                    {{-- ---------------- Voucher code ----------------
+                         Only while nothing has been paid. On a part-paid or settled
+                         entry the field is not drawn and the endpoint refuses, because
+                         reducing a charge below money already received would create a
+                         credit nobody has decided how to refund. --}}
+                    @if ($canApplyCoupon)
+                        <div class="px-6 py-5 border-t border-gray-200">
+                            <x-voucher-apply :action="$couponUrl" noun="registration" />
+                        </div>
+                    @endif
 
                     {{-- ---------------- Action ---------------- --}}
                     <div class="px-6 py-5 border-t border-gray-200 bg-gray-50">
