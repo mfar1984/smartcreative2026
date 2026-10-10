@@ -341,11 +341,12 @@ class EventRequest extends FormRequest
 
         $html = strip_tags($html, self::DESCRIPTION_TAGS);
 
-        // Drop every attribute on every tag...
+        // Drop every attribute on every tag, keeping only the two that are
+        // vetted: an alignment class, and a safe href on an <a>.
         $html = preg_replace_callback('/<([a-z0-9]+)\b[^>]*>/i', function (array $m): string {
             $tag = strtolower($m[1]);
+            $align = $this->vettedAlignClass($m[0]);
 
-            // ...except a vetted href on an <a>.
             if ($tag === 'a' && preg_match('/\bhref\s*=\s*("|\')(.*?)\1/i', $m[0], $href)) {
                 $url = trim(html_entity_decode($href[2], ENT_QUOTES));
 
@@ -356,12 +357,44 @@ class EventRequest extends FormRequest
                 return '<a>';
             }
 
-            return '<' . $tag . '>';
+            return '<' . $tag . $align . '>';
         }, $html);
 
         $html = trim((string) $html);
 
         return $html === '' ? null : $html;
+    }
+
+    /**
+     * The alignment classes the editor is allowed to keep.
+     *
+     * Quill records alignment as a class on the block rather than as a style, so
+     * the class has to survive the attribute scrub for a centred paragraph to
+     * stay centred. Left is absent on purpose: it is the default, and Quill emits
+     * no class for it.
+     */
+    private const ALIGN_CLASSES = [
+        'ql-align-center',
+        'ql-align-right',
+        'ql-align-justify',
+    ];
+
+    /**
+     * The ` class="..."` to re-emit for one opening tag, or an empty string.
+     *
+     * Only names on the allow-list survive, so a class cannot be used to pull in
+     * styling from elsewhere in the page.
+     */
+    private function vettedAlignClass(string $openingTag): string
+    {
+        if (! preg_match('/\bclass\s*=\s*("|\')(.*?)\1/i', $openingTag, $m)) {
+            return '';
+        }
+
+        $names = preg_split('/\s+/', trim(html_entity_decode($m[2], ENT_QUOTES))) ?: [];
+        $kept = array_values(array_intersect($names, self::ALIGN_CLASSES));
+
+        return $kept === [] ? '' : ' class="' . implode(' ', $kept) . '"';
     }
 
     /**

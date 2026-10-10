@@ -107,3 +107,18 @@
     color: #2563eb; /* blue-600 */
     text-decoration: underline;
 }
+
+/* Penjajaran yang dipilih dalam editor. Quill menyimpannya sebagai kelas pada
+   blok, dan stylesheet Quill hanya melukisnya di dalam editor, jadi paparan di
+   luar editor memerlukan rules ini sendiri. Kiri tiada kelas kerana ia lalai. */
+.event-description .ql-align-center {
+    text-align: center;
+}
+
+.event-description .ql-align-right {
+    text-align: right;
+}
+
+.event-description .ql-align-justify {
+    text-align: justify;
+}

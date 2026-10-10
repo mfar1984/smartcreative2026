@@ -1329,6 +1329,9 @@
                     toolbar: [
                         ['bold', 'italic', 'underline'],
                         [{ list: 'ordered' }, { list: 'bullet' }],
+                        // Four separate buttons rather than a dropdown, so the
+                        // current alignment is readable without opening anything.
+                        [{ align: '' }, { align: 'center' }, { align: 'right' }, { align: 'justify' }],
                         ['link'],
                         ['clean'],
                     ],
