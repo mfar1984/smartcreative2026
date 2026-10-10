@@ -108,7 +108,7 @@
         </ul>
 
         @if ($event->description)
-            <p class="text-sm text-gray-600 leading-relaxed mb-5">{{ $event->description }}</p>
+            <div class="event-description text-sm text-gray-600 leading-relaxed mb-5">{!! $event->description !!}</div>
         @endif
 
         {{-- Seat availability --}}

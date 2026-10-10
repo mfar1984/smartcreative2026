@@ -172,8 +172,11 @@
                 </x-admin.field-row>
 
                 <x-admin.field-row label="Description" help="A short paragraph shown on the card." for="description" error="description">
-                    <textarea id="description" name="description" rows="4" maxlength="5000"
-                              class="{{ $input }} resize-y">{{ old('description', $event->description) }}</textarea>
+                    {{-- Basic rich-text editor (Quill). The textarea stays as the real
+                         form field; on submit the editor copies its HTML into it. --}}
+                    <div id="description-editor" data-description-editor></div>
+                    <textarea id="description" name="description" maxlength="20000"
+                              class="hidden">{{ old('description', $event->description) }}</textarea>
                 </x-admin.field-row>
 
                 <x-admin.field-row
@@ -1284,6 +1287,45 @@
             syncVariantCharges(row);
         });
         renumber();
+    })();
+</script>
+
+<script>
+    /* ---------------------------------------------------------------------
+     | Description rich-text editor (Quill, basic toolbar)
+     |
+     | The textarea stays as the real form field. Quill edits a div seeded from
+     | that textarea's value (which carries old()/saved HTML), and on submit its
+     | HTML is copied back into the textarea so the posted value is the HTML.
+     * ------------------------------------------------------------------ */
+    (function () {
+        const holder = document.getElementById('description-editor');
+        const field = document.getElementById('description');
+        const form = document.getElementById('event-form');
+
+        if (!holder || !field || !form || typeof window.Quill === 'undefined') {
+            return;
+        }
+
+        const quill = new window.Quill(holder, {
+            theme: 'snow',
+            modules: {
+                toolbar: [
+                    ['bold', 'italic', 'underline'],
+                    [{ list: 'ordered' }, { list: 'bullet' }],
+                    ['link'],
+                    ['clean'],
+                ],
+            },
+        });
+
+        // Seed from the real field (old() on redraw, or the saved value on edit).
+        quill.clipboard.dangerouslyPasteHTML(field.value);
+
+        form.addEventListener('submit', function () {
+            // An empty editor still reports a stray <p><br></p>; store nothing then.
+            field.value = quill.getText().trim() === '' ? '' : quill.root.innerHTML;
+        });
     })();
 </script>
 @endpush

@@ -356,7 +356,7 @@
 
                     @if ($event->description)
                         <x-admin.field-row label="Description">
-                            <p class="md:pt-2 text-sm text-gray-600 leading-relaxed">{{ $event->description }}</p>
+                            <div class="event-description md:pt-2 text-sm text-gray-600 leading-relaxed">{!! $event->description !!}</div>
                         </x-admin.field-row>
                     @endif
 

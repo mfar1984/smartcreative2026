@@ -57,7 +57,10 @@ class EventRequest extends FormRequest
                 Rule::unique('events', 'slug')->ignore($event?->id),
             ],
             'category' => ['required', 'string', 'max:100'],
-            'description' => ['nullable', 'string', 'max:5000'],
+            // HTML from the basic rich-text editor, already whitelisted in
+            // prepareForValidation(). The cap is higher than plain text because
+            // the tags themselves spend characters.
+            'description' => ['nullable', 'string', 'max:20000'],
             'rules' => ['nullable', 'string', 'max:10000'],
 
             'starts_at' => ['required', 'date'],
@@ -297,8 +300,59 @@ class EventRequest extends FormRequest
             'remove_rules_file' => $this->boolean('remove_rules_file'),
             // An empty fee box means free, not zero-that-was-typed.
             'fee' => $this->input('fee') === '' ? null : $this->input('fee'),
+            // The description arrives as HTML from the editor; strip it down to a
+            // safe whitelist before it is validated or stored.
+            'description' => $this->sanitisedDescription(),
             'addons' => $this->normalisedAddons(),
         ]);
+    }
+
+    /**
+     * Tags the description editor is allowed to produce. Everything else is
+     * stripped. Lists keep their items; a link keeps only its href.
+     */
+    private const DESCRIPTION_TAGS = '<p><br><strong><b><em><i><u><ol><ul><li><a>';
+
+    /**
+     * Reduce the posted description HTML to a safe whitelist.
+     *
+     * strip_tags removes every tag outside the allow-list (so <script>, <iframe>,
+     * <img> and the rest never survive). A regex pass then scrubs what strip_tags
+     * leaves on the surviving tags: on* handlers, style and any attribute other
+     * than a safe href. Hrefs are limited to http/https/mailto and forced to carry
+     * rel="noopener nofollow".
+     */
+    private function sanitisedDescription(): ?string
+    {
+        $html = $this->input('description');
+
+        if (! is_string($html) || trim($html) === '') {
+            return null;
+        }
+
+        $html = strip_tags($html, self::DESCRIPTION_TAGS);
+
+        // Drop every attribute on every tag...
+        $html = preg_replace_callback('/<([a-z0-9]+)\b[^>]*>/i', function (array $m): string {
+            $tag = strtolower($m[1]);
+
+            // ...except a vetted href on an <a>.
+            if ($tag === 'a' && preg_match('/\bhref\s*=\s*("|\')(.*?)\1/i', $m[0], $href)) {
+                $url = trim(html_entity_decode($href[2], ENT_QUOTES));
+
+                if (preg_match('#^(https?:|mailto:)#i', $url)) {
+                    return '<a href="' . htmlspecialchars($url, ENT_QUOTES) . '" rel="noopener nofollow">';
+                }
+
+                return '<a>';
+            }
+
+            return '<' . $tag . '>';
+        }, $html);
+
+        $html = trim((string) $html);
+
+        return $html === '' ? null : $html;
     }
 
     /**
