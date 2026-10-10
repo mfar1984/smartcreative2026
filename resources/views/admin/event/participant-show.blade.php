@@ -3,8 +3,7 @@
 @section('title', 'Participant ' . $registration->reference)
 
 @section('breadcrumb')
-    <a href="{{ route('admin.dashboard') }}" class="hover:text-gray-700 transition">Dashboard</a>
-    <span class="mx-1.5 text-gray-300">/</span>
+    @include('admin.partials.breadcrumb-root')
     <span>Event</span>
     <span class="mx-1.5 text-gray-300">/</span>
     <a href="{{ route('admin.event.participants') }}" class="hover:text-gray-700 transition">Participants</a>
@@ -71,7 +70,10 @@
                 {{ $registration->paymentStatusLabel() }}
             </x-admin.badge>
 
-            @if ($event)
+            {{-- Only for somebody who may actually open an event. A reader holding
+                 participants.view without events.view — a monitoring account — would
+                 otherwise be shown a link that answers 403. --}}
+            @if ($event && $canOpenEvent)
                 <a href="{{ route('admin.event.registration.show', $event) }}"
                    class="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
                     Open Event

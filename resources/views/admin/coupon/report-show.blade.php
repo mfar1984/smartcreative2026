@@ -12,8 +12,7 @@
 @section('title', $coupon->name . ' Report')
 
 @section('breadcrumb')
-    <a href="{{ route('admin.dashboard') }}" class="hover:text-gray-700 transition">Dashboard</a>
-    <span class="mx-1.5 text-gray-300">/</span>
+    @include('admin.partials.breadcrumb-root')
     <span>Coupon</span>
     <span class="mx-1.5 text-gray-300">/</span>
     <a href="{{ route('admin.coupons.report') }}" class="hover:text-gray-700 transition">Report</a>
@@ -44,7 +43,17 @@
              estimated is a guess, actual is money that really came off real
              registrations, and remaining is worked out from the actual. Conflating
              them is how a sponsor's money appears to vanish, so every card says
-             which kind of figure it is holding. --}}
+             which kind of figure it is holding.
+
+             NOT DRAWN FOR A MONITORING ACCOUNT, and that is a correctness decision
+             rather than a cautious one. These four are a sponsorship's money across
+             the WHOLE batch — a batch routinely ticked on several organisers' events
+             — so they are the one set of figures on this screen that cannot honestly
+             be narrowed to one event. Showing a monitor a scoped version would put a
+             different quantity under the word "committed"; showing the real one would
+             hand them another organiser's pledge. So the panel is for staff, and a
+             monitor reads the uses below it, which ARE theirs. --}}
+        @if ($showsSponsorship)
         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-px bg-gray-200 border-b border-gray-200">
             <div class="bg-white px-5 py-4">
                 <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Committed</p>
@@ -136,6 +145,7 @@
                 </p>
             @endif
         </div>
+        @endif
 
         {{-- ---------------- The blocks ---------------- --}}
         @if ($coupon->isUnique())

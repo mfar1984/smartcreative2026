@@ -13,10 +13,15 @@ use Illuminate\Support\Facades\Storage;
 class Event extends Model
 {
     public const STATUS_DRAFT = 'draft';
+
     public const STATUS_OPEN = 'open';
+
     public const STATUS_CLOSING_SOON = 'closing_soon';
+
     public const STATUS_FULL = 'full';
+
     public const STATUS_CLOSED = 'closed';
+
     public const STATUS_CANCELLED = 'cancelled';
 
     /**
@@ -40,7 +45,9 @@ class Event extends Model
     ];
 
     public const MODE_INDIVIDUAL = 'individual';
+
     public const MODE_MANAGER = 'manager';
+
     public const MODE_GROUPING = 'grouping';
 
     public const MODES = [
@@ -148,6 +155,34 @@ class Event extends Model
     public function coupons(): BelongsToMany
     {
         return $this->belongsToMany(Coupon::class)->orderBy('coupons.name');
+    }
+
+    /**
+     * The monitoring accounts that have been given sight of this event.
+     *
+     * The inverse of User::monitoredEvents(). Read by the scope below and by the
+     * Monitoring tab, and by nothing a staff screen runs.
+     */
+    public function monitors(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'monitor_event')->withTimestamps();
+    }
+
+    /**
+     * Narrow a listing to the events this user is allowed to see.
+     *
+     * Only a monitoring account is narrowed, and only to what it has been assigned.
+     * Every existing staff role, and the super admin, pass through untouched, so no
+     * screen any of them use today returns fewer rows than it did. The mirror of
+     * Tournament::scopeVisibleTo, written the same way for the same reason.
+     */
+    public function scopeVisibleTo(Builder $query, ?User $user): Builder
+    {
+        if ($user === null || ! $user->isRestrictedToAssignedEvents()) {
+            return $query;
+        }
+
+        return $query->whereHas('monitors', fn (Builder $monitors) => $monitors->whereKey($user->getKey()));
     }
 
     /**
@@ -299,7 +334,7 @@ class Event extends Model
 
     public function feeLabel(): string
     {
-        return $this->isFree() ? 'Free' : 'RM ' . number_format((float) $this->fee, 2);
+        return $this->isFree() ? 'Free' : 'RM '.number_format((float) $this->fee, 2);
     }
 
     /**
@@ -550,14 +585,14 @@ class Event extends Model
         }
 
         if ($bytes < 1024) {
-            return $bytes . ' B';
+            return $bytes.' B';
         }
 
         if ($bytes < 1024 * 1024) {
-            return round($bytes / 1024) . ' KB';
+            return round($bytes / 1024).' KB';
         }
 
-        return round($bytes / (1024 * 1024), 1) . ' MB';
+        return round($bytes / (1024 * 1024), 1).' MB';
     }
 
     /**
@@ -803,11 +838,11 @@ class Event extends Model
         $today = now()->startOfDay();
 
         if ($this->registration_opens_at && $this->registration_opens_at->gt($today)) {
-            return 'Registration opens on ' . \App\Support\LocalTime::dateWallClock($this->registration_opens_at) . '.';
+            return 'Registration opens on '.\App\Support\LocalTime::dateWallClock($this->registration_opens_at).'.';
         }
 
         if ($this->registration_closes_at && $this->registration_closes_at->lt($today)) {
-            return 'Registration closed on ' . \App\Support\LocalTime::dateWallClock($this->registration_closes_at) . '.';
+            return 'Registration closed on '.\App\Support\LocalTime::dateWallClock($this->registration_closes_at).'.';
         }
 
         if ($this->seats_total > 0 && $this->seatsLeft() <= 0) {

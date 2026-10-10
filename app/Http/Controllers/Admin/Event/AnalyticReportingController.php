@@ -6,19 +6,41 @@ use App\Http\Controllers\Controller;
 use App\Models\ContactMessage;
 use App\Models\Event;
 use App\Models\EventQuestion;
+use App\Support\MonitorScope;
 use Illuminate\Http\Request;
 
 class AnalyticReportingController extends Controller
 {
     public function index(Request $request)
     {
-        // Registration counts are loaded because the fee is charged once per
-        // registration, so revenue cannot be derived from the seat count.
-        $events = Event::query()->withCount('registrations')->get();
+        /*
+         | Registration counts are loaded because the fee is charged once per
+         | registration, so revenue cannot be derived from the seat count.
+         |
+         | visibleTo narrows the whole screen for a monitoring account, and it is the
+         | only change this controller needs: every summary figure, the lifecycle
+         | split, the per-category table and the event list below are all read off this
+         | one collection. An aggregate is the easiest place for a scope to leak,
+         | because a total silently including an event they were never given looks
+         | exactly like a correct total.
+         */
+        $events = Event::query()
+            ->visibleTo($request->user())
+            ->withCount('registrations')
+            ->get();
+
+        /*
+         | Contact enquiries are the organisation's own post bag: they arrive through
+         | the public contact form and belong to no event at all, so there is no way to
+         | attribute one to an assigned event and no reason a third-party observer
+         | should be reading them. The card is dropped for a monitoring account rather
+         | than shown as a zero, which would be a figure asserting there were none.
+         */
+        $showsEnquiries = ! (bool) $request->user()?->isRestrictedToAssignedEvents();
 
         return view('admin.event.reporting', [
-            'questionResponses' => $this->questionResponses(),
-            'summary' => [
+            'questionResponses' => $this->questionResponses($request),
+            'summary' => array_values(array_filter([
                 [
                     'label' => 'Total Events',
                     'value' => $events->count(),
@@ -40,14 +62,14 @@ class AnalyticReportingController extends Controller
                     'accent' => 'purple',
                     'icon' => 'users',
                 ],
-                [
+                $showsEnquiries ? [
                     'label' => 'Contact Enquiries',
                     'value' => ContactMessage::count(),
                     'note' => sprintf('%d in the last 30 days', ContactMessage::where('created_at', '>=', now()->subDays(30))->count()),
                     'accent' => 'amber',
                     'icon' => 'mail',
-                ],
-            ],
+                ] : null,
+            ])),
 
             // Grouped in PHP rather than SQL because the collection is already
             // loaded for the summary figures above.
@@ -79,9 +101,9 @@ class AnalyticReportingController extends Controller
      *
      * @return \Illuminate\Support\Collection<int, EventQuestion>
      */
-    private function questionResponses()
+    private function questionResponses(Request $request)
     {
-        return EventQuestion::query()
+        return MonitorScope::throughRelation(EventQuestion::query(), $request->user(), 'event', 'events.id')
             ->with('event:id,title')
             ->withCount([
                 'answers as answers_total',

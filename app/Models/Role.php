@@ -27,6 +27,13 @@ class Role extends Model
      */
     public const SPONSOR = 'sponsor';
 
+    /**
+     * The monitoring role: a view-only observer confined to the events assigned to
+     * it. A system role, so the slug is fixed and the Monitoring tab assigns it
+     * server side rather than reading one from a form.
+     */
+    public const MONITOR = 'monitor';
+
     protected $fillable = [
         'slug',
         'name',

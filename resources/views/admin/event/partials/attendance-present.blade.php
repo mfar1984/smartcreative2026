@@ -27,6 +27,8 @@
                 <option value="{{ $id }}" @selected((string) $eventId === (string) $id)>{{ $title }}</option>
             @endforeach
         </select>
+
+        @include('admin.event.partials.attendance-export')
     </x-admin.filter-bar>
 
     <div class="overflow-x-auto">

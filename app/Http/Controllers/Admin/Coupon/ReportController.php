@@ -12,6 +12,7 @@ use App\Support\CouponHolderIdentity;
 use App\Support\CouponSponsorship;
 use App\Support\LocalDateRange;
 use App\Support\LocalTime;
+use App\Support\MonitorScope;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\Request;
@@ -50,7 +51,9 @@ class ReportController extends Controller
         $from = LocalDateRange::parse($request->query('from'));
         $to = LocalDateRange::parse($request->query('to'));
 
-        $batches = Coupon::query()
+        $user = $request->user();
+
+        $batches = MonitorScope::couponsOnAssignedEvents(Coupon::query(), $user)
             /*
              | Counted and summed in SQL rather than by asking each row. A page of
              | twenty-five batches would otherwise be a hundred queries, and
@@ -58,13 +61,27 @@ class ReportController extends Controller
              |
              | There is no stock count to make: `quantity` IS the allowance, and what
              | is left is that less the ledger rows counted here.
+             |
+             | Every one of them is narrowed for a monitoring account. A batch ticked on
+             | their event and on two others is shown — the discount really was given on
+             | theirs — but it reports only the uses that belong to them, so the figures
+             | beside the name are their event's and nobody else's.
              */
             ->withCount([
-                'codes as redeemed_total' => fn ($query) => $query->whereNotNull('redeemed_at'),
-                'codes as redeemed_in_range' => fn ($query) => $this->redeemedInRange($query, $from, $to),
+                'codes as redeemed_total' => fn ($query) => MonitorScope::redemptionsOnAssignedEvents(
+                    $query->whereNotNull('redeemed_at'),
+                    $user,
+                ),
+                'codes as redeemed_in_range' => fn ($query) => MonitorScope::redemptionsOnAssignedEvents(
+                    $this->redeemedInRange($query, $from, $to),
+                    $user,
+                ),
             ])
             ->withSum(
-                ['codes as discount_in_range' => fn ($query) => $this->redeemedInRange($query, $from, $to)],
+                ['codes as discount_in_range' => fn ($query) => MonitorScope::redemptionsOnAssignedEvents(
+                    $this->redeemedInRange($query, $from, $to),
+                    $user,
+                )],
                 'discount_amount',
             )
             ->when($kind !== '', fn (Builder $query) => $query->where('kind', $kind))
@@ -85,7 +102,7 @@ class ReportController extends Controller
              | same reason Tracking does it: a figure that only counted the visible
              | rows would disagree with the list the moment anybody turned a page.
              */
-            'summary' => $this->summary($kind, $from, $to),
+            'summary' => $this->summary($kind, $from, $to, $user),
         ]);
     }
 
@@ -111,15 +128,25 @@ class ReportController extends Controller
 
         return view('admin.coupon.report-show', [
             'coupon' => $coupon,
-            'figures' => CouponSponsorship::figures($coupon),
 
-            'allocations' => $this->allocations($coupon),
+            /*
+             | The sponsor's four figures are NOT narrowed, and must not be: they are a
+             | sponsorship's own money across the whole batch, and a monitor's slice of
+             | it would be a different quantity wearing the word "committed". The panel
+             | is drawn only for somebody who may read a sponsorship — see the view —
+             | so a monitoring account is not shown it at all rather than shown a
+             | version of it that means something else.
+             */
+            'figures' => CouponSponsorship::figures($coupon),
+            'showsSponsorship' => ! (bool) $request->user()?->isRestrictedToAssignedEvents(),
+
+            'allocations' => $this->allocations($coupon, $request->user()),
             'codes' => $coupon->isUnique()
-                ? $this->codes($coupon, $allocationId, $state)->paginate(self::CODES_PER_PAGE)->withQueryString()
+                ? $this->codes($coupon, $allocationId, $state, $request->user())->paginate(self::CODES_PER_PAGE)->withQueryString()
                 : null,
             'uses' => $coupon->isUnique()
                 ? null
-                : $this->uses($coupon)->paginate(self::CODES_PER_PAGE)->withQueryString(),
+                : $this->uses($coupon, $request->user())->paginate(self::CODES_PER_PAGE)->withQueryString(),
 
             'allocationId' => $allocationId,
             'state' => $state,
@@ -165,9 +192,15 @@ class ReportController extends Controller
             ? ['Code', 'Handler', 'Handler Email', 'Handler Phone', 'Handler IC', 'Issued', 'Status', 'Used At', 'Used By', 'Reference', 'Discount']
             : ['Code', 'Used At', 'Used By', 'Reference', 'Used On', 'Discount'];
 
+        /*
+         | The same two scoped queries the screen pages, so the file is exactly the set
+         | on screen — which for a monitoring account means its own events' uses and no
+         | others. This is one of the three things a monitor is allowed to do, and an
+         | export that reached past the screen would be the whole leak in one download.
+         */
         $rows = $coupon->isUnique()
-            ? $this->codes($coupon, $allocationId, $state)->with(['allocation.holder', 'redemption.registration', 'redemption.order'])
-            : $this->uses($coupon)->with(['registration', 'order']);
+            ? $this->codes($coupon, $allocationId, $state, $request->user())->with(['allocation.holder', 'redemption.registration', 'redemption.order'])
+            : $this->uses($coupon, $request->user())->with(['registration', 'order']);
 
         return response()->streamDownload(function () use ($rows, $header, $coupon) {
             $handle = fopen('php://output', 'wb');
@@ -204,7 +237,7 @@ class ReportController extends Controller
      *
      * @return \Illuminate\Support\Collection<int, \App\Models\CouponAllocation>
      */
-    private function allocations(Coupon $coupon)
+    private function allocations(Coupon $coupon, ?User $user = null)
     {
         if (! $coupon->isUnique()) {
             return collect();
@@ -213,8 +246,25 @@ class ReportController extends Controller
         return $coupon->allocations()
             ->with(['holder', 'sponsor:id,name'])
             ->withCount([
+                /*
+                 | codes_total is STOCK — how many were minted into this block — so it
+                 | is never narrowed: it is the figure the remaining count is worked out
+                 | from, and a scoped version would make the arithmetic on screen
+                 | unexplainable.
+                 |
+                 | codes_used IS narrowed, because it counts real uses by real people. A
+                 | block spent half on this monitor's event and half on another
+                 | organiser's would otherwise report the other half to them as a
+                 | number, which is the quiet kind of leak an aggregate makes.
+                 */
                 'codes as codes_total',
-                'codes as codes_used' => fn ($query) => $query->whereNotNull('used_at'),
+                'codes as codes_used' => function ($query) use ($user) {
+                    $query->whereNotNull('used_at');
+
+                    if ($user?->isRestrictedToAssignedEvents()) {
+                        $query->whereHas('redemption', fn ($redemption) => MonitorScope::redemptionsOnAssignedEvents($redemption, $user));
+                    }
+                },
             ])
             ->orderBy('id')
             ->get()
@@ -231,15 +281,32 @@ class ReportController extends Controller
     /**
      * @return \Illuminate\Database\Eloquent\Builder<CouponIssuedCode>
      */
-    private function codes(Coupon $coupon, ?int $allocationId, string $state)
+    private function codes(Coupon $coupon, ?int $allocationId, string $state, ?User $user = null)
     {
-        return CouponIssuedCode::query()
+        $query = CouponIssuedCode::query()
             ->where('coupon_id', $coupon->id)
             ->when($allocationId !== null, fn ($query) => $query->where('coupon_allocation_id', $allocationId))
             ->when($state === 'used', fn ($query) => $query->whereNotNull('used_at'))
             ->when($state === 'unused', fn ($query) => $query->whereNull('used_at'))
             ->with(['allocation.holder', 'redemption.registration', 'redemption.order'])
             ->orderBy('id');
+
+        /*
+         | For a monitoring account, a SPENT code is only theirs if it was spent on one
+         | of their events. An unspent one carries no event and no person, so it stays:
+         | it is stock on a batch they can already see, and hiding it would make the
+         | remaining count on the screen above unexplainable.
+         |
+         | Said as one predicate rather than two queries: unused, or used on an
+         | assigned event.
+         */
+        if ($user?->isRestrictedToAssignedEvents()) {
+            $query->where(fn ($outer) => $outer
+                ->whereNull('used_at')
+                ->orWhereHas('redemption', fn ($redemption) => MonitorScope::redemptionsOnAssignedEvents($redemption, $user)));
+        }
+
+        return $query;
     }
 
     /**
@@ -247,12 +314,17 @@ class ReportController extends Controller
      *
      * @return \Illuminate\Database\Eloquent\Builder<CouponCode>
      */
-    private function uses(Coupon $coupon)
+    private function uses(Coupon $coupon, ?User $user = null)
     {
-        return CouponCode::query()
-            ->where('coupon_id', $coupon->id)
-            ->whereNotNull('redeemed_at')
-            ->with(['registration', 'order'])
+        // A use names the person who spent it, so a monitoring account sees only the
+        // uses that happened on an event assigned to them.
+        return MonitorScope::redemptionsOnAssignedEvents(
+            CouponCode::query()
+                ->where('coupon_id', $coupon->id)
+                ->whereNotNull('redeemed_at')
+                ->with(['registration', 'order']),
+            $user,
+        )
             ->orderByDesc('id');
     }
 
@@ -385,9 +457,20 @@ class ReportController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function summary(string $kind, ?string $from, ?string $to): array
+    private function summary(string $kind, ?string $from, ?string $to, ?User $user = null): array
     {
-        $rows = CouponCode::query()
+        /*
+         | Narrowed for a monitoring account, because an unscoped total is the quietest
+         | way a scope leaks: a correct-looking "RM 4,180 given away" over every
+         | organiser's batches, sitting above a list holding only their own, is a
+         | figure nobody would think to question.
+         |
+         | Reached through the registration here rather than through the join, so it is
+         | the same rule the rows use. A monitor's event split is therefore event-only
+         | by construction: a shop redemption belongs to no event and drops out, which
+         | is why the Shop half of their summary reads zero.
+         */
+        $rows = MonitorScope::redemptionsOnAssignedEvents(CouponCode::query(), $user)
             ->join('coupons', 'coupons.id', '=', 'coupon_codes.coupon_id')
             ->when($kind !== '', fn ($query) => $query->where('coupons.kind', $kind))
             ->tap(fn ($query) => $this->redeemedInRange($query, $from, $to))
@@ -402,7 +485,7 @@ class ReportController extends Controller
         $shopGiven = (float) ($rows[Coupon::KIND_SHOP]->given ?? 0);
 
         return [
-            'batches' => Coupon::query()
+            'batches' => MonitorScope::couponsOnAssignedEvents(Coupon::query(), $user)
                 ->when($kind !== '', fn (Builder $query) => $query->where('kind', $kind))
                 ->count(),
 
@@ -425,10 +508,13 @@ class ReportController extends Controller
              | Floored per batch rather than over the sum, so a cap that somehow sits
              | below its own ledger cannot borrow headroom from the batch beside it.
              */
-            'uses_left' => (int) Coupon::query()
+            'uses_left' => (int) MonitorScope::couponsOnAssignedEvents(Coupon::query(), $user)
                 ->where('quantity', '>', 0)
                 ->when($kind !== '', fn (Builder $query) => $query->where('kind', $kind))
-                ->withCount(['codes as spent' => fn ($query) => $query->whereNotNull('redeemed_at')])
+                ->withCount(['codes as spent' => fn ($query) => MonitorScope::redemptionsOnAssignedEvents(
+                    $query->whereNotNull('redeemed_at'),
+                    $user,
+                )])
                 ->get()
                 ->sum(fn (Coupon $batch) => max(0, (int) $batch->quantity - (int) $batch->spent)),
         ];

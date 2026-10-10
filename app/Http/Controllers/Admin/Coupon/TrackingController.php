@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Coupon;
 use App\Models\CouponCode;
 use App\Support\LocalDateRange;
+use App\Support\MonitorScope;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -26,9 +27,24 @@ class TrackingController extends Controller
         $from = LocalDateRange::parse($request->query('from'));
         $to = LocalDateRange::parse($request->query('to'));
 
-        $redemptions = CouponCode::query()
-            ->redeemed()
-            ->with(['coupon', 'registration.event', 'order'])
+        /*
+         | Narrowed to redemptions that happened on an assigned event for a monitoring
+         | account, and left exactly as it was for everybody else.
+         |
+         | The redemption is the right unit to scope here rather than the batch. A
+         | batch is routinely ticked on several events at once, so refusing a shared
+         | one outright would hide a discount really given on the monitor's own event,
+         | while showing the batch unscoped would list another organiser's entrants by
+         | name. Scoping the rows answers both. A SHOP redemption carries an order
+         | rather than a registration, belongs to no event at all, and is therefore not
+         | theirs to read.
+         */
+        $redemptions = MonitorScope::redemptionsOnAssignedEvents(
+            CouponCode::query()
+                ->redeemed()
+                ->with(['coupon', 'registration.event', 'order']),
+            $request->user(),
+        )
             ->when($couponId > 0, fn (Builder $query) => $query->where('coupon_id', $couponId))
 
             /*
@@ -52,7 +68,11 @@ class TrackingController extends Controller
 
         return view('admin.coupon.tracking', [
             'redemptions' => $redemptions,
-            'coupons' => Coupon::query()->orderBy('name')->get(['id', 'name', 'kind']),
+            // The batch picker, narrowed the same way the list is so it cannot offer a
+            // batch the request scope would then refuse.
+            'coupons' => MonitorScope::couponsOnAssignedEvents(Coupon::query(), $request->user())
+                ->orderBy('name')
+                ->get(['id', 'name', 'kind']),
             'couponId' => $couponId,
             'from' => $from,
             'to' => $to,
@@ -63,8 +83,10 @@ class TrackingController extends Controller
              | rather than the page. A badge that only counted the visible twenty-five
              | would disagree with the list the moment anybody turned a page.
              */
-            'discountTotal' => (float) CouponCode::query()
-                ->redeemed()
+            'discountTotal' => (float) MonitorScope::redemptionsOnAssignedEvents(
+                CouponCode::query()->redeemed(),
+                $request->user(),
+            )
                 ->when($couponId > 0, fn (Builder $query) => $query->where('coupon_id', $couponId))
                 ->when($from !== null, fn (Builder $query) => $query->where('redeemed_at', '>=', $this->fromInstant($from)))
                 ->when($to !== null, fn (Builder $query) => $query->where('redeemed_at', '<=', $this->toInstant($to)))

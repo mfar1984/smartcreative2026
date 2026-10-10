@@ -11,8 +11,11 @@ use App\Models\EventAttendance;
 use App\Models\EventParticipant;
 use App\Models\EventParticipantChange;
 use App\Models\EventRegistration;
+use App\Models\User;
 use App\Services\AdminLogger;
 use App\Services\Messaging\StaffAlerts;
+use App\Support\LocalTime;
+use App\Support\MonitorScope;
 use App\Support\ParticipantOptions;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -54,9 +57,7 @@ class AttendanceController extends Controller
     /** Search results shown at the counter before one is opened. */
     private const SEARCH_LIMIT = 12;
 
-    public function __construct(private readonly StaffAlerts $alerts)
-    {
-    }
+    public function __construct(private readonly StaffAlerts $alerts) {}
 
     public function index(Request $request)
     {
@@ -66,25 +67,191 @@ class AttendanceController extends Controller
         $eventId = trim((string) $request->query('event'));
 
         $data = [
-            'tabs' => $this->tabsWithCounts(),
+            'tabs' => $this->tabsWithCounts($request->user()),
             'activeTab' => $tab,
             'definition' => self::TABS[$tab],
-            'events' => Event::query()->whereHas('registrations')->orderByDesc('starts_at')->pluck('title', 'id')->all(),
+
+            // visibleTo narrows the picker to a monitoring account's own events, so it
+            // cannot offer one the request scope would then refuse.
+            'events' => Event::query()
+                ->visibleTo($request->user())
+                ->whereHas('registrations')
+                ->orderByDesc('starts_at')
+                ->pluck('title', 'id')
+                ->all(),
+
             'search' => $search,
             'eventId' => $eventId,
             'isFiltered' => $search !== '' || $eventId !== '',
             'canUpdate' => $request->user()->hasPermission('attendance.update'),
             'canRemove' => $request->user()->hasPermission('attendance.remove-player'),
+
+            /*
+             | The one action on this screen a monitoring account is allowed, so the
+             | header button is drawn from the permissions rather than from the role:
+             | both are needed, because the file carries identity card numbers.
+             */
+            'canExport' => $request->user()->hasPermission('attendance.view')
+                && $request->user()->hasPermission('participants.export'),
+
             'genders' => ParticipantOptions::GENDERS,
             'races' => ParticipantOptions::RACES,
         ];
 
         return view('admin.event.attendance', $data + match ($tab) {
-            'player-change' => $this->playerChangeData($search, $eventId),
-            'present' => $this->presentData($search, $eventId),
-            'absent' => $this->absentData($search, $eventId),
+            'player-change' => $this->playerChangeData($request, $search, $eventId),
+            'present' => $this->presentData($request, $search, $eventId),
+            'absent' => $this->absentData($request, $search, $eventId),
             default => $this->counterData($request, $search, $eventId),
         });
+    }
+
+    /**
+     * The attendance list as a UTF-8 CSV: who is expected, and who actually arrived.
+     *
+     * ONE ROW IS ONE PERSON, the same unit as the Participants export, which is what
+     * makes the two files siblings rather than two different ideas of a list. A squad
+     * of seven is seven rows, because arriving is something a person does and not
+     * something an entry does.
+     *
+     * Scoped to one event, like the two exports beside it, and refused without one for
+     * the same reason: a single file holding every identity card number this
+     * organisation has ever collected is a different risk from one event's, so the
+     * request is turned down rather than quietly widened.
+     *
+     * Carries the same filters as the screen it was pressed from, so the file matches
+     * what was on display. A button that exports a different set from the one being
+     * looked at is a button that surprises people.
+     *
+     * Behind attendance.view AND participants.export: the screen's own data, plus the
+     * slug that already governs carrying competitors' card numbers out of the building.
+     * Available to staff as much as to a monitoring account — a screen with an export
+     * for a third-party observer and none for the people working the door would be
+     * absurd.
+     */
+    public function export(Request $request)
+    {
+        $eventId = trim((string) $request->query('event'));
+
+        if ($eventId === '') {
+            return back()->with('error', 'Choose an event before exporting. One file covering every event would carry more personal data than any single job needs.');
+        }
+
+        /*
+         | visibleTo as well as the request scope. The middleware already refuses an
+         | unassigned ?event=, and this says the same thing at the query that writes
+         | the file, because an export that reached past its scope would be the whole
+         | leak in one download.
+         */
+        /** @var Event $event */
+        $event = Event::query()
+            ->visibleTo($request->user())
+            ->whereKey($eventId)
+            ->firstOrFail();
+
+        $search = trim((string) $request->query('q'));
+
+        $people = EventParticipant::query()
+            ->whereHas('registration', fn (Builder $query) => $query
+                ->where('event_id', $event->id)
+                ->where('status', '!=', EventRegistration::STATUS_CANCELLED))
+            ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
+                $inner->where('full_name', 'like', "%{$search}%")
+                    ->orWhere('ic_number', 'like', "%{$search}%")
+                    ->orWhereHas('registration', fn (Builder $reg) => $reg
+                        ->where('team_name', 'like', "%{$search}%")
+                        ->orWhere('reference', 'like', "%{$search}%"));
+            }))
+            // By entry first so a squad's players sit together the way they arrive at
+            // the desk, then by id, which is the order they were entered in.
+            ->orderBy('event_registration_id')
+            ->orderBy('id');
+
+        $header = [
+            'Reference', 'Team / Entry', 'Mode',
+            'Full Name', 'Identity Card', 'Role',
+            'Telephone', 'Email',
+            'Attendance', 'Checked In At', 'Identity Card Checked', 'Notes', 'Recorded By',
+            'Entry Status', 'Payment Status',
+        ];
+
+        AdminLogger::activity(
+            'attendance.export',
+            sprintf('Exported the attendance list for %s.', $event->title),
+        );
+
+        return response()->streamDownload(function () use ($people, $header) {
+            $handle = fopen('php://output', 'wb');
+
+            // Byte order mark, for the reason the Participants export has one:
+            // Malaysian names carry characters Excel reads as mojibake without it,
+            // which ruins the file for anybody who opens it by double clicking.
+            fwrite($handle, "\xEF\xBB\xBF");
+
+            fputcsv($handle, $header);
+
+            /*
+             | Chunked with the relations loaded per chunk rather than up front. A
+             | popular event is hundreds of people, and holding all of them plus their
+             | entries and arrival records in memory to write a file is needless.
+             */
+            $people
+                ->with(['registration', 'attendance.recordedBy'])
+                ->chunk(100, function ($rows) use ($handle) {
+                    foreach ($rows as $person) {
+                        fputcsv($handle, $this->attendanceRow($person));
+                    }
+                });
+
+            fclose($handle);
+        }, sprintf('attendance-%s-%s.csv', $event->slug, now()->format('Ymd-His')), [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
+    }
+
+    /**
+     * One person as a row of cells, in the same order as the header.
+     *
+     * @return array<int, string>
+     */
+    private function attendanceRow(EventParticipant $person): array
+    {
+        $registration = $person->registration;
+        $attendance = $person->attendance;
+
+        return [
+            (string) ($registration?->reference ?? ''),
+            (string) ($registration?->team_name ?? ''),
+
+            // The stored word, capitalised, which is what the Mode column on the
+            // screen shows. Event::MODES holds a sentence meant for a dropdown and
+            // would be unreadable in a spreadsheet cell.
+            ucfirst((string) ($registration?->mode ?? '')),
+
+            $person->full_name,
+
+            // In full, not masked. Somebody at the counter checks this against a card
+            // in a person's hand, and half a number cannot be checked.
+            (string) $person->ic_number,
+
+            $person->roleLabel(),
+
+            (string) ($person->phone ?? ''),
+            (string) ($person->email ?? ''),
+
+            $attendance === null ? 'Absent' : 'Present',
+
+            // Empty rather than the screen's em dash: a spreadsheet column wants a
+            // blank cell it can sort, not a character that reads as data.
+            $attendance === null ? '' : LocalTime::format($attendance->checked_in_at),
+
+            $attendance === null ? '' : ($attendance->ic_verified ? 'Yes' : 'No'),
+            (string) ($attendance->notes ?? ''),
+            (string) ($attendance?->recordedBy?->name ?? ''),
+
+            (string) ($registration?->statusLabel() ?? ''),
+            (string) ($registration?->paymentStatusLabel() ?? ''),
+        ];
     }
 
     /**
@@ -328,7 +495,7 @@ class AttendanceController extends Controller
             '%s removed from %s and the seat released.%s',
             $name,
             $registration->displayName(),
-            $shortfall === null ? '' : ' ' . $shortfall,
+            $shortfall === null ? '' : ' '.$shortfall,
         ));
     }
 
@@ -348,8 +515,17 @@ class AttendanceController extends Controller
         $open = null;
 
         if (filled($openId)) {
-            $open = EventRegistration::query()
-                ->with($this->counterRelations())
+            /*
+             | Scoped as well as refused upstream. ScopeEventToMonitor reads
+             | ?registration= and turns an unassigned one away, and this says the same
+             | thing at the query: the entry opened here draws its people, their card
+             | numbers and its payment state onto the page, so it is the single most
+             | revealing thing on the screen.
+             */
+            $open = MonitorScope::byColumn(
+                EventRegistration::query()->with($this->counterRelations()),
+                $request->user(),
+            )
                 ->whereKey($openId)
                 ->first();
         }
@@ -359,8 +535,10 @@ class AttendanceController extends Controller
         $results = collect();
 
         if ($search !== '') {
-            $results = EventRegistration::query()
-                ->with(['event', 'participants.attendance'])
+            $results = MonitorScope::byColumn(
+                EventRegistration::query()->with(['event', 'participants.attendance']),
+                $request->user(),
+            )
                 ->when($eventId !== '', fn (Builder $query) => $query->where('event_id', $eventId))
                 ->where(function (Builder $query) use ($search) {
                     $query->where('team_name', 'like', "%{$search}%")
@@ -409,7 +587,7 @@ class AttendanceController extends Controller
         return [
             'event',
             'participants' => fn ($query) => $query
-                ->orderByRaw("CASE WHEN role = '" . ParticipantOptions::ROLE_MANAGER . "' THEN 0 ELSE 1 END")
+                ->orderByRaw("CASE WHEN role = '".ParticipantOptions::ROLE_MANAGER."' THEN 0 ELSE 1 END")
                 ->orderBy('id'),
             'participants.attendance.recordedBy',
             'participants.changes',
@@ -424,11 +602,14 @@ class AttendanceController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function playerChangeData(string $search, string $eventId): array
+    private function playerChangeData(Request $request, string $search, string $eventId): array
     {
         return [
-            'changes' => EventParticipantChange::query()
-                ->with(['event', 'registration', 'fromRegistration', 'changedBy'])
+            'changes' => MonitorScope::byColumn(
+                EventParticipantChange::query()
+                    ->with(['event', 'registration', 'fromRegistration', 'changedBy']),
+                $request->user(),
+            )
                 ->when($eventId !== '', fn (Builder $query) => $query->where('event_id', $eventId))
                 ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
                     $inner->where('previous_name', 'like', "%{$search}%")
@@ -448,11 +629,14 @@ class AttendanceController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function presentData(string $search, string $eventId): array
+    private function presentData(Request $request, string $search, string $eventId): array
     {
         return [
-            'present' => EventAttendance::query()
-                ->with(['event', 'registration', 'participant', 'recordedBy'])
+            'present' => MonitorScope::byColumn(
+                EventAttendance::query()
+                    ->with(['event', 'registration', 'participant', 'recordedBy']),
+                $request->user(),
+            )
                 ->when($eventId !== '', fn (Builder $query) => $query->where('event_id', $eventId))
                 ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
                     $inner->whereHas('participant', fn (Builder $person) => $person
@@ -471,10 +655,10 @@ class AttendanceController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function absentData(string $search, string $eventId): array
+    private function absentData(Request $request, string $search, string $eventId): array
     {
         return [
-            'absent' => $this->absentQuery($eventId)
+            'absent' => $this->absentQuery($eventId, $request->user())
                 ->with(['registration.event'])
                 ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
                     $inner->where('full_name', 'like', "%{$search}%")
@@ -495,10 +679,17 @@ class AttendanceController extends Controller
      * Cancelled registrations are excluded: nobody is waiting for them, so
      * listing them as absent would overstate the gap.
      */
-    private function absentQuery(string $eventId): Builder
+    private function absentQuery(string $eventId, ?User $user = null): Builder
     {
-        return EventParticipant::query()
-            ->whereDoesntHave('attendance')
+        /*
+         | A person holds no event of its own, so the scope goes through the entry —
+         | the same relation the cancelled filter below already reaches through.
+         */
+        return MonitorScope::throughRelation(
+            EventParticipant::query()->whereDoesntHave('attendance'),
+            $user,
+            'registration',
+        )
             ->whereHas('registration', function (Builder $query) use ($eventId) {
                 $query->where('status', '!=', EventRegistration::STATUS_CANCELLED)
                     ->when($eventId !== '', fn (Builder $inner) => $inner->where('event_id', $eventId));
@@ -600,13 +791,20 @@ class AttendanceController extends Controller
     /**
      * @return array<string, array<string, mixed>>
      */
-    private function tabsWithCounts(): array
+    private function tabsWithCounts(?User $user = null): array
     {
+        /*
+         | Counted under the same scope as the lists they badge. A monitoring account
+         | being shown "412 present" over every event in the system, above a list
+         | holding its own event's nine, would be an aggregate quietly reporting
+         | somebody else's day — the shape of mistake the dashboard tournaments count
+         | already made once.
+         */
         $counts = [
             'attendance' => null,
-            'player-change' => EventParticipantChange::query()->count(),
-            'present' => EventAttendance::query()->count(),
-            'absent' => $this->absentQuery('')->count(),
+            'player-change' => MonitorScope::byColumn(EventParticipantChange::query(), $user)->count(),
+            'present' => MonitorScope::byColumn(EventAttendance::query(), $user)->count(),
+            'absent' => $this->absentQuery('', $user)->count(),
         ];
 
         $tabs = [];

@@ -590,6 +590,175 @@
                 </div>
             </div>
         @endif
+
+        {{-- ==================== Monitoring ==================== --}}
+        @if ($activeTab === 'monitoring')
+            <div class="flex flex-wrap items-start justify-between gap-4 mb-5">
+                <x-admin.section-intro
+                    title="Monitoring"
+                    description="Outside organisers who watch the events assigned to them. They sign in at the same /admin/login and can only look."
+                    icon="clipboard"
+                    class="mb-0" />
+
+                @if ($canCreateMonitor)
+                    <button type="button" data-open-dialog="monitor-create" class="{{ $addButton }}">
+                        <x-admin.icon name="plus" class="w-4 h-4" />
+                        Add Monitoring
+                    </button>
+                @endif
+            </div>
+
+            {{-- Said here because the Events column is what the account can see, and
+                 one assigned to nothing sees nothing at all. --}}
+            <p class="text-xs text-gray-500 mb-4">
+                Which events an account may watch is ticked on its own form below. It reads those events'
+                participants, attendance, collection, reporting and coupons &mdash; and nothing else in the
+                system. The role is set automatically and is view only, apart from exporting those events'
+                own lists.
+            </p>
+
+            <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <x-admin.filter-bar
+                    :action="route('admin.settings.users')"
+                    :reset="$isFiltered ? route('admin.settings.users', ['tab' => 'monitoring']) : null">
+
+                    <input type="hidden" name="tab" value="monitoring">
+
+                    <div class="relative flex-1 min-w-56">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">
+                            <x-admin.icon name="search" class="w-4 h-4" />
+                        </span>
+                        <label for="q" class="sr-only">Search monitoring accounts</label>
+                        <input type="search" id="q" name="q" value="{{ $search }}"
+                               placeholder="Search name, username or email..."
+                               class="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                    </div>
+
+                    <label for="status" class="sr-only">Status</label>
+                    <select id="status" name="status"
+                            class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                        <option value="">All Status</option>
+                        <option value="active" @selected($status === 'active')>Active</option>
+                        <option value="inactive" @selected($status === 'inactive')>Inactive</option>
+                    </select>
+                </x-admin.filter-bar>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-left">
+                            <tr>
+                                <th scope="col" class="{{ $head }} w-12">#</th>
+                                <th scope="col" class="{{ $head }}">Monitoring</th>
+                                <th scope="col" class="{{ $head }}">Email</th>
+                                <th scope="col" class="{{ $head }}">Status</th>
+                                <th scope="col" class="{{ $head }}">Events Watched</th>
+                                <th scope="col" class="{{ $head }} text-center">Actions</th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-gray-100">
+                            @forelse ($monitors as $index => $row)
+                                <tr class="hover:bg-blue-50/40 align-top">
+                                    <td class="px-6 py-3 text-gray-500">{{ $monitors->firstItem() + $index }}</td>
+
+                                    <td class="px-6 py-3">
+                                        <div class="flex items-center gap-3">
+                                            <span class="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center text-xs font-bold shrink-0" aria-hidden="true">
+                                                {{ strtoupper(substr($row->name, 0, 1)) }}
+                                            </span>
+                                            <div class="min-w-0">
+                                                <span class="block font-semibold text-gray-900 truncate">{{ $row->name }}</span>
+                                                <code class="block text-xs text-gray-500 truncate">{{ $row->username }}</code>
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    <td class="px-6 py-3 text-gray-600">{{ $row->email }}</td>
+
+                                    <td class="px-6 py-3 whitespace-nowrap">
+                                        @if ($row->is_active)
+                                            <x-admin.badge tone="green" :dot="true">Active</x-admin.badge>
+                                        @else
+                                            <x-admin.badge tone="gray" :dot="true">Inactive</x-admin.badge>
+                                        @endif
+                                    </td>
+
+                                    {{-- The account's whole field of view. This column is the
+                                         reason somebody opens this tab. --}}
+                                    <td class="px-6 py-3">
+                                        @forelse ($row->monitoredEvents as $event)
+                                            <span class="block text-xs text-gray-700">{{ $event->title }}</span>
+                                        @empty
+                                            <span class="text-xs text-gray-400">&mdash; Not assigned yet, so it sees nothing</span>
+                                        @endforelse
+                                    </td>
+
+                                    <td class="px-6 py-3 whitespace-nowrap">
+                                        <div class="flex items-center justify-center gap-1">
+                                            @if ($canUpdateMonitor)
+                                                <button type="button" data-open-dialog="monitor-edit-{{ $row->id }}"
+                                                        class="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition"
+                                                        title="Edit {{ $row->name }}" aria-label="Edit {{ $row->name }}">
+                                                    <x-admin.icon name="pencil" class="w-4 h-4" />
+                                                </button>
+                                            @endif
+
+                                            @if ($canDeleteMonitor)
+                                                @php
+                                                    $watched = $row->monitoredEvents->count();
+                                                    $confirm = $watched === 0
+                                                        ? sprintf('Delete %s? This cannot be undone.', $row->name)
+                                                        : sprintf(
+                                                            'Delete %s? They are watching %d event(s), which are otherwise untouched. This cannot be undone.',
+                                                            $row->name,
+                                                            $watched,
+                                                        );
+                                                @endphp
+
+                                                <form action="{{ route('admin.settings.users.monitors.destroy', $row) }}" method="POST"
+                                                      onsubmit="return confirm('{{ addslashes($confirm) }}');">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <button type="submit"
+                                                            class="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
+                                                            title="Delete {{ $row->name }}" aria-label="Delete {{ $row->name }}">
+                                                        <x-admin.icon name="trash" class="w-4 h-4" />
+                                                    </button>
+                                                </form>
+                                            @endif
+
+                                            @if (! $canUpdateMonitor && ! $canDeleteMonitor)
+                                                <span class="text-xs text-gray-400">View only</span>
+                                            @endif
+                                        </div>
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="6" class="px-6 py-12 text-center text-sm text-gray-500">
+                                        @if ($isFiltered)
+                                            No monitoring accounts match the current filters.
+                                        @else
+                                            No monitoring accounts yet.
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="px-6 py-3.5 border-t border-gray-200">
+                    @if ($monitors->hasPages())
+                        {{ $monitors->links() }}
+                    @else
+                        <p class="text-xs text-gray-500">
+                            Showing {{ $monitors->total() }} {{ Str::plural('account', $monitors->total()) }}
+                        </p>
+                    @endif
+                </div>
+            </div>
+        @endif
     </x-admin.settings-shell>
 
     {{-- ===================== Create dialog: user ===================== --}}
@@ -1042,6 +1211,427 @@
             </div>
         @endforeach
     @endif
+
+    {{-- ===================== Create dialog: monitoring ===================== --}}
+    @if ($activeTab === 'monitoring' && $canCreateMonitor)
+        <div id="monitor-create" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="monitor-create-title">
+            <div class="fixed inset-0 bg-gray-900/50" data-close-dialog></div>
+
+            <div class="relative min-h-full flex items-start justify-center p-4">
+                <div class="relative w-full max-w-lg bg-white rounded-xl shadow-xl my-8">
+                    <div class="flex items-center justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                        <h2 id="monitor-create-title" class="text-base font-bold text-gray-900">Add Monitoring</h2>
+                        <button type="button" data-close-dialog class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition" aria-label="Close">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <form action="{{ route('admin.settings.users.monitors.store') }}" method="POST" class="p-6 space-y-4">
+                        @csrf
+
+                        <div>
+                            <label for="monitor-create-name" class="{{ $label }}">Organiser Name <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="text" id="monitor-create-name" name="name" required maxlength="120" value="{{ old('name') }}" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">An association, a department or a person. This is what the account is called on screen.</p>
+                        </div>
+
+                        <div>
+                            <label for="monitor-create-username" class="{{ $label }}">Username <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="text" id="monitor-create-username" name="username" required maxlength="120" value="{{ old('username') }}" autocomplete="off" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">What they sign in with at /admin/login.</p>
+                        </div>
+
+                        <div>
+                            <label for="monitor-create-email" class="{{ $label }}">Email <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="email" id="monitor-create-email" name="email" required maxlength="190" value="{{ old('email') }}" class="{{ $input }}">
+                        </div>
+
+                        <div>
+                            <label for="monitor-create-password" class="{{ $label }}">Password <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="password" id="monitor-create-password" name="password" required autocomplete="new-password" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">At least 10 characters, with letters, numbers and a symbol.</p>
+                        </div>
+
+                        <div>
+                            <label for="monitor-create-password-confirm" class="{{ $label }}">Confirm Password <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="password" id="monitor-create-password-confirm" name="password_confirmation" required autocomplete="new-password" class="{{ $input }}">
+                        </div>
+
+                        {{-- Which events this account may see. The whole of its field of
+                             view, so it is stated as plainly as possible: nothing ticked
+                             means nothing visible. --}}
+                        <fieldset>
+                            <legend class="{{ $label }}">Events This Account May Watch</legend>
+
+                            @if ($assignableEvents->isEmpty())
+                                <p class="text-xs text-gray-500">
+                                    No events exist yet. Create one first, then come back and tick it here.
+                                </p>
+                            @else
+                                <div class="max-h-48 overflow-y-auto rounded-lg border border-gray-300 divide-y divide-gray-100">
+                                    @foreach ($assignableEvents as $event)
+                                        <label for="monitor-create-event-{{ $event->id }}"
+                                               class="flex items-start gap-2.5 px-3.5 py-2.5 hover:bg-gray-50 cursor-pointer">
+                                            <input type="checkbox" id="monitor-create-event-{{ $event->id }}"
+                                                   name="events[]" value="{{ $event->id }}"
+                                                   @checked(in_array($event->id, (array) old('events', [])))
+                                                   class="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                            <span class="min-w-0">
+                                                <span class="block text-sm text-gray-900">{{ $event->title }}</span>
+                                                <span class="block text-xs text-gray-500">
+                                                    {{ $event->starts_at?->format('d M Y') ?? 'No date' }} &middot; {{ \App\Models\Event::STATUSES[$event->status] ?? $event->status }}
+                                                </span>
+                                            </span>
+                                        </label>
+                                    @endforeach
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1.5">
+                                    Tick nothing and the account sees nothing until somebody comes back and ticks one.
+                                </p>
+                            @endif
+                        </fieldset>
+
+                        <x-admin.toggle name="is_active" id="monitor-create-active" :checked="old('is_active', true)" label="Account is active" />
+
+                        <p class="text-xs text-gray-500">
+                            The monitoring role is assigned automatically and is view only: no create, no edit,
+                            no delete, no check-in, no handover, no payment and no messages. The only thing it
+                            can do is export the lists of the events ticked above.
+                        </p>
+
+                        <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                            <button type="button" data-close-dialog class="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                Cancel
+                            </button>
+                            <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">
+                                Create Monitoring
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    {{-- ===================== Edit dialogs: monitoring ===================== --}}
+    @if ($activeTab === 'monitoring' && $canUpdateMonitor)
+        @foreach ($monitors as $row)
+            @php $assigned = $row->monitoredEvents->pluck('id')->all(); @endphp
+
+            <div id="monitor-edit-{{ $row->id }}" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="monitor-edit-title-{{ $row->id }}">
+                <div class="fixed inset-0 bg-gray-900/50" data-close-dialog></div>
+
+                <div class="relative min-h-full flex items-start justify-center p-4">
+                    <div class="relative w-full max-w-lg bg-white rounded-xl shadow-xl my-8">
+                        <div class="flex items-center justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                            <h2 id="monitor-edit-title-{{ $row->id }}" class="text-base font-bold text-gray-900">Edit {{ $row->name }}</h2>
+                            <button type="button" data-close-dialog class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition" aria-label="Close">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <form action="{{ route('admin.settings.users.monitors.update', $row) }}" method="POST" class="p-6 space-y-4">
+                            @csrf
+                            @method('PUT')
+
+                            <div>
+                                <label for="monitor-edit-name-{{ $row->id }}" class="{{ $label }}">Organiser Name <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="text" id="monitor-edit-name-{{ $row->id }}" name="name" required maxlength="120" value="{{ $row->name }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="monitor-edit-username-{{ $row->id }}" class="{{ $label }}">Username <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="text" id="monitor-edit-username-{{ $row->id }}" name="username" required maxlength="120" value="{{ $row->username }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="monitor-edit-email-{{ $row->id }}" class="{{ $label }}">Email <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="email" id="monitor-edit-email-{{ $row->id }}" name="email" required maxlength="190" value="{{ $row->email }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="monitor-edit-password-{{ $row->id }}" class="{{ $label }}">New Password</label>
+                                <input type="password" id="monitor-edit-password-{{ $row->id }}" name="password" autocomplete="new-password" class="{{ $input }}">
+                                <p class="text-xs text-gray-500 mt-1">Leave blank to keep the current password.</p>
+                            </div>
+
+                            <div>
+                                <label for="monitor-edit-password-confirm-{{ $row->id }}" class="{{ $label }}">Confirm New Password</label>
+                                <input type="password" id="monitor-edit-password-confirm-{{ $row->id }}" name="password_confirmation" autocomplete="new-password" class="{{ $input }}">
+                            </div>
+
+                            <fieldset>
+                                <legend class="{{ $label }}">Events This Account May Watch</legend>
+
+                                @if ($assignableEvents->isEmpty())
+                                    <p class="text-xs text-gray-500">No events exist yet.</p>
+                                @else
+                                    <div class="max-h-48 overflow-y-auto rounded-lg border border-gray-300 divide-y divide-gray-100">
+                                        @foreach ($assignableEvents as $event)
+                                            <label for="monitor-edit-{{ $row->id }}-event-{{ $event->id }}"
+                                                   class="flex items-start gap-2.5 px-3.5 py-2.5 hover:bg-gray-50 cursor-pointer">
+                                                <input type="checkbox" id="monitor-edit-{{ $row->id }}-event-{{ $event->id }}"
+                                                       name="events[]" value="{{ $event->id }}"
+                                                       @checked(in_array($event->id, $assigned))
+                                                       class="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                                <span class="min-w-0">
+                                                    <span class="block text-sm text-gray-900">{{ $event->title }}</span>
+                                                    <span class="block text-xs text-gray-500">
+                                                        {{ $event->starts_at?->format('d M Y') ?? 'No date' }} &middot; {{ \App\Models\Event::STATUSES[$event->status] ?? $event->status }}
+                                                    </span>
+                                                </span>
+                                            </label>
+                                        @endforeach
+                                    </div>
+                                    {{-- Said plainly because unticking is how sight is taken
+                                         away, and it takes effect the moment this is saved. --}}
+                                    <p class="text-xs text-gray-500 mt-1.5">
+                                        Unticking an event removes this account's sight of it as soon as you save.
+                                    </p>
+                                @endif
+                            </fieldset>
+
+                            <x-admin.toggle
+                                name="is_active"
+                                id="monitor-edit-active-{{ $row->id }}"
+                                :checked="$row->is_active"
+                                label="Account is active" />
+
+                            <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                                <button type="button" data-close-dialog class="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                    Cancel
+                                </button>
+                                <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        @endforeach
+    @endif
+
+    {{-- ===================== Create dialog: monitoring ===================== --}}
+    @if ($activeTab === 'monitoring' && $canCreateMonitor)
+        <div id="monitor-create" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="monitor-create-title">
+            <div class="fixed inset-0 bg-gray-900/50" data-close-dialog></div>
+
+            <div class="relative min-h-full flex items-start justify-center p-4">
+                <div class="relative w-full max-w-lg bg-white rounded-xl shadow-xl my-8">
+                    <div class="flex items-center justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                        <h2 id="monitor-create-title" class="text-base font-bold text-gray-900">Add Monitoring</h2>
+                        <button type="button" data-close-dialog class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition" aria-label="Close">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <form action="{{ route('admin.settings.users.monitors.store') }}" method="POST" class="p-6 space-y-4">
+                        @csrf
+
+                        <div>
+                            <label for="monitor-create-name" class="{{ $label }}">Organiser Name <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="text" id="monitor-create-name" name="name" required maxlength="120" value="{{ old('name') }}" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">A company, an association or a person. This is what the account is called on screen.</p>
+                        </div>
+
+                        <div>
+                            <label for="monitor-create-username" class="{{ $label }}">Username <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="text" id="monitor-create-username" name="username" required maxlength="120" value="{{ old('username') }}" autocomplete="off" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">What they sign in with at /admin/login.</p>
+                        </div>
+
+                        <div>
+                            <label for="monitor-create-email" class="{{ $label }}">Email <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="email" id="monitor-create-email" name="email" required maxlength="190" value="{{ old('email') }}" class="{{ $input }}">
+                        </div>
+
+                        <div>
+                            <label for="monitor-create-password" class="{{ $label }}">Password <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="password" id="monitor-create-password" name="password" required autocomplete="new-password" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">At least 10 characters, with letters, numbers and a symbol.</p>
+                        </div>
+
+                        <div>
+                            <label for="monitor-create-password-confirm" class="{{ $label }}">Confirm Password <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="password" id="monitor-create-password-confirm" name="password_confirmation" required autocomplete="new-password" class="{{ $input }}">
+                        </div>
+
+                        {{-- Which events this account may see, which is the whole of what
+                             it can do. A tick list rather than a select, so the answer is
+                             readable at a glance and several events are one gesture —
+                             the same shape the tournament form uses for handlers. --}}
+                        <fieldset class="border-t border-gray-100 pt-4">
+                            <legend class="{{ $label }}">Events They May Watch</legend>
+
+                            <p class="text-xs text-gray-500 mb-2">
+                                They see Participants, Attendance, Collection, Analytic Reporting and the Coupon
+                                screens for these events only, including identity card numbers and payment figures,
+                                and can export those lists. Nothing else is visible and nothing can be changed.
+                            </p>
+
+                            @forelse ($assignableEvents as $event)
+                                <label for="monitor-create-event-{{ $event->id }}"
+                                       class="flex items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-gray-50 transition cursor-pointer">
+                                    <input type="checkbox"
+                                           id="monitor-create-event-{{ $event->id }}"
+                                           name="events[]"
+                                           value="{{ $event->id }}"
+                                           @checked(in_array($event->id, old('events', []), false))
+                                           class="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                    <span class="min-w-0">
+                                        <span class="block text-sm text-gray-900 truncate">{{ $event->title }}</span>
+                                        <span class="block text-xs text-gray-500">
+                                            {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
+                                            · {{ \App\Models\Event::STATUSES[$event->status] ?? $event->status }}
+                                        </span>
+                                    </span>
+                                </label>
+                            @empty
+                                <p class="text-xs text-gray-500">
+                                    No events exist yet. The account can be created now and the events ticked later.
+                                </p>
+                            @endforelse
+                        </fieldset>
+
+                        <x-admin.toggle name="is_active" id="monitor-create-active" :checked="old('is_active', true)" label="Account is active" />
+
+                        <p class="text-xs text-gray-500">
+                            The monitoring role is assigned automatically and is view only. An account with no
+                            event ticked can see nothing until one is.
+                        </p>
+
+                        <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                            <button type="button" data-close-dialog class="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                Cancel
+                            </button>
+                            <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">
+                                Create Monitoring
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    {{-- ===================== Edit dialogs: monitoring ===================== --}}
+    @if ($activeTab === 'monitoring' && $canUpdateMonitor)
+        @foreach ($monitors as $row)
+            @php
+                // Ticked from the account unless validation sent the form back, in
+                // which case what the operator had chosen is what they see again.
+                $ticked = old('events') !== null && (int) old('monitor_id') === (int) $row->id
+                    ? array_map('intval', (array) old('events'))
+                    : $row->monitoredEvents->pluck('id')->map(fn ($id) => (int) $id)->all();
+            @endphp
+
+            <div id="monitor-edit-{{ $row->id }}" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="monitor-edit-title-{{ $row->id }}">
+                <div class="fixed inset-0 bg-gray-900/50" data-close-dialog></div>
+
+                <div class="relative min-h-full flex items-start justify-center p-4">
+                    <div class="relative w-full max-w-lg bg-white rounded-xl shadow-xl my-8">
+                        <div class="flex items-center justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                            <h2 id="monitor-edit-title-{{ $row->id }}" class="text-base font-bold text-gray-900">Edit {{ $row->name }}</h2>
+                            <button type="button" data-close-dialog class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition" aria-label="Close">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <form action="{{ route('admin.settings.users.monitors.update', $row) }}" method="POST" class="p-6 space-y-4">
+                            @csrf
+                            @method('PUT')
+
+                            {{-- Which row's form came back, so a validation error reopens
+                                 this dialog with its own ticks rather than another row's. --}}
+                            <input type="hidden" name="monitor_id" value="{{ $row->id }}">
+
+                            <div>
+                                <label for="monitor-edit-name-{{ $row->id }}" class="{{ $label }}">Organiser Name <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="text" id="monitor-edit-name-{{ $row->id }}" name="name" required maxlength="120" value="{{ $row->name }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="monitor-edit-username-{{ $row->id }}" class="{{ $label }}">Username <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="text" id="monitor-edit-username-{{ $row->id }}" name="username" required maxlength="120" value="{{ $row->username }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="monitor-edit-email-{{ $row->id }}" class="{{ $label }}">Email <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="email" id="monitor-edit-email-{{ $row->id }}" name="email" required maxlength="190" value="{{ $row->email }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="monitor-edit-password-{{ $row->id }}" class="{{ $label }}">New Password</label>
+                                <input type="password" id="monitor-edit-password-{{ $row->id }}" name="password" autocomplete="new-password" class="{{ $input }}">
+                                <p class="text-xs text-gray-500 mt-1">Leave blank to keep the current password.</p>
+                            </div>
+
+                            <div>
+                                <label for="monitor-edit-password-confirm-{{ $row->id }}" class="{{ $label }}">Confirm New Password</label>
+                                <input type="password" id="monitor-edit-password-confirm-{{ $row->id }}" name="password_confirmation" autocomplete="new-password" class="{{ $input }}">
+                            </div>
+
+                            <fieldset class="border-t border-gray-100 pt-4">
+                                <legend class="{{ $label }}">Events They May Watch</legend>
+
+                                {{-- Said plainly, because unticking is how sight is taken
+                                     away and the effect is immediate on their next page. --}}
+                                <p class="text-xs text-gray-500 mb-2">
+                                    Unticking an event takes it out of their sight straight away. With none ticked
+                                    the account can see nothing.
+                                </p>
+
+                                @forelse ($assignableEvents as $event)
+                                    <label for="monitor-edit-{{ $row->id }}-event-{{ $event->id }}"
+                                           class="flex items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-gray-50 transition cursor-pointer">
+                                        <input type="checkbox"
+                                               id="monitor-edit-{{ $row->id }}-event-{{ $event->id }}"
+                                               name="events[]"
+                                               value="{{ $event->id }}"
+                                               @checked(in_array((int) $event->id, $ticked, true))
+                                               class="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                        <span class="min-w-0">
+                                            <span class="block text-sm text-gray-900 truncate">{{ $event->title }}</span>
+                                            <span class="block text-xs text-gray-500">
+                                                {{ \App\Support\LocalTime::dateWallClock($event->starts_at) }}
+                                                · {{ \App\Models\Event::STATUSES[$event->status] ?? $event->status }}
+                                            </span>
+                                        </span>
+                                    </label>
+                                @empty
+                                    <p class="text-xs text-gray-500">No events exist yet.</p>
+                                @endforelse
+                            </fieldset>
+
+                            <x-admin.toggle
+                                name="is_active"
+                                id="monitor-edit-active-{{ $row->id }}"
+                                :checked="$row->is_active"
+                                label="Account is active" />
+
+                            <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                                <button type="button" data-close-dialog class="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                    Cancel
+                                </button>
+                                <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        @endforeach
+    @endif
 @endsection
 
 @push('scripts')
@@ -1085,6 +1675,7 @@
                 $createDialog = match ($activeTab) {
                     'handler' => 'handler-create',
                     'sponsorship' => 'sponsor-create',
+                    'monitoring' => 'monitor-create',
                     default => 'user-create',
                 };
             @endphp

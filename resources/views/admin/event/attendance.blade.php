@@ -3,8 +3,7 @@
 @section('title', 'Attendance')
 
 @section('breadcrumb')
-    <a href="{{ route('admin.dashboard') }}" class="hover:text-gray-700 transition">Dashboard</a>
-    <span class="mx-1.5 text-gray-300">/</span>
+    @include('admin.partials.breadcrumb-root')
     <span>Event</span>
     <span class="mx-1.5 text-gray-300">/</span>
     <a href="{{ route('admin.event.attendance') }}" class="hover:text-gray-700 transition">Attendance</a>

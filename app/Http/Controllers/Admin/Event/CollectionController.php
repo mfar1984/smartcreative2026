@@ -106,7 +106,16 @@ class CollectionController extends Controller
          | event only appears here once somebody ticked "handed over at the event" on
          | one of its add-ons.
          */
+        /*
+         | visibleTo is the ONE place this screen is narrowed for a monitoring account,
+         | and it is enough because everything else on it is derived from this
+         | collection: the event picker, the add-on ids per event, the rows, the four
+         | figures and the scope caption all read $handedOver, whose keys are these
+         | events' ids. Narrowing the source rather than each consumer is what stops a
+         | figure and a list disagreeing about whose afternoon they describe.
+         */
         $handoverEvents = Event::query()
+            ->visibleTo($request->user())
             ->whereHas('addons', fn (Builder $addons) => $addons->where('is_handed_over', true))
             ->with('addons.variants')
             ->orderByDesc('starts_at')
@@ -254,7 +263,7 @@ class CollectionController extends Controller
              */
             return response()->json([
                 'ok' => false,
-                'message' => $e->publicMessage . ' If it will not go through, open "The code will not go through" below and say why.',
+                'message' => $e->publicMessage.' If it will not go through, open "The code will not go through" below and say why.',
             ], 422);
         }
 
@@ -509,7 +518,7 @@ class CollectionController extends Controller
          | an absent member says later that they never got theirs, the record says who
          | did take it.
          */
-        DB::transaction(function () use ($rows, $named, $kind, $verification, $override, $paymentOverride, $user, &$written) {
+        DB::transaction(function () use ($rows, $named, $verification, $override, $paymentOverride, $user, &$written) {
             foreach ($rows as $row) {
                 /** @var EventRegistrationAddon $line */
                 $line = $row['line'];
@@ -604,8 +613,8 @@ class CollectionController extends Controller
             count($written) === 1 ? 'item' : 'items',
             $registration->reference,
             $collectorLabel,
-            $override === '' ? '' : ' No SMS verification: ' . $override,
-            $paymentOverride === '' ? '' : ' Money still owed: ' . $paymentOverride,
+            $override === '' ? '' : ' No SMS verification: '.$override,
+            $paymentOverride === '' ? '' : ' Money still owed: '.$paymentOverride,
         ));
 
         return back()->with($override === '' && $paymentOverride === '' ? 'status' : 'warning', trim(sprintf(
@@ -643,8 +652,13 @@ class CollectionController extends Controller
             return back()->with('warning', 'Choose an event before exporting. One file covering every event would carry more personal data than any single job needs.');
         }
 
+        /*
+         | visibleTo as well as the request scope, for the reason the other two exports
+         | say it too: this is the query that writes the file.
+         */
         /** @var Event $event */
         $event = Event::query()
+            ->visibleTo($request->user())
             ->with('addons.variants')
             ->whereKey($filters['event'])
             ->firstOrFail();
@@ -764,7 +778,7 @@ class CollectionController extends Controller
      *
      * @param  array{search: string, event: string, state: string, choice: string, payment: string}  $filters
      * @param  array<int, array<int, int>>  $handedOver  eventId => add-on ids it hands over
-     * @param  array<int, array<int, int>>  $choices     eventId => add-on ids a counter may choose for
+     * @param  array<int, array<int, int>>  $choices  eventId => add-on ids a counter may choose for
      * @return Builder<EventParticipant>
      */
     private function filtered(array $filters, array $handedOver, array $choices): Builder
@@ -1034,7 +1048,7 @@ class CollectionController extends Controller
         }
 
         if ($filters['search'] !== '') {
-            $parts[] = 'matching "' . $filters['search'] . '"';
+            $parts[] = 'matching "'.$filters['search'].'"';
         }
 
         return implode(' · ', $parts);
@@ -1113,7 +1127,7 @@ class CollectionController extends Controller
             $participantId = (int) $row['participant']->id;
             $addonId = (int) $row['addon']->id;
 
-            $value = data_get($submitted, $participantId . '.' . $addonId);
+            $value = data_get($submitted, $participantId.'.'.$addonId);
 
             if (blank($value)) {
                 continue;
@@ -1188,6 +1202,6 @@ class CollectionController extends Controller
             return 'Identity card checked at the counter';
         }
 
-        return 'Handed over without SMS verification: ' . ($handover->override_reason ?? '');
+        return 'Handed over without SMS verification: '.($handover->override_reason ?? '');
     }
 }

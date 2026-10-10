@@ -427,6 +427,26 @@ class RolesAndPermissionsSeeder extends Seeder
                 'update' => ['sponsors.update', 'Update sponsorship accounts'],
                 'delete' => ['sponsors.delete', 'Delete sponsorship accounts'],
             ],
+            /*
+            | The Monitoring tab on the same screen: the view-only accounts a
+            | third-party organiser signs in with to watch the events they were
+            | given.
+            |
+            | Its own four slugs for the same reason Handler and Sponsorship have
+            | theirs: somebody trusted to open an account for an outside organiser
+            | has no business editing an administrator.
+            |
+            | Granted to no role here, which leaves it with super admin only. A
+            | monitor must not manage monitors — it would be the one way a view-only
+            | account could widen its own sight — so the monitor role deliberately
+            | holds none of these.
+            */
+            'Monitoring' => [
+                'view' => ['monitors.view', 'View monitoring accounts'],
+                'create' => ['monitors.create', 'Create monitoring accounts'],
+                'update' => ['monitors.update', 'Update monitoring accounts'],
+                'delete' => ['monitors.delete', 'Delete monitoring accounts'],
+            ],
         ],
 
         /*
@@ -684,6 +704,61 @@ class RolesAndPermissionsSeeder extends Seeder
             'permissions' => [
                 'admin.access',
                 'sponsorship.portal.view',
+            ],
+        ],
+
+        /*
+        | A third-party organiser running an event THROUGH this system. Signs in at
+        | the same /admin/login and, once in, the navigation shows the Event and
+        | Coupon screens they were given and nothing else.
+        |
+        | WHAT MAKES THIS ROLE DIFFERENT FROM THE SPONSOR'S
+        |
+        | A sponsor got a purpose-built screen, written knowing it was scoped. A
+        | monitor reads the REAL STAFF SCREENS, which were written assuming the
+        | reader sees everything and can act on it. That is what the owner asked for
+        | and it is the more dangerous shape, so it rests on three independent layers
+        | rather than on this list alone: these permissions, ScopeEventToMonitor on
+        | the route groups, and the event scope applied in each listing's own query.
+        |
+        | VIEW ONLY, AND THE LIST IS THE FIRST LAYER. Every slug here is a .view or
+        | an export. Nothing that creates, edits, deletes, checks anybody in, hands
+        | anything over, records a payment or sends a message is granted, which is
+        | what removes those controls from the screens: the admin UI draws only what
+        | the role holds, and each write route sits behind a permission that is
+        | deliberately absent from this list.
+        |
+        | WHY participants.export IS HERE, which looks like the odd one out. It is
+        | the owner's explicit instruction — the monitor's only actions are the three
+        | exports — and it is also what the identity card route is behind, which he
+        | asked for in as many words: an outside organiser checking a competitor at
+        | the door needs the card number. It is the most sensitive thing this role
+        | holds and it is confined to assigned events by the layers above.
+        |
+        | NO dashboard.view: the dashboard totals every event and every payment in
+        | the system, which is none of a third party's business. No payments.* for
+        | the same reason — the payment figures a monitor is meant to see are the
+        | ones on their own events' screens.
+        |
+        | A system role, so is_protected is true the same way the handler's and the
+        | sponsor's are: the login landing and the request scope depend on it, and it
+        | must not be deleted by accident.
+        */
+        Role::MONITOR => [
+            'name' => 'Monitoring',
+            'description' => 'Watches the events assigned to them. View only, apart from exporting those events\' own lists.',
+            'is_protected' => true,
+            'permissions' => [
+                'admin.access',
+
+                // Event: the four screens the owner named, read only.
+                'participants.view',
+                'participants.export',
+                'attendance.view',
+                'reports.view',
+
+                // Coupon, Tracking and Report, which is one slug for all three.
+                'coupons.view',
             ],
         ],
 

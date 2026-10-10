@@ -26,9 +26,23 @@
              | hold dashboard.view, so the brand would otherwise be a link straight
              | to a 403 on the one screen they are allowed to be on.
              */
-            $brandHome = auth()->user()?->isSponsor()
-                ? route('admin.sponsorship.index')
-                : route('admin.dashboard');
+            /*
+             | Asked of the PERMISSION first rather than of the role, which is what the
+             | sponsor-only version of this could not do: a second view-only audience
+             | arrived — a monitoring account, which also lacks dashboard.view — and
+             | inherited the same dead link. Anything holding dashboard.view keeps
+             | exactly the link it had. The destinations match LoginController's
+             | post-login landing, deliberately, so the brand goes where signing in
+             | would have put them.
+             */
+            $sidebarUser = auth()->user();
+
+            $brandHome = match (true) {
+                (bool) $sidebarUser?->hasPermission('dashboard.view') => route('admin.dashboard'),
+                (bool) $sidebarUser?->isSponsor() => route('admin.sponsorship.index'),
+                (bool) $sidebarUser?->isMonitor() => route('admin.event.participants'),
+                default => route('admin.dashboard'),
+            };
         @endphp
 
         <a href="{{ $brandHome }}" class="flex items-center gap-2 min-w-0">
@@ -181,12 +195,19 @@
     @endphp
 
     <div class="h-9 shrink-0 flex items-center gap-2 px-3 border-t border-gray-200">
-        <a href="{{ route('admin.payments.overview') }}"
-           class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition shrink-0"
-           title="Payments"
-           aria-label="Payments">
-            <x-admin.icon name="cash" class="w-5 h-5 shrink-0" />
-        </a>
+        {{-- Gated on the permission the screen it points at actually requires.
+             It was not, which meant every role was shown this icon and the
+             view-only audiences — a handler, a sponsorship, a monitoring account —
+             were being offered a link that answers 403 when pressed. The navigation
+             hides exactly what the role cannot reach, and this is part of it. --}}
+        @if (auth()->user()?->hasPermission('payments.view'))
+            <a href="{{ route('admin.payments.overview') }}"
+               class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition shrink-0"
+               title="Payments"
+               aria-label="Payments">
+                <x-admin.icon name="cash" class="w-5 h-5 shrink-0" />
+            </a>
+        @endif
 
         @if ($balance)
             @php

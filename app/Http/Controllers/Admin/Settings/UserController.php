@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Admin\Settings;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreHandlerRequest;
+use App\Http\Requests\Admin\StoreMonitorRequest;
 use App\Http\Requests\Admin\StoreSponsorRequest;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateHandlerRequest;
+use App\Http\Requests\Admin\UpdateMonitorRequest;
 use App\Http\Requests\Admin\UpdateSponsorRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\Coupon;
+use App\Models\Event;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\AdminLogger;
@@ -28,20 +31,22 @@ class UserController extends Controller
         'users' => ['label' => 'Users', 'icon' => 'users'],
         'handler' => ['label' => 'Handler', 'icon' => 'trophy'],
         'sponsorship' => ['label' => 'Sponsorship', 'icon' => 'cash'],
+        'monitoring' => ['label' => 'Monitoring', 'icon' => 'clipboard'],
     ];
 
     /**
      * The permission each tab needs before it is drawn at all.
      *
-     * Three separate sets on purpose: a role can be given handler management, or
-     * sponsorship management, without being given administrator management. A tab
-     * the role cannot see is not rendered and cannot be reached by editing the
-     * query string either.
+     * Four separate sets on purpose: a role can be given handler management, or
+     * sponsorship management, or monitoring management, without being given
+     * administrator management. A tab the role cannot see is not rendered and cannot
+     * be reached by editing the query string either.
      */
     private const TAB_PERMISSIONS = [
         'users' => 'users.view',
         'handler' => 'handlers.view',
         'sponsorship' => 'sponsors.view',
+        'monitoring' => 'monitors.view',
     ];
 
     public function index(Request $request)
@@ -75,6 +80,7 @@ class UserController extends Controller
             'users' => $activeTab === 'users' ? $this->userRows($search, $status, $roleId) : null,
             'handlers' => $activeTab === 'handler' ? $this->handlerRows($search, $status) : null,
             'sponsors' => $sponsors,
+            'monitors' => $activeTab === 'monitoring' ? $this->monitorRows($search, $status) : null,
 
             /*
              | What each sponsorship holds and what it has actually given away,
@@ -100,15 +106,32 @@ class UserController extends Controller
             'canCreateSponsor' => $request->user()->hasPermission('sponsors.create'),
             'canUpdateSponsor' => $request->user()->hasPermission('sponsors.update'),
             'canDeleteSponsor' => $request->user()->hasPermission('sponsors.delete'),
+            'canCreateMonitor' => $request->user()->hasPermission('monitors.create'),
+            'canUpdateMonitor' => $request->user()->hasPermission('monitors.update'),
+            'canDeleteMonitor' => $request->user()->hasPermission('monitors.delete'),
+
+            /*
+             | Every event, for the tick list on the monitoring form. NOT narrowed by
+             | visibleTo: this is the list of what a monitor MAY be given, and the
+             | person reading it is staff. A monitoring account cannot reach this
+             | screen at all, because the monitor role holds none of the four
+             | monitors.* slugs.
+             |
+             | Loaded only for the tab that draws it, so the other three cost nothing.
+             */
+            'assignableEvents' => $activeTab === 'monitoring'
+                ? Event::query()->orderByDesc('starts_at')->get(['id', 'title', 'starts_at', 'status'])
+                : collect(),
         ]);
     }
 
     /**
-     * The Users tab: administrator accounts, handlers and sponsors excluded.
+     * The Users tab: administrator accounts, with handlers, sponsors and monitors
+     * excluded.
      *
-     * The exclusions are what keep the three tabs from overlapping. Without them
-     * an account would appear on two lists and be editable from either, which is
-     * the opposite of keeping the permissions apart.
+     * The exclusions are what keep the four tabs from overlapping. Without them an
+     * account would appear on two lists and be editable from either, which is the
+     * opposite of keeping the permissions apart.
      */
     private function userRows(string $search, ?string $status, ?int $roleId): LengthAwarePaginator
     {
@@ -116,6 +139,7 @@ class UserController extends Controller
             ->with('role:id,name,slug,is_active')
             ->where('is_handler', false)
             ->where('is_sponsor', false)
+            ->where('is_monitor', false)
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('name', 'like', "%{$search}%")
@@ -142,10 +166,11 @@ class UserController extends Controller
         return User::query()
             ->with('handledTournaments')
             ->where('is_handler', true)
-            // Said out loud rather than relied on: the two flags are written as
-            // constants by different endpoints, so an account can only ever be one
-            // of the two, and this tab must not list a sponsor even so.
+            // Said out loud rather than relied on: the flags are written as constants
+            // by different endpoints, so an account can only ever be one of them, and
+            // this tab must not list a sponsor or a monitor even so.
             ->where('is_sponsor', false)
+            ->where('is_monitor', false)
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('name', 'like', "%{$search}%")
@@ -173,6 +198,7 @@ class UserController extends Controller
     {
         return User::query()
             ->where('is_sponsor', true)
+            ->where('is_monitor', false)
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('name', 'like', "%{$search}%")
@@ -183,6 +209,34 @@ class UserController extends Controller
             ->when($status !== null, fn ($query) => $query->where('is_active', $status === 'active'))
             ->orderBy('name')
             ->paginate(15, ['*'], 'sponsor_page')
+            ->withQueryString();
+    }
+
+    /**
+     * The Monitoring tab: view-only accounts and the events each one may watch.
+     *
+     * The events relation is eager loaded because the Events column reads it on every
+     * row. Its own page name, so a page number from one tab is not carried into
+     * another.
+     *
+     * The column is the whole reason somebody opens this tab: a monitoring account
+     * assigned to nothing can see nothing, and this is where that is visible.
+     */
+    private function monitorRows(string $search, ?string $status): LengthAwarePaginator
+    {
+        return User::query()
+            ->with('monitoredEvents:id,title')
+            ->where('is_monitor', true)
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($inner) use ($search) {
+                    $inner->where('name', 'like', "%{$search}%")
+                        ->orWhere('username', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                });
+            })
+            ->when($status !== null, fn ($query) => $query->where('is_active', $status === 'active'))
+            ->orderBy('name')
+            ->paginate(15, ['*'], 'monitor_page')
             ->withQueryString();
     }
 
@@ -269,13 +323,17 @@ class UserController extends Controller
     /**
      * Which tab an account belongs to, decided by its flags and nothing else.
      *
-     * One answer per account, so the three lists cannot overlap however the row
-     * was written.
+     * One answer per account, so the four lists cannot overlap however the row was
+     * written.
      */
     private function tabFor(User $user): string
     {
         if ($user->isHandler()) {
             return 'handler';
+        }
+
+        if ($user->isMonitor()) {
+            return 'monitoring';
         }
 
         return $user->isSponsor() ? 'sponsorship' : 'users';
@@ -284,10 +342,12 @@ class UserController extends Controller
     /**
      * Refuse a row that belongs to another tab.
      *
-     * The three tabs are three lists over one table, so an id from one is a valid
-     * route parameter on another's routes. Without this a role granted only
-     * sponsorship management could edit an administrator by changing the number in
-     * the URL, which would undo the whole point of keeping the permissions apart.
+     * The four tabs are four lists over one table, so an id from one is a valid route
+     * parameter on another's routes. Without this a role granted only monitoring
+     * management could edit an administrator by changing the number in the URL, which
+     * would undo the whole point of keeping the permissions apart. It refuses in both
+     * directions: a monitor id posted at the user, handler or sponsor endpoints, and
+     * any of those posted at the monitor endpoints.
      */
     private function refuseCrossTab(User $user, string $tab): void
     {
@@ -642,6 +702,172 @@ class UserController extends Controller
         return redirect()
             ->route('admin.settings.users', ['tab' => 'sponsorship'])
             ->with('status', 'Sponsorship account deleted.');
+    }
+
+    /* ---------------------------------------------------------------------
+     | Monitoring tab
+     *
+     | A monitor is an ordinary users row carrying the monitor role with
+     | is_monitor set. These three endpoints are the only ones that write that
+     | pair, and they write it as a constant.
+     |
+     | A monitoring account is VIEW ONLY on the events it is given: it reads the
+     | real staff screens for those events — participants, attendance, collection,
+     | reporting and the coupon screens, identity card numbers and payment figures
+     | included — and the only actions it holds are the three exports. Which events
+     | it may see is assigned HERE, on its own form, because that is where somebody
+     | opening an account for an outside organiser is already standing.
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Create a monitoring account, and assign it its events.
+     *
+     * The role is not a field on this form and no role is ever read from the request.
+     * If it were, a role granted only monitors.create could mint a super admin by
+     * posting a role_id, which is a straight privilege escalation. So the role is
+     * looked up by its fixed slug and written last, where nothing in the payload can
+     * reach it.
+     *
+     * The events are the account's whole field of view, so they are recorded in the
+     * audit entry by name as well as being attached: "which events was this account
+     * opened with" is the question somebody will actually be asking afterwards.
+     */
+    public function storeMonitor(StoreMonitorRequest $request)
+    {
+        $role = Role::where('slug', Role::MONITOR)->firstOrFail();
+
+        $attributes = $request->accountAttributes();
+        $attributes['role_id'] = $role->id;
+        $attributes['is_monitor'] = true;
+
+        $user = User::create($attributes);
+
+        $events = $request->assignedEvents();
+        $user->monitoredEvents()->sync($events);
+
+        AdminLogger::activity('monitors.create', sprintf(
+            'Created monitoring account %s with %d event(s) assigned.',
+            $user->logLabel(),
+            count($events),
+        ));
+
+        AdminLogger::audit($user, 'created', null, [
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'role_id' => $user->role_id,
+            'is_monitor' => true,
+            'is_active' => $user->is_active,
+            'events' => $this->eventTitles($user),
+        ]);
+
+        return redirect()
+            ->route('admin.settings.users', ['tab' => 'monitoring'])
+            ->with('status', count($events) === 0
+                ? sprintf('Monitoring account %s created. It is assigned no events yet, so it can see nothing until one is ticked.', $user->username)
+                : sprintf('Monitoring account %s created, watching %d event(s).', $user->username, count($events)));
+    }
+
+    /**
+     * Update a monitoring account, including which events it may see.
+     *
+     * The assignment is recorded at both ends in the audit entry. Widening or
+     * narrowing what a third party can read is the most consequential thing this
+     * screen does — it is the difference between an organiser seeing their own
+     * competitors and seeing somebody else's — so "it used to be these" is the half
+     * worth keeping.
+     */
+    public function updateMonitor(UpdateMonitorRequest $request, User $user)
+    {
+        $this->refuseCrossTab($user, 'monitoring');
+
+        $validated = $request->accountAttributes();
+
+        $before = [
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'is_active' => $user->is_active,
+            'events' => $this->eventTitles($user),
+        ];
+
+        // A blank password field leaves the existing password in place.
+        if (blank($validated['password'] ?? null)) {
+            unset($validated['password']);
+        }
+
+        // Neither the role nor the flag is in the payload, so an edit here cannot
+        // turn a monitor into anything else.
+        $user->update($validated);
+
+        $user->monitoredEvents()->sync($request->assignedEvents());
+        $user->load('monitoredEvents');
+
+        AdminLogger::activity('monitors.update', sprintf('Updated monitoring account %s.', $user->logLabel()));
+        AdminLogger::audit($user, 'updated', $before, [
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'is_active' => $user->is_active,
+            'password' => array_key_exists('password', $validated) ? '[redacted]' : null,
+            'events' => $this->eventTitles($user),
+        ]);
+
+        return redirect()
+            ->route('admin.settings.users', ['tab' => 'monitoring'])
+            ->with('status', sprintf('Monitoring account %s updated.', $user->username));
+    }
+
+    /**
+     * Delete a monitoring account.
+     *
+     * The pivot cascades, so each event it was watching simply loses an observer and
+     * is otherwise untouched: nothing a monitor could do left a mark on an event, so
+     * there is nothing to release the way a sponsorship's blocks are released. How
+     * many it was watching is recorded, because that is the part somebody will want to
+     * know afterwards.
+     */
+    public function destroyMonitor(Request $request, User $user)
+    {
+        $this->refuseCrossTab($user, 'monitoring');
+
+        $label = $user->logLabel();
+        $assigned = $user->monitoredEvents()->count();
+
+        AdminLogger::audit($user, 'deleted', [
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'role_id' => $user->role_id,
+            'is_monitor' => true,
+            'events' => $this->eventTitles($user),
+        ], null);
+
+        $user->delete();
+
+        AdminLogger::activity('monitors.delete', $assigned === 0
+            ? sprintf('Deleted monitoring account %s.', $label)
+            : sprintf('Deleted monitoring account %s, which was watching %d event(s).', $label, $assigned));
+
+        return redirect()
+            ->route('admin.settings.users', ['tab' => 'monitoring'])
+            ->with('status', 'Monitoring account deleted.');
+    }
+
+    /**
+     * The titles of the events an account may watch, for the audit trail.
+     *
+     * By name rather than by id, because the trail is read by people and an id tells
+     * them nothing once the event has been renamed or removed.
+     *
+     * @return array<int, string>
+     */
+    private function eventTitles(User $user): array
+    {
+        return $user->monitoredEvents()
+            ->orderBy('events.title')
+            ->pluck('events.title')
+            ->all();
     }
 
     private function activeSuperAdminCount(): int

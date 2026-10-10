@@ -114,7 +114,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
         | gain. That is the same call Portfolio made.
         |
         */
-        Route::prefix('coupons')->name('coupons.')->group(function () {
+        /*
+        | event.scope is declared on this whole group rather than on the routes that
+        | take a {coupon}. A monitoring account is confined to the events assigned to
+        | it, and a coupon reaches events through the coupon_event pivot — so a batch
+        | ticked on none of their events is refused here, and the FIGURES on a batch
+        | that spans theirs and somebody else's are narrowed where they are queried.
+        | The group is where that cannot be forgotten on a route added later. For
+        | anybody who is not a monitor it does nothing.
+        */
+        Route::prefix('coupons')->name('coupons.')->middleware('event.scope')->group(function () {
 
             // `create` and `tracking` are declared before `{coupon}` so neither is
             // swallowed as a route parameter.
@@ -289,8 +298,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
         | Listing screens only for now. The create and edit forms wait on the
         | field list, and Attendance waits on its data model.
         |
+        | event.scope is declared on the whole group rather than on the routes that
+        | take an {event}. A monitoring account is confined to the events assigned to
+        | it, and the group is where that cannot be forgotten on a route added later.
+        | It reads whichever event the request names — by path, through a
+        | {registration}, through a {participant}, or through ?event= and
+        | ?registration= — and refuses an unassigned one with a 403. For anybody who
+        | is not a monitor it does nothing.
+        |
         */
-        Route::prefix('event')->name('event.')->group(function () {
+        Route::prefix('event')->name('event.')->middleware('event.scope')->group(function () {
 
             // Registration - tabs: Register Event, Ongoing, Completed, Cancel
             // `create` is declared before `{event}` so it is not swallowed as a
@@ -607,6 +624,30 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::get('attendance', [AttendanceController::class, 'index'])
                 ->middleware('permission:attendance.view')
                 ->name('attendance');
+
+            /*
+            | The attendance list as a CSV: who is expected, who arrived, and whether
+            | a card was checked.
+            |
+            | For the office as much as for anybody else — a screen with an export for
+            | a third-party observer and none for the people working the door would be
+            | absurd — and it is one of the three things a monitoring account is allowed
+            | to do at all.
+            |
+            | BOTH permissions, which is the only route in this module that asks for
+            | two. attendance.view because it is the attendance screen's own data, and
+            | participants.export because the file carries every competitor's identity
+            | card number out of the building, which is exactly what that slug governs
+            | on the Participants and Collection exports beside it. Requiring one or the
+            | other would let somebody who may read the counter screen take the cards
+            | home, or somebody with no business on this screen export it.
+            |
+            | Declared before anything taking a {participant} so "export" is never read
+            | as a person's id, the same way the other two exports are.
+            */
+            Route::get('attendance/export', [AttendanceController::class, 'export'])
+                ->middleware('permission:attendance.view,participants.export')
+                ->name('attendance.export');
 
             /*
             | Collection. The other counter: handing the shirts out.
@@ -1335,15 +1376,15 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('roles.destroy');
 
             /*
-             | User Management - tabs: Users, Handler, Sponsorship
+             | User Management - tabs: Users, Handler, Sponsorship, Monitoring
              |
-             | One screen, three lists, three sets of permissions. The index takes
-             | any of them, because the screen draws only the tabs the role holds;
-             | the write endpoints take one each, so handler or sponsorship
+             | One screen, four lists, four sets of permissions. The index takes any
+             | of them, because the screen draws only the tabs the role holds; the
+             | write endpoints take one each, so handler, sponsorship or monitoring
              | management can be granted without administrator management.
              */
             Route::get('users', [UserController::class, 'index'])
-                ->middleware('permission:users.view|handlers.view|sponsors.view')
+                ->middleware('permission:users.view|handlers.view|sponsors.view|monitors.view')
                 ->name('users');
             Route::post('users', [UserController::class, 'store'])
                 ->middleware('permission:users.create')
@@ -1382,6 +1423,25 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::delete('users/sponsors/{user}', [UserController::class, 'destroySponsor'])
                 ->middleware('permission:sponsors.delete')
                 ->name('users.sponsors.destroy');
+
+            /*
+             | Monitoring accounts. Unlike the handler, whose tournaments are ticked
+             | on the tournament's own form, a monitor's events are assigned HERE on
+             | its own form: an outside organiser is given a fixed set of events when
+             | the account is opened, and the person opening it is already on this
+             | screen. The alternative — a Monitors section on every event's form —
+             | would spread one account's field of view across as many screens as it
+             | has events, with no single place to read it back.
+             */
+            Route::post('users/monitors', [UserController::class, 'storeMonitor'])
+                ->middleware('permission:monitors.create')
+                ->name('users.monitors.store');
+            Route::put('users/monitors/{user}', [UserController::class, 'updateMonitor'])
+                ->middleware('permission:monitors.update')
+                ->name('users.monitors.update');
+            Route::delete('users/monitors/{user}', [UserController::class, 'destroyMonitor'])
+                ->middleware('permission:monitors.delete')
+                ->name('users.monitors.destroy');
 
             // Logging - tabs: Activity Log, Audit Log
             Route::get('logging', [LoggingController::class, 'index'])

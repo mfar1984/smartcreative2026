@@ -8,8 +8,7 @@
 @section('title', 'Coupons')
 
 @section('breadcrumb')
-    <a href="{{ route('admin.dashboard') }}" class="hover:text-gray-700 transition">Dashboard</a>
-    <span class="mx-1.5 text-gray-300">/</span>
+    @include('admin.partials.breadcrumb-root')
     <span>Coupon</span>
     <span class="mx-1.5 text-gray-300">/</span>
     <span class="font-semibold text-gray-700">Coupon</span>
@@ -73,10 +72,14 @@
                         <th scope="col" class="{{ $head }}">Expires</th>
                         <th scope="col" class="{{ $head }} text-center">State</th>
 
-                        {{-- Always drawn. The design download lives in this column and
-                             asks only for the view permission, which everybody reading
-                             this page already holds. --}}
-                        <th scope="col" class="{{ $head }} text-center">Actions</th>
+                        {{-- Drawn for staff, who always have at least the design
+                             download in it. Dropped entirely for a view-only
+                             monitoring account, which holds none of the three things
+                             this column can contain: a header over an empty cell
+                             would be a control somebody goes looking for. --}}
+                        @if ($canAct)
+                            <th scope="col" class="{{ $head }} text-center">Actions</th>
+                        @endif
                     </tr>
                 </thead>
 
@@ -143,6 +146,7 @@
                                 </x-admin.badge>
                             </td>
 
+                            @if ($canAct)
                             <td class="px-5 py-3 whitespace-nowrap">
                                 <div class="flex items-center justify-center gap-1">
                                     @if ($canUpdate)
@@ -180,10 +184,11 @@
                                     </a>
                                 </div>
                             </td>
+                            @endif
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="px-5 py-12 text-center">
+                            <td colspan="{{ $canAct ? 7 : 6 }}" class="px-5 py-12 text-center">
                                 <x-admin.icon name="tag" class="w-10 h-10 mx-auto text-gray-300" />
 
                                 <p class="text-sm font-semibold text-gray-700 mt-3">

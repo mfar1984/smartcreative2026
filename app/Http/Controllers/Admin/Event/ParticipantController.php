@@ -29,6 +29,7 @@ use App\Services\SizeConfirmationSender;
 use App\Support\EventTemplates;
 use App\Support\GatewayPaymentRecord;
 use App\Support\LocalTime;
+use App\Support\MonitorScope;
 use App\Support\ParticipantOptions;
 use App\Support\ParticipantSizes;
 use App\Support\PaymentFigures;
@@ -72,8 +73,7 @@ class ParticipantController extends Controller
     public function __construct(
         private readonly PaymentGatewayManager $gateways,
         private readonly RegistrationPaymentUpdater $updater,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request)
     {
@@ -137,13 +137,17 @@ class ParticipantController extends Controller
              | shape each one takes rather than leaving the refusal until submit.
              */
             'transferTargets' => Event::query()
+                ->visibleTo($request->user())
                 ->whereIn('status', Event::REGISTERABLE)
                 ->orderBy('title')
                 ->get(['id', 'title', 'registration_mode', 'fee']),
 
             // Only events that actually have entries, so the filter never offers
-            // a choice that returns nothing.
+            // a choice that returns nothing. visibleTo narrows it to a monitoring
+            // account's own events, so the picker cannot offer one the middleware
+            // would then refuse — and cannot name an event they were not given.
             'events' => Event::query()
+                ->visibleTo($request->user())
                 ->whereHas('registrations')
                 ->orderBy('title')
                 ->pluck('title', 'id')
@@ -232,6 +236,18 @@ class ParticipantController extends Controller
             // the first fixes a record, the second destroys one.
             'canUpdatePerson' => $request->user()->hasPermission('participants.update'),
             'canRemovePerson' => $request->user()->hasPermission('participants.remove'),
+
+            /*
+             | Whether the "Open Event" link is drawn at all.
+             |
+             | It used to be drawn whenever the entry had an event, which was fine
+             | while everybody who could read this page could also read an event. A
+             | monitoring account cannot: it holds participants.view and deliberately
+             | not events.view, so the link was a button that answered 403. Gated on
+             | the permission the target route itself asks for, so the link exists
+             | exactly when it works.
+             */
+            'canOpenEvent' => $request->user()->hasPermission('events.view'),
 
             // The gateway record, verbatim. Null when there has never been one.
             'payment' => GatewayPaymentRecord::make($registration->payment_details),
@@ -554,7 +570,7 @@ class ParticipantController extends Controller
             'Payment link queued for %s (%s outstanding)%s. The Reminder column says when it actually leaves.',
             $this->registrant($registration)?->full_name ?? $registration->reference,
             $registration->outstandingAmountLabel(),
-            filled($address) ? ', to ' . $address : '',
+            filled($address) ? ', to '.$address : '',
         ));
     }
 
@@ -607,7 +623,7 @@ class ParticipantController extends Controller
             $this->registrant($registration)?->full_name ?? $registration->reference,
             $missing,
             $missing === 1 ? 'size' : 'sizes',
-            filled($address) ? ', to ' . $address : '',
+            filled($address) ? ', to '.$address : '',
         ));
     }
 
@@ -685,7 +701,7 @@ class ParticipantController extends Controller
             strtolower(self::TABS[$tab]['label'] ?? $tab),
             $this->sizeFilterLabel($request),
             $passedOver,
-            $breakdown === '' ? '' : ': ' . $breakdown,
+            $breakdown === '' ? '' : ': '.$breakdown,
         ));
 
         if ($queued === 0) {
@@ -743,11 +759,11 @@ class ParticipantController extends Controller
         $parts = [];
 
         if ($eventId !== '') {
-            $parts[] = 'event ' . (Event::query()->whereKey($eventId)->value('title') ?? $eventId);
+            $parts[] = 'event '.(Event::query()->whereKey($eventId)->value('title') ?? $eventId);
         }
 
         if ($search !== '') {
-            $parts[] = 'search "' . $search . '"';
+            $parts[] = 'search "'.$search.'"';
         }
 
         return $parts === [] ? 'no filters' : implode(', ', $parts);
@@ -861,8 +877,8 @@ class ParticipantController extends Controller
             'proof' => [
                 'nullable',
                 'file',
-                'mimes:' . EventRegistrationPayment::PROOF_MIMES,
-                'max:' . EventRegistrationPayment::PROOF_MAX_KB,
+                'mimes:'.EventRegistrationPayment::PROOF_MIMES,
+                'max:'.EventRegistrationPayment::PROOF_MAX_KB,
             ],
 
             'settlement' => ['required', 'in:full,partial'],
@@ -873,7 +889,7 @@ class ParticipantController extends Controller
              | accepting one here would push the entry's outstanding figure negative
              | and quietly reduce what everybody else on the event owes.
              */
-            'amount' => ['nullable', 'required_if:settlement,partial', 'numeric', 'min:0.01', 'max:' . $outstanding],
+            'amount' => ['nullable', 'required_if:settlement,partial', 'numeric', 'min:0.01', 'max:'.$outstanding],
         ], [
             'received_date.required' => 'Enter the date the money arrived.',
             'received_date.before_or_equal' => 'The money cannot have arrived in the future.',
@@ -1477,7 +1493,7 @@ class ParticipantController extends Controller
                 '%s moved to %s.%s',
                 $registration->reference,
                 $moved->title,
-                $notes === [] ? '' : ' ' . ucfirst(implode('. ', $notes)) . '.',
+                $notes === [] ? '' : ' '.ucfirst(implode('. ', $notes)).'.',
             ));
     }
 
@@ -1660,7 +1676,7 @@ class ParticipantController extends Controller
          | reason for one person's dialog to be able to answer for the rest of the
          | squad either.
          */
-        $given = $request->input('sizes.' . $participant->id);
+        $given = $request->input('sizes.'.$participant->id);
 
         $outcome = $choices->apply(
             $registration,
@@ -1675,7 +1691,7 @@ class ParticipantController extends Controller
          */
         if ($outcome['refused'] !== []) {
             return redirect()
-                ->to(route('admin.event.participants.show', $registration) . '#person-' . $participant->id)
+                ->to(route('admin.event.participants.show', $registration).'#person-'.$participant->id)
                 ->withErrors($outcome['refused'])
                 ->withInput();
         }
@@ -1918,8 +1934,18 @@ class ParticipantController extends Controller
             return back()->with('error', 'Choose an event before exporting. One file covering every event would carry more personal data than any single job needs.');
         }
 
+        /*
+         | visibleTo as well as the middleware, deliberately. The middleware already
+         | refuses an unassigned ?event=, so this is the belt to its braces — but an
+         | export that dumped every event would be the whole leak in one file, and
+         | this is the query that writes the file, so it says so itself rather than
+         | trusting something declared in another part of the codebase.
+         */
         /** @var Event $event */
-        $event = Event::query()->whereKey($eventId)->firstOrFail();
+        $event = Event::query()
+            ->visibleTo($request->user())
+            ->whereKey($eventId)
+            ->firstOrFail();
 
         /*
          | A missing or unknown tab means everybody, not the first tab.
@@ -2170,7 +2196,7 @@ class ParticipantController extends Controller
             $result = $tally->settle($registration, $validated['purchase_id'] ?? null);
         } catch (PaymentGatewayException $e) {
             return back()->withInput()->withErrors([
-                'tally' => 'The gateway could not be reached, so nothing was compared and nothing was changed. ' . $e->publicMessage(),
+                'tally' => 'The gateway could not be reached, so nothing was compared and nothing was changed. '.$e->publicMessage(),
             ]);
         }
 
@@ -2240,7 +2266,10 @@ class ParticipantController extends Controller
         $search = trim((string) $request->query('q'));
         $eventId = trim((string) $request->query('event'));
 
-        return ($tab === null ? EventRegistration::query() : $this->scoped($tab))
+        return MonitorScope::byColumn(
+            $tab === null ? EventRegistration::query() : $this->scoped($tab),
+            $request->user(),
+        )
             ->when($search !== '', fn (Builder $query) => $query->where(function (Builder $inner) use ($search) {
                 $inner->where('reference', 'like', "%{$search}%")
                     ->orWhere('team_name', 'like', "%{$search}%")

@@ -11,6 +11,7 @@ use App\Services\AdminLogger;
 use App\Services\Coupon\CouponIssuer;
 use App\Support\CouponDesignSample;
 use App\Support\CouponHolderIdentity;
+use App\Support\MonitorScope;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -24,14 +25,21 @@ class CouponController extends Controller
         $search = trim((string) $request->query('q'));
         $kind = trim((string) $request->query('kind'));
 
-        $coupons = Coupon::query()
+        $coupons = MonitorScope::couponsOnAssignedEvents(Coupon::query(), $request->user())
             /*
              | Counted in SQL rather than by asking each row, because the list shows
              | how many uses a batch has left and a page of fifteen batches would
              | otherwise be fifteen extra queries.
+             |
+             | Narrowed for a monitoring account, because a use the monitor may not see
+             | must not be counted into a figure they can: the ledger rows are scoped
+             | the same way the Report and Tracking figures are.
              */
             ->withCount([
-                'codes as redeemed_count' => fn ($query) => $query->whereNotNull('redeemed_at'),
+                'codes as redeemed_count' => fn ($query) => MonitorScope::redemptionsOnAssignedEvents(
+                    $query->whereNotNull('redeemed_at'),
+                    $request->user(),
+                ),
             ])
             ->when($search !== '', fn (Builder $query) => $query->where('name', 'like', "%{$search}%"))
             ->when($kind !== '', fn (Builder $query) => $query->where('kind', $kind))
@@ -48,6 +56,21 @@ class CouponController extends Controller
             'canCreate' => $request->user()->hasPermission('coupons.create'),
             'canUpdate' => $request->user()->hasPermission('coupons.update'),
             'canDelete' => $request->user()->hasPermission('coupons.delete'),
+
+            /*
+             | Whether this reader gets an Actions column at all.
+             |
+             | The design download used to be drawn unconditionally, on the reasoning
+             | that it asks only for the view permission. That reasoning stopped
+             | holding when a VIEW-ONLY audience arrived: a monitoring account is
+             | allowed exactly three exports and the owner was explicit that no other
+             | control should be on its screens, so an Actions column holding one
+             | download icon would be the one thing on this page it could press.
+             |
+             | Drawn as a column rather than as an empty cell, which is the difference
+             | between a table that looks right and one with a stray header.
+             */
+            'canAct' => ! $request->user()->isRestrictedToAssignedEvents(),
         ]);
     }
 

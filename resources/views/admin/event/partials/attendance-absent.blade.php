@@ -31,6 +31,8 @@
                 <option value="{{ $id }}" @selected((string) $eventId === (string) $id)>{{ $title }}</option>
             @endforeach
         </select>
+
+        @include('admin.event.partials.attendance-export')
     </x-admin.filter-bar>
 
     <div class="overflow-x-auto">
@@ -42,7 +44,13 @@
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Entry</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Contact</th>
                     <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Payment</th>
-                    <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Open at Counter</th>
+                    {{-- The column holds one thing and that thing is an action, so it is
+                         dropped rather than drawn empty for somebody who may not act. A
+                         monitoring account reads this list and exports it; it has no
+                         counter to open an entry at. --}}
+                    @if ($canUpdate)
+                        <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-center">Open at Counter</th>
+                    @endif
                 </tr>
             </thead>
 
@@ -89,22 +97,24 @@
                             @endif
                         </td>
 
-                        <td class="px-5 py-3 whitespace-nowrap text-center">
-                            @if ($registration)
-                                {{-- Straight to the desk with this entry loaded, so
-                                     a phone call can turn into a check-in without
-                                     searching again. --}}
-                                <a href="{{ route('admin.event.attendance', ['tab' => 'attendance', 'registration' => $registration->id]) }}"
-                                   class="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition">
-                                    <x-admin.icon name="clipboard" class="w-3.5 h-3.5" />
-                                    Counter
-                                </a>
-                            @endif
-                        </td>
+                        @if ($canUpdate)
+                            <td class="px-5 py-3 whitespace-nowrap text-center">
+                                @if ($registration)
+                                    {{-- Straight to the desk with this entry loaded, so
+                                         a phone call can turn into a check-in without
+                                         searching again. --}}
+                                    <a href="{{ route('admin.event.attendance', ['tab' => 'attendance', 'registration' => $registration->id]) }}"
+                                       class="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition">
+                                        <x-admin.icon name="clipboard" class="w-3.5 h-3.5" />
+                                        Counter
+                                    </a>
+                                @endif
+                            </td>
+                        @endif
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="6" class="px-5 py-12 text-center text-sm text-gray-500">
+                        <td colspan="{{ $canUpdate ? 6 : 5 }}" class="px-5 py-12 text-center text-sm text-gray-500">
                             @if ($isFiltered)
                                 Everyone matching the current filters has checked in.
                             @else

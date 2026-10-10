@@ -6,6 +6,7 @@ use App\Http\Middleware\EnsurePermission;
 use App\Http\Middleware\EnsureUserCanAccessAdmin;
 use App\Http\Middleware\ObserveSuspiciousInput;
 use App\Http\Middleware\PublicMaintenanceMode;
+use App\Http\Middleware\ScopeEventToMonitor;
 use App\Http\Middleware\ScopeTournamentToHandler;
 use App\Services\Security\SecurityEventRecorder;
 use Illuminate\Foundation\Application;
@@ -32,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'session.timeout' => EnforceInactivityTimeout::class,
             'ip.allowlist' => EnforceIpAllowlist::class,
             'tournament.scope' => ScopeTournamentToHandler::class,
+            'event.scope' => ScopeEventToMonitor::class,
         ]);
 
         // Soft maintenance mode for the public site. The middleware itself
