@@ -14,6 +14,12 @@ use Illuminate\Support\Facades\Schema;
  *
  * WHY THE TAG SITS ON THE ALLOCATION AND NOT ON THE BATCH
  *
+ * PARTLY SUPERSEDED. 2026_10_16_090000 adds a batch-level tag alongside this one,
+ * because the reasoning below misses the case it does not cover: a SHARED batch has no
+ * allocation for a tag to sit on, so it could not be sponsored at all. Both levels now
+ * exist, with one rule between them — see CouponAllocation::effectiveSponsorId(). The
+ * argument for the block being the unit still holds and is why this column stays.
+ *
  * The owner's case is an NGO commissioning a thousand codes handed out through ten
  * representatives, and his question is whose block ran out first. That question is
  * asked of a block, so the block is what a sponsor funds. A batch-level tag could not

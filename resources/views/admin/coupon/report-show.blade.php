@@ -106,6 +106,37 @@
             </p>
         @endunless
 
+        {{-- ---------------- Who funded the batch ----------------
+
+             The batch-level sponsorship, read-only here because it is set on the
+             coupon form, under THE CODE. Shown on both modes: a shared batch has no
+             blocks, so this is the ONLY level it can be sponsored at. --}}
+        <div class="px-5 py-3 border-b border-gray-200 bg-gray-50/60">
+            <p class="text-xs text-gray-600">
+                <span class="font-semibold text-gray-700">Sponsorship for the whole batch:</span>
+                @if ($coupon->hasSponsor())
+                    <span class="font-semibold text-gray-900">{{ $coupon->sponsor?->name }}</span>
+                @else
+                    <span class="italic text-gray-500">Not sponsored</span>
+                @endif
+
+                @if ($canIssue)
+                    &middot;
+                    <a href="{{ route('admin.coupons.edit', $coupon) }}"
+                       class="font-semibold text-blue-600 hover:underline">Change it on the coupon form</a>
+                @endif
+            </p>
+
+            @if ($coupon->isUnique())
+                {{-- THE RULE, stated where both levels are visible. See
+                     CouponAllocation::effectiveSponsorId(). --}}
+                <p class="text-xs text-gray-500 mt-0.5">
+                    Every block below follows this unless it names its own sponsorship, which
+                    overrides it for that block only.
+                </p>
+            @endif
+        </div>
+
         {{-- ---------------- The blocks ---------------- --}}
         @if ($coupon->isUnique())
             <div class="px-5 py-4 border-b border-gray-200">
@@ -115,6 +146,20 @@
                     generated and handed over on its own, so a block's balance is what a group
                     registration is checked against.
                 </p>
+
+                @if ($canIssue && $sponsors->isEmpty())
+                    {{-- Said out loud rather than leaving an operator looking for a
+                         control that cannot exist yet, which is what this screen used
+                         to do: the select simply was not drawn and nothing explained
+                         why. --}}
+                    <p class="text-xs text-gray-500 mt-1.5">
+                        There are no sponsorship accounts yet, so there is nothing to tag a block to.
+                        <a href="{{ route('admin.settings.users', ['tab' => 'sponsorship']) }}"
+                           class="font-semibold text-blue-600 hover:underline">
+                            Create one under Settings, User Management, Sponsorship.
+                        </a>
+                    </p>
+                @endif
 
                 <div class="overflow-x-auto mt-3 rounded-lg border border-gray-200">
                     <table class="w-full text-sm">
@@ -176,7 +221,15 @@
                                                 </label>
                                                 <select id="sponsor-{{ $allocation->id }}" name="sponsor_user_id"
                                                         class="rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
-                                                    <option value="">Not sponsored</option>
+                                                    {{-- Blank is not "unsponsored" any more: it means
+                                                         this block follows the batch. Saying which it
+                                                         is matters, because the two look identical
+                                                         until somebody tags the batch. --}}
+                                                    <option value="">
+                                                        {{ $coupon->hasSponsor()
+                                                            ? 'Follow the batch (' . $coupon->sponsor?->name . ')'
+                                                            : 'Not sponsored' }}
+                                                    </option>
                                                     @foreach ($sponsors as $sponsor)
                                                         <option value="{{ $sponsor->id }}" @selected($allocation->sponsor_user_id === $sponsor->id)>
                                                             {{ $sponsor->name }}
@@ -196,9 +249,15 @@
                                                 </button>
                                             </form>
                                         @else
-                                            <span @class(['text-sm', 'text-gray-900' => $allocation->hasSponsor(), 'text-gray-500 italic' => ! $allocation->hasSponsor()])>
-                                                {{ $allocation->sponsor?->name ?? 'Not sponsored' }}
+                                            @php $effective = $allocation->effectiveSponsor(); @endphp
+
+                                            <span @class(['text-sm', 'text-gray-900' => $effective !== null, 'text-gray-500 italic' => $effective === null])>
+                                                {{ $effective?->name ?? 'Not sponsored' }}
                                             </span>
+                                        @endif
+
+                                        @if ($allocation->inheritsSponsor())
+                                            <span class="block text-xs text-gray-400 mt-0.5">from the batch</span>
                                         @endif
                                     </td>
 

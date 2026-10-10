@@ -160,6 +160,17 @@
                     </p>
                 </x-admin.field-row>
 
+                {{-- Wrapped so the script can find this row's own label and helper.
+
+                     THE LABEL FOLLOWS THE MODE. In unique mode the figure typed here
+                     is how many CODES to generate; in shared mode it is how many USES
+                     the one code allows. The two numbers are equal in unique mode, so
+                     a single label was not wrong — but this feature has already sent
+                     the owner down a wrong path once with a batch name that read like
+                     a code, and a label that still says "uses" while he is generating
+                     codes is the same mistake. The server renders the right one on
+                     load and the script keeps it right when the mode is switched. --}}
+                <div data-quantity-row>
                 <x-admin.field-row
                     :label="$isUnique ? 'How Many Codes' : 'How Many Uses'"
                     :help="$isUnique ? 'How many individual codes to generate now.' : 'How many times the code may be used. 0 means no limit.'"
@@ -210,6 +221,52 @@
                         </p>
                     @endif
                 </x-admin.field-row>
+                </div>
+
+                {{-- ---------------- Who funded the batch ---------------- --}}
+                @if ($canSetSponsor)
+                    <x-admin.field-row
+                        label="Sponsorship"
+                        help="Optional. The account that paid for this batch, so they can watch it being used."
+                        for="sponsor_user_id"
+                        error="sponsor_user_id">
+
+                        @if ($sponsors->isEmpty())
+                            {{-- An empty dropdown here would leave the operator hunting
+                                 for something that does not exist yet, which is exactly
+                                 what happened when this was only on the Report screen.
+                                 So the field says so, and says where to go. --}}
+                            <p class="text-sm text-gray-700">
+                                There are no sponsorship accounts yet.
+                                <a href="{{ route('admin.settings.users', ['tab' => 'sponsorship']) }}"
+                                   class="font-semibold text-blue-600 hover:underline">
+                                    Create one under Settings, User Management, Sponsorship
+                                </a>
+                                and it will be offered here.
+                            </p>
+                        @else
+                            <select id="sponsor_user_id" name="sponsor_user_id" class="{{ $input }}">
+                                <option value="">Not sponsored</option>
+                                @foreach ($sponsors as $account)
+                                    <option value="{{ $account->id }}" @selected((int) $sponsorId === (int) $account->id)>
+                                        {{ $account->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+
+                            {{-- THE RULE, said here as well as in the code, because two
+                                 places that can set the same thing is how the quantity
+                                 field confused this feature the first time round. See
+                                 CouponAllocation::effectiveSponsorId(). --}}
+                            <p class="text-xs text-gray-500 mt-1.5">
+                                This applies to the whole batch, including a single shared code.
+                                <span class="font-semibold">Every block in it follows this
+                                sponsorship unless that block names its own</span> on the
+                                batch report, which overrides it for that block only.
+                            </p>
+                        @endif
+                    </x-admin.field-row>
+                @endif
 
                 {{-- ---------------- Who handles the first block ---------------- --}}
                 @if ($mode === 'create')
@@ -438,6 +495,13 @@
         const quantity = document.querySelector('[data-quantity]');
         const codeNote = document.querySelector('[data-code-note]');
         const quantityNote = document.querySelector('[data-quantity-note]');
+
+        // This row's own label and helper. Switching the mode changes what the
+        // figure MEANS — codes to generate, or uses of one code — so the words have
+        // to move with it rather than only on the next page load.
+        const quantityRow = document.querySelector('[data-quantity-row]');
+        const quantityLabel = quantityRow?.querySelector('label[for="quantity"]');
+        const quantityHelp = quantityLabel?.parentElement?.querySelector('p');
         const handlerRow = document.querySelector('[data-handler-row]');
         const unit = document.querySelector('[data-unit]');
         const value = document.querySelector('[data-discount-value]');
@@ -479,6 +543,18 @@
                 quantityNote.textContent = unique
                     ? '1,000 codes fund 1,000 participants. Generate more later as a separate block for a different handler.'
                     : 'Set 50 and the code works for the first fifty people who type it. Set 0 and it works for everybody.';
+            }
+
+            // Only the label's own text node, so the required asterisk beside it is
+            // left alone.
+            if (quantityLabel?.firstChild) {
+                quantityLabel.firstChild.textContent = unique ? 'How Many Codes' : 'How Many Uses';
+            }
+
+            if (quantityHelp) {
+                quantityHelp.textContent = unique
+                    ? 'How many individual codes to generate now.'
+                    : 'How many times the code may be used. 0 means no limit.';
             }
 
             // Unlimited has no meaning for codes you print and hand out, so the floor

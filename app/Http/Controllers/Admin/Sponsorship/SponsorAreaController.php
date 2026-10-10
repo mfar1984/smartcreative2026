@@ -3,14 +3,17 @@
 namespace App\Http\Controllers\Admin\Sponsorship;
 
 use App\Http\Controllers\Controller;
+use App\Models\CouponCode;
 use App\Models\CouponIssuedCode;
+use App\Models\User;
 use App\Services\AdminLogger;
 use App\Support\CouponSponsorship;
 use App\Support\LocalTime;
+use App\Support\SponsorBlockRow;
 use Illuminate\Http\Request;
 
 /**
- * A sponsor's own area: the blocks they funded, and nothing else in the system.
+ * A sponsor's own area: what they funded, and nothing else in the system.
  *
  * WHY THIS IS A SEPARATE AREA RATHER THAN THE STAFF SCREENS WITH SCOPING BOLTED ON
  *
@@ -24,11 +27,20 @@ use Illuminate\Http\Request;
  *
  * HOW THE SCOPING WORKS, AND WHY IT CANNOT BE EDITED IN A URL
  *
- * Every query below starts from $request->user()->sponsoredAllocations(). There is no
- * sponsor id anywhere in these routes, so there is no number to change: another
- * sponsor's figures are not addressable from here at all. The block filter is resolved
- * against the signed-in sponsor's own blocks, so a stray id narrows to nothing rather
- * than reaching across.
+ * Every query below starts from $request->user() — sponsoredBlocks() for the blocks
+ * the rule resolves to them, and sponsoredSharedBatches() for the shared codes they
+ * funded outright. There is no sponsor id anywhere in these routes, so there is no
+ * number to change: another sponsor's figures are not addressable from here at all.
+ * The block filter is resolved against the signed-in sponsor's own blocks, so a stray
+ * id narrows to nothing rather than reaching across.
+ *
+ * TWO SHAPES IN ONE LIST, AND HOW THE SECOND ONE READS
+ *
+ * A unique batch is funded a BLOCK at a time, each handed to a named representative.
+ * A shared batch has no blocks at all — the name on the poster is the code — so it
+ * appears as a single row with no handler, labelled "One shared code — no block"
+ * rather than left blank. See SponsorBlockRow for why that is a sentence and not a
+ * dash, and why there is no invented allocation behind it.
  *
  * WHAT IS DELIBERATELY NOT ON THIS SCREEN
  *
@@ -69,9 +81,6 @@ class SponsorAreaController extends Controller
         $blockId = $this->blockFilter($request);
         $sort = $this->sortFilter($request);
 
-        $blocks = $this->blocks($request, $sort);
-        $allocationIds = $sponsor->sponsoredAllocations()->pluck('id')->all();
-
         return view('admin.sponsorship.index', [
             'sponsor' => $sponsor,
 
@@ -79,8 +88,8 @@ class SponsorAreaController extends Controller
             // and the Sponsorship tab read, so no two screens can disagree.
             'figures' => CouponSponsorship::forSponsor($sponsor),
 
-            'blocks' => $blocks,
-            'uses' => $this->uses($allocationIds, $blockId)->paginate(self::PER_PAGE)->withQueryString(),
+            'blocks' => $this->rows($sponsor, $sort),
+            'uses' => $this->uses($sponsor, $blockId)->paginate(self::PER_PAGE)->withQueryString(),
 
             'sorts' => self::SORTS,
             'sort' => $sort,
@@ -103,7 +112,6 @@ class SponsorAreaController extends Controller
 
         $set = $request->query('set') === 'uses' ? 'uses' : 'blocks';
         $blockId = $this->blockFilter($request);
-        $allocationIds = $sponsor->sponsoredAllocations()->pluck('id')->all();
 
         AdminLogger::activity('sponsorship.export', sprintf(
             'Exported the sponsorship %s list as CSV.',
@@ -114,11 +122,8 @@ class SponsorAreaController extends Controller
             ? ['Code', 'Coupon', 'Handler', 'Used At', 'Used By', 'Discount']
             : ['Coupon', 'Handler', 'Issued', 'Codes', 'Used', 'Unused', 'State'];
 
-        $rows = $set === 'uses'
-            ? $this->uses($allocationIds, $blockId)->with(['coupon:id,name', 'allocation.holder', 'redemption'])
-            : null;
-
-        $blocks = $set === 'blocks' ? $this->blocks($request, $this->sortFilter($request)) : null;
+        $rows = $set === 'uses' ? $this->uses($sponsor, $blockId) : null;
+        $blocks = $set === 'blocks' ? $this->rows($sponsor, $this->sortFilter($request)) : null;
 
         return response()->streamDownload(function () use ($set, $header, $rows, $blocks) {
             $handle = fopen('php://output', 'wb');
@@ -129,9 +134,9 @@ class SponsorAreaController extends Controller
             fputcsv($handle, $header);
 
             if ($set === 'uses') {
-                $rows->orderBy('id')->chunk(200, function ($chunk) use ($handle) {
-                    foreach ($chunk as $code) {
-                        fputcsv($handle, $this->useRow($code));
+                $rows->reorder('coupon_codes.id')->chunk(200, function ($chunk) use ($handle) {
+                    foreach ($chunk as $use) {
+                        fputcsv($handle, $this->useRow($use));
                     }
                 });
             } else {
@@ -151,52 +156,104 @@ class SponsorAreaController extends Controller
      * ------------------------------------------------------------------ */
 
     /**
-     * The sponsor's blocks, counted in SQL.
+     * Everything this sponsorship funded, as one list of rows.
      *
-     * One row per block: whose it is, how many codes, how many used, how many left.
-     * Counted here rather than by asking each row, because ten representatives would
-     * otherwise be twenty extra queries and the whole point of this list is being
-     * read at a glance.
+     * The blocks are counted in SQL — ten representatives would otherwise be twenty
+     * extra queries and the whole point of this list is being read at a glance — and
+     * the shared batches are added beside them.
      *
-     * @return \Illuminate\Support\Collection<int, \App\Models\CouponAllocation>
+     * The ORDER is applied in PHP rather than in SQL, which it was before. The two
+     * halves come from two tables, so there is no single query to sort; sorting the
+     * merged list is the only way the chosen order means the same thing for both
+     * shapes rather than quietly applying to the blocks alone.
+     *
+     * @return \Illuminate\Support\Collection<int, SponsorBlockRow>
      */
-    private function blocks(Request $request, string $sort)
+    private function rows(User $sponsor, string $sort)
     {
-        $query = $request->user()->sponsoredAllocations()
+        $blocks = $sponsor->sponsoredBlocks()
             ->with(['coupon:id,name,kind,mode,discount_type,discount_value', 'holder'])
             ->withCount([
                 'codes as codes_total',
                 'codes as codes_used' => fn ($codes) => $codes->whereNotNull('used_at'),
-            ]);
+            ])
+            ->get()
+            ->map(fn ($block) => SponsorBlockRow::fromBlock($block));
 
+        $shared = $sponsor->sponsoredSharedBatches()
+            ->withCount(['codes as uses' => fn ($codes) => $codes->whereNotNull('redeemed_at')])
+            ->get()
+            ->map(fn ($batch) => SponsorBlockRow::fromSharedBatch($batch, (int) $batch->uses));
+
+        return $this->sorted($blocks->concat($shared), $sort);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, SponsorBlockRow>  $rows
+     * @return \Illuminate\Support\Collection<int, SponsorBlockRow>
+     */
+    private function sorted($rows, string $sort)
+    {
         return match ($sort) {
-            'unused' => $query->orderByRaw('(codes_total - codes_used) desc')->orderBy('id')->get(),
-            'holder' => $query->get()->sortBy(fn ($block) => mb_strtolower($block->holderLabel()))->values(),
-            'codes' => $query->orderByDesc('codes_total')->orderBy('id')->get(),
-            'newest' => $query->orderByDesc('issued_at')->orderByDesc('id')->get(),
-            default => $query->orderByDesc('codes_used')->orderBy('id')->get(),
+            // Unlimited has no "left", so it sorts last rather than as zero: an
+            // endless code is not the thing a reader is looking for under "most
+            // left first".
+            'unused' => $rows->sortByDesc(fn (SponsorBlockRow $row) => $row->left ?? -1)->values(),
+            'holder' => $rows->sortBy(fn (SponsorBlockRow $row) => mb_strtolower($row->holderLabel()))->values(),
+            'codes' => $rows->sortByDesc(fn (SponsorBlockRow $row) => $row->total ?? PHP_INT_MAX)->values(),
+            'newest' => $rows->sortByDesc(fn (SponsorBlockRow $row) => $row->issuedAt?->getTimestamp() ?? 0)->values(),
+            default => $rows->sortByDesc(fn (SponsorBlockRow $row) => $row->used)->values(),
         };
     }
 
     /**
-     * The people who used the sponsor's codes.
+     * The people who used this sponsorship's coupons.
      *
-     * Read off the issued codes, which is what ties a use to a block and so to this
-     * sponsor. The ledger row is loaded for the name, the moment and the discount,
-     * and the registration and the order are deliberately NOT loaded: there is
-     * nothing on either that a sponsor is entitled to.
+     * Read off the LEDGER rather than off the issued codes, which is what it used to
+     * be. A shared batch mints nothing, so its uses exist only here; reading the
+     * issued codes would have left a sponsor looking at a real "actually used" figure
+     * above an empty list, which reads as a broken screen and is the kind of
+     * contradiction this feature is supposed to stop.
      *
-     * @param  array<int, int>  $allocationIds
-     * @return \Illuminate\Database\Eloquent\Builder<CouponIssuedCode>
+     * Two ways a ledger row belongs to this sponsorship, matching the two shapes:
+     *
+     *   it is the row an issued code in one of their blocks paid for, or
+     *   it is any use of a shared batch they funded outright.
+     *
+     * The registration and the order are deliberately NOT loaded: there is nothing on
+     * either that a sponsor is entitled to.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<CouponCode>
      */
-    private function uses(array $allocationIds, ?int $blockId)
+    private function uses(User $sponsor, ?int $blockId)
     {
-        return CouponIssuedCode::query()
-            ->whereIn('coupon_allocation_id', $blockId !== null ? [$blockId] : ($allocationIds ?: [0]))
-            ->whereNotNull('used_at')
-            ->with(['coupon:id,name', 'allocation.holder', 'redemption'])
-            ->orderByDesc('used_at')
-            ->orderByDesc('id');
+        $blockIds = $blockId !== null
+            ? [$blockId]
+            : ($sponsor->sponsoredBlocks()->pluck('coupon_allocations.id')->all() ?: [0]);
+
+        return CouponCode::query()
+            ->whereNotNull('coupon_codes.redeemed_at')
+            ->where(function ($query) use ($sponsor, $blockIds, $blockId) {
+                $query->whereIn('coupon_codes.id', CouponIssuedCode::query()
+                    ->whereIn('coupon_allocation_id', $blockIds)
+                    ->whereNotNull('coupon_code_id')
+                    ->select('coupon_code_id'));
+
+                /*
+                 | Only when nothing is filtered. The filter narrows to one BLOCK, and
+                 | a shared batch has none — folding it in anyway would make a
+                 | "one block only" view show uses from outside that block.
+                 */
+                if ($blockId === null) {
+                    $query->orWhereIn(
+                        'coupon_codes.coupon_id',
+                        $sponsor->sponsoredSharedBatches()->select('coupons.id'),
+                    );
+                }
+            })
+            ->with(['coupon:id,name', 'issuedCode.allocation.holder'])
+            ->orderByDesc('coupon_codes.redeemed_at')
+            ->orderByDesc('coupon_codes.id');
     }
 
     /**
@@ -214,7 +271,7 @@ class SponsorAreaController extends Controller
             return null;
         }
 
-        return $request->user()->sponsoredAllocations()->whereKey($wanted)->exists()
+        return $request->user()->sponsoredBlocks()->whereKey($wanted)->exists()
             ? (int) $wanted
             : null;
     }
@@ -227,27 +284,26 @@ class SponsorAreaController extends Controller
     }
 
     /**
-     * One block as a row of cells, in the same order as the CSV header.
+     * One row as a row of cells, in the same order as the CSV header.
      *
      * @return array<int, string>
      */
-    private function blockRow($block): array
+    private function blockRow(SponsorBlockRow $row): array
     {
-        $total = (int) $block->codes_total;
-        $used = (int) $block->codes_used;
-
         return [
-            (string) ($block->coupon?->name ?? ''),
+            $row->couponName,
 
             // The representative by label only. Their email, phone and IC stay with
-            // the office, which is the only party that needs to trace a code.
-            $block->holderLabel(),
+            // the office, which is the only party that needs to trace a code. A
+            // shared batch says in words that there is no block, rather than leaving
+            // a cell that reads as missing data.
+            $row->holderLabel(),
 
-            LocalTime::format($block->issued_at, fallback: ''),
-            (string) $total,
-            (string) $used,
-            (string) max(0, $total - $used),
-            $total - $used === 0 ? 'Finished' : ($used === 0 ? 'Untouched' : 'In use'),
+            $row->issuedLabel(fallback: ''),
+            $row->totalLabel(),
+            (string) $row->used,
+            $row->leftLabel(),
+            $row->stateLabel(),
         ];
     }
 
@@ -259,19 +315,19 @@ class SponsorAreaController extends Controller
      *
      * @return array<int, string>
      */
-    private function useRow(CouponIssuedCode $code): array
+    private function useRow(CouponCode $use): array
     {
         return [
-            (string) $code->code,
-            (string) ($code->coupon?->name ?? ''),
-            $code->holderLabel(),
+            $use->codeLabel(),
+            (string) ($use->coupon?->name ?? ''),
 
-            // Empty rather than the screen's em dash: a spreadsheet column wants a
-            // blank cell it can sort, not a character that reads as data.
-            LocalTime::format($code->used_at, fallback: ''),
+            // Empty rather than the screen's sentence: a spreadsheet wants a blank
+            // cell it can sort, not prose.
+            (string) ($use->holderLabel() ?? ''),
 
-            (string) ($code->redeemerName() ?? ''),
-            $code->redemption === null ? '' : number_format((float) $code->redemption->discount_amount, 2, '.', ''),
+            LocalTime::format($use->redeemed_at, fallback: ''),
+            (string) ($use->participant_name ?? ''),
+            number_format((float) $use->discount_amount, 2, '.', ''),
         ];
     }
 }

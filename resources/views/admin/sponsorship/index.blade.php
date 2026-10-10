@@ -122,7 +122,8 @@
             <p class="text-xs text-gray-500 mt-0.5">
                 Whose codes are finished, and whose have not been touched. Each block was
                 generated and handed over on its own, so a finished block is one
-                representative's share spent.
+                representative's share spent. A coupon that is one shared code has no
+                block and nobody holding it, so it appears here as a single row.
             </p>
 
             <form action="{{ route('admin.sponsorship.index') }}" method="GET" class="flex flex-wrap items-center gap-2 mt-3">
@@ -164,21 +165,16 @@
 
                     <tbody class="divide-y divide-gray-100">
                         @forelse ($blocks as $block)
-                            @php
-                                $total = (int) $block->codes_total;
-                                $used = (int) $block->codes_used;
-                                $left = max(0, $total - $used);
-
-                                // Read off the counted columns rather than the model's
-                                // own methods, which would each be another query per row.
-                                $tone = $left === 0 ? 'amber' : ($used === 0 ? 'gray' : 'green');
-                                $label = $left === 0 ? 'Finished' : ($used === 0 ? 'Untouched' : 'In use');
-                            @endphp
-
-                            <tr @class(['hover:bg-blue-50/40 align-top', 'bg-blue-50/60' => $blockId === $block->id])>
+                            {{-- Every figure and label is already worked out on the row.
+                                 See App\Support\SponsorBlockRow: a block of minted codes
+                                 and a whole shared batch are two different shapes, and
+                                 the row is what lets them read as one list without one
+                                 of them pretending to be the other. --}}
+                            <tr @class(['hover:bg-blue-50/40 align-top', 'bg-blue-50/60' => $blockId !== null && $blockId === $block->blockId])>
                                 {{-- The representative by NAME only. Their email, phone and
                                      IC stay with the office, which is the party that needs
-                                     to trace a code. --}}
+                                     to trace a code. A shared code was never handed to
+                                     anybody, so it says so instead of showing a blank. --}}
                                 <td class="px-5 py-3">
                                     <span @class(['font-semibold text-gray-900', 'text-gray-500 italic' => ! $block->hasHolder()])>
                                         {{ $block->holderLabel() }}
@@ -186,9 +182,9 @@
                                 </td>
 
                                 <td class="px-5 py-3 text-gray-600">
-                                    {{ $block->coupon?->name ?? '—' }}
+                                    {{ $block->couponName }}
                                     <span class="block text-xs text-gray-400">
-                                        {{ $block->coupon?->discountLabel() }}
+                                        {{ $block->discountLabel }}
                                     </span>
                                 </td>
 
@@ -196,19 +192,25 @@
                                     {{ $block->issuedLabel() }}
                                 </td>
 
-                                <td class="px-5 py-3 text-right text-gray-600 tabular-nums">{{ number_format($total) }}</td>
-                                <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums">{{ number_format($used) }}</td>
-                                <td class="px-5 py-3 text-right text-gray-600 tabular-nums">{{ number_format($left) }}</td>
+                                <td class="px-5 py-3 text-right text-gray-600 tabular-nums">{{ $block->totalLabel() }}</td>
+                                <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums">{{ number_format($block->used) }}</td>
+                                <td class="px-5 py-3 text-right text-gray-600 tabular-nums">{{ $block->leftLabel() }}</td>
 
                                 <td class="px-5 py-3 text-center">
-                                    <x-admin.badge :tone="$tone" :dot="true">{{ $label }}</x-admin.badge>
+                                    <x-admin.badge :tone="$block->stateTone()" :dot="true">{{ $block->stateLabel() }}</x-admin.badge>
                                 </td>
 
                                 <td class="px-5 py-3 text-center whitespace-nowrap">
-                                    <a href="{{ route('admin.sponsorship.index', ['block' => $block->id, 'sort' => $sort]) }}"
-                                       class="text-xs font-semibold text-blue-600 hover:underline">
-                                        Show
-                                    </a>
+                                    @if ($block->blockId === null)
+                                        {{-- Nothing to narrow to: there is one code and
+                                             every use of it is already in the list below. --}}
+                                        <span class="text-xs text-gray-400">Listed below</span>
+                                    @else
+                                        <a href="{{ route('admin.sponsorship.index', ['block' => $block->blockId, 'sort' => $sort]) }}"
+                                           class="text-xs font-semibold text-blue-600 hover:underline">
+                                            Show
+                                        </a>
+                                    @endif
                                 </td>
                             </tr>
                         @empty
@@ -257,26 +259,30 @@
                 </thead>
 
                 <tbody class="divide-y divide-gray-100">
+                    {{-- Read off the LEDGER, which is the only record a shared code's
+                         uses leave: a shared batch mints nothing, so reading the issued
+                         codes would show a real "actually used" figure above an empty
+                         list. --}}
                     @forelse ($uses as $use)
                         <tr class="hover:bg-blue-50/40 align-top">
                             <td class="px-5 py-3 font-mono font-semibold text-gray-900 whitespace-nowrap">
-                                {{ $use->code }}
+                                {{ $use->codeLabel() }}
                             </td>
 
                             <td class="px-5 py-3 text-gray-600">{{ $use->coupon?->name ?? '—' }}</td>
 
-                            <td class="px-5 py-3 text-gray-600">{{ $use->holderLabel() }}</td>
+                            <td class="px-5 py-3 text-gray-600">{{ $use->holderLabel() ?? 'One shared code — no block' }}</td>
 
                             {{-- The REDEEMER, by name only. Their IC, phone, reference and
                                  what they paid are on the registration and stay there. --}}
-                            <td class="px-5 py-3 text-gray-700">{{ $use->redeemerName() ?? '—' }}</td>
+                            <td class="px-5 py-3 text-gray-700">{{ $use->participant_name ?? '—' }}</td>
 
                             <td class="px-5 py-3 text-gray-600 whitespace-nowrap tabular-nums">
-                                {{ $use->usedAtLabel() }}
+                                {{ $use->redeemedAtLabel() }}
                             </td>
 
                             <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">
-                                {{ $use->redemption === null ? '—' : $use->redemption->discountLabel() }}
+                                {{ $use->discountLabel() }}
                             </td>
                         </tr>
                     @empty

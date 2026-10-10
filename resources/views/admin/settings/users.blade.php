@@ -442,22 +442,37 @@
                         <tbody class="divide-y divide-gray-100">
                             @forelse ($sponsors as $index => $row)
                                 @php
-                                    $blocks = $row->sponsoredAllocations;
-                                    $codes = $blocks->sum(fn ($block) => (int) $block->codes_total);
-                                    $usedCodes = $blocks->sum(fn ($block) => (int) $block->codes_used);
-                                    $batches = $blocks->pluck('coupon.name')->filter()->unique();
+                                    // CouponSponsorship's own figures, which resolve a
+                                    // batch-level sponsorship as well as a block-level
+                                    // one, so this column and the sponsor's own screen
+                                    // cannot disagree about what they funded.
+                                    $figures = $sponsorFigures[$row->id] ?? null;
+                                    $batches = $sponsorBatches[$row->id] ?? [];
+                                    $units = ($figures['blocks'] ?? 0) + ($figures['shared_batches'] ?? 0);
 
                                     // Assembled in one string rather than across
                                     // several lines of markup, so the sentence a
                                     // reader sees is the sentence in the source.
-                                    $fundedLine = sprintf(
-                                        '%s %s · %s of %s %s used',
-                                        number_format($blocks->count()),
-                                        Str::plural('block', $blocks->count()),
-                                        number_format($usedCodes),
-                                        number_format($codes),
-                                        Str::plural('code', $codes),
+                                    $fundedParts = [];
+
+                                    if (($figures['blocks'] ?? 0) > 0) {
+                                        $fundedParts[] = number_format($figures['blocks'])
+                                            . ' ' . Str::plural('block', $figures['blocks']);
+                                    }
+
+                                    if (($figures['shared_batches'] ?? 0) > 0) {
+                                        $fundedParts[] = number_format($figures['shared_batches'])
+                                            . ' shared ' . Str::plural('code', $figures['shared_batches']);
+                                    }
+
+                                    $fundedParts[] = sprintf(
+                                        '%s of %s %s used',
+                                        number_format($figures['used'] ?? 0),
+                                        number_format($figures['codes'] ?? 0),
+                                        Str::plural('code', $figures['codes'] ?? 0),
                                     );
+
+                                    $fundedLine = implode(' · ', $fundedParts);
                                 @endphp
 
                                 <tr class="hover:bg-blue-50/40 align-top">
@@ -488,7 +503,7 @@
                                     {{-- What the account is tied to, and the state of it. This
                                          column is the whole reason somebody opens this tab. --}}
                                     <td class="px-6 py-3">
-                                        @if ($blocks->isEmpty())
+                                        @if ($batches === [])
                                             <span class="text-xs text-gray-400">— Not tagged to any coupon yet</span>
                                         @else
                                             @foreach ($batches as $batchName)
@@ -507,7 +522,7 @@
                                     </td>
 
                                     <td class="px-6 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">
-                                        {{ \App\Support\PaymentFigures::money($sponsorSpend[$row->id] ?? 0) }}
+                                        {{ \App\Support\PaymentFigures::money($figures['actual'] ?? 0) }}
                                     </td>
 
                                     <td class="px-6 py-3 whitespace-nowrap">
@@ -522,12 +537,12 @@
 
                                             @if ($canDeleteSponsor)
                                                 @php
-                                                    $confirm = $blocks->isEmpty()
+                                                    $confirm = $units === 0
                                                         ? sprintf('Delete %s? This cannot be undone.', $row->name)
                                                         : sprintf(
-                                                            'Delete %s? %d coupon block(s) will be released, keeping every code and every use. This cannot be undone.',
+                                                            'Delete %s? %d coupon block(s) or batch(es) will be released, keeping every code and every use. This cannot be undone.',
                                                             $row->name,
-                                                            $blocks->count(),
+                                                            $units,
                                                         );
                                                 @endphp
 

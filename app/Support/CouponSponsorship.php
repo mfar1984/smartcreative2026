@@ -86,13 +86,26 @@ class CouponSponsorship
     }
 
     /**
-     * The same four figures for ONE SPONSORSHIP ACCOUNT, scoped to the blocks it funded.
+     * The same four figures for ONE SPONSORSHIP ACCOUNT, scoped to what it funded.
      *
      * Here rather than in the sponsor's controller on purpose. A second
      * implementation of "what has this sponsorship given away" is how two screens
      * come to show a sponsor two different answers, so every figure below is worked
      * out by the methods above: the estimate through perCodeValue(), the actual off
      * the same ledger column, and remaining from the actual and never the estimate.
+     *
+     * WHAT COUNTS AS "WHAT IT FUNDED", WHICH IS TWO THINGS AND NOT ONE
+     *
+     *   BLOCKS      resolved by CouponAllocation's rule: a block that names this
+     *               sponsorship, or a block that names nobody on a batch that does.
+     *   SHARED      batches tagged at the batch level that mint no codes at all.
+     *               A shared batch has no blocks for a tag to sit on, so an
+     *               allocation-only reading dropped it entirely — a sponsor pledging
+     *               against one shared code used twenty times saw nothing. Its uses
+     *               and its discount are counted exactly as a unique batch's are;
+     *               the only question it cannot answer is whose block, and that is
+     *               the sponsor's own screen's problem to word, not a reason to
+     *               leave the money out.
      *
      * WHAT IS SCOPED, AND WHAT THAT MEANS
      *
@@ -106,9 +119,10 @@ class CouponSponsorship
      *   ACTUAL      the real discount on the ledger rows their own codes paid for.
      *   REMAINING   their pledge less that actual, floored at zero.
      *
-     * A batch whose codes have no knowable value contributes nothing to the estimate
-     * and is counted in `unpriced`, so the screen can say why the estimate is short
-     * rather than quietly understating it.
+     * A batch whose codes have no knowable value — a percentage ticked on nothing, or
+     * an unlimited shared code with no countable allocation — contributes nothing to
+     * the estimate and is counted in `unpriced`, so the screen can say why the
+     * estimate is short rather than quietly understating it.
      *
      * @return array{
      *     committed: float|null,
@@ -120,6 +134,7 @@ class CouponSponsorship
      *     unused: int,
      *     blocks: int,
      *     batches: int,
+     *     shared_batches: int,
      *     unpriced: int,
      *     exact: bool,
      * }
@@ -130,15 +145,22 @@ class CouponSponsorship
             ? null
             : round((float) $sponsor->sponsor_committed_amount, 2);
 
-        $allocationIds = $sponsor->sponsoredAllocations()->pluck('id')->all();
+        $allocationIds = self::blockIdsFor($sponsor);
+        $sharedBatches = $sponsor->sponsoredSharedBatches()->get();
 
-        $codes = self::sponsorCodes($allocationIds);
+        $total = self::sponsorCodes($allocationIds)->count();
         $used = self::sponsorCodes($allocationIds)->whereNotNull('used_at')->count();
-        $total = $codes->count();
 
-        $actual = self::actualForAllocations($allocationIds);
+        foreach ($sharedBatches as $batch) {
+            // The cap is the same promise as a minted code, which is what
+            // codesIssued() already says. An unlimited one has nothing to add.
+            $total += self::codesIssued($batch) ?? 0;
+            $used += $batch->redeemedCount();
+        }
 
-        [$estimated, $unpriced, $exact, $batches] = self::sponsorEstimate($allocationIds);
+        $actual = self::actualForParts($allocationIds, $sharedBatches->modelKeys());
+
+        [$estimated, $unpriced, $exact, $batches] = self::sponsorEstimate($allocationIds, $sharedBatches);
 
         return [
             'committed' => $committed,
@@ -150,6 +172,7 @@ class CouponSponsorship
             'unused' => max(0, $total - $used),
             'blocks' => count($allocationIds),
             'batches' => $batches,
+            'shared_batches' => $sharedBatches->count(),
             'unpriced' => $unpriced,
             'exact' => $exact,
         ];
@@ -190,6 +213,30 @@ class CouponSponsorship
                 ->whereIn('coupon_allocation_id', $allocationIds)
                 ->whereNotNull('coupon_code_id')
                 ->select('coupon_code_id'))
+            ->whereNotNull('redeemed_at')
+            ->sum('discount_amount'), 2);
+    }
+
+    /**
+     * What a set of WHOLE BATCHES has really given away, in ringgit.
+     *
+     * The same ledger column again, reached straight off the batch because a shared
+     * batch has no codes to go through: the name on the poster was typed, and every
+     * ledger row on that batch is a use of it. Only ever called with batches a
+     * sponsorship funds outright, which in practice means shared ones — a unique
+     * batch is reached through its blocks so that a block overridden to somebody
+     * else is not counted here as well.
+     *
+     * @param  array<int, int>  $couponIds
+     */
+    public static function actualForBatches(array $couponIds): float
+    {
+        if ($couponIds === []) {
+            return 0.0;
+        }
+
+        return round((float) CouponCode::query()
+            ->whereIn('coupon_id', $couponIds)
             ->whereNotNull('redeemed_at')
             ->sum('discount_amount'), 2);
     }
@@ -269,6 +316,33 @@ class CouponSponsorship
      * ------------------------------------------------------------------ */
 
     /**
+     * The ids of every block this sponsorship answers for, by either level.
+     *
+     * One place, so the figures and the screens narrow identically. The rule itself
+     * is CouponAllocation's.
+     *
+     * @return array<int, int>
+     */
+    private static function blockIdsFor(User $sponsor): array
+    {
+        return $sponsor->sponsoredBlocks()->pluck('coupon_allocations.id')->all();
+    }
+
+    /**
+     * The two halves of a sponsorship's spend, added.
+     *
+     * @param  array<int, int>  $allocationIds
+     * @param  array<int, int>  $sharedBatchIds
+     */
+    private static function actualForParts(array $allocationIds, array $sharedBatchIds): float
+    {
+        return round(
+            self::actualForAllocations($allocationIds) + self::actualForBatches($sharedBatchIds),
+            2,
+        );
+    }
+
+    /**
      * The codes issued inside a set of blocks.
      *
      * Returns a fresh builder each call so a count and a filtered count do not share
@@ -284,35 +358,58 @@ class CouponSponsorship
     }
 
     /**
-     * The estimate across every batch a sponsor holds blocks on.
+     * The estimate across every batch a sponsor funds, by blocks or outright.
      *
      * Per batch, because what one code is worth is a property of its batch: 50% of a
      * RM15 event is RM7.50 a code there and something else on the batch beside it.
      * Summed rather than averaged, so the figure is the sponsor's own codes and not a
      * blend of everybody's.
      *
+     * A shared batch contributes the same way, with codesIssued() standing in for the
+     * code count: its use cap is the same promise expressed as a number of uses. An
+     * unlimited one has no countable allocation and so is counted as unpriced rather
+     * than as nothing.
+     *
      * @param  array<int, int>  $allocationIds
+     * @param  \Illuminate\Support\Collection<int, Coupon>  $sharedBatches
      * @return array{0: float|null, 1: int, 2: bool, 3: int}
      */
-    private static function sponsorEstimate(array $allocationIds): array
+    private static function sponsorEstimate(array $allocationIds, $sharedBatches): array
     {
-        if ($allocationIds === []) {
+        if ($allocationIds === [] && $sharedBatches->isEmpty()) {
             return [null, 0, true, 0];
         }
 
-        $perBatch = self::sponsorCodes($allocationIds)
-            ->selectRaw('coupon_id, COUNT(*) as codes')
-            ->groupBy('coupon_id')
-            ->pluck('codes', 'coupon_id');
+        $perBatch = $allocationIds === []
+            ? collect()
+            : self::sponsorCodes($allocationIds)
+                ->selectRaw('coupon_id, COUNT(*) as codes')
+                ->groupBy('coupon_id')
+                ->pluck('codes', 'coupon_id');
+
+        /*
+         | batch => how many codes of it this sponsorship holds. Blocks first, then
+         | the shared batches, which cannot collide: a shared batch mints nothing and
+         | so can never appear among the blocks.
+         */
+        $contributions = [];
+
+        foreach (Coupon::query()->whereIn('id', $perBatch->keys())->get() as $coupon) {
+            $contributions[] = [$coupon, (int) $perBatch[$coupon->id]];
+        }
+
+        foreach ($sharedBatches as $coupon) {
+            $contributions[] = [$coupon, self::codesIssued($coupon)];
+        }
 
         $estimated = null;
         $unpriced = 0;
         $exact = true;
 
-        foreach (Coupon::query()->whereIn('id', $perBatch->keys())->get() as $coupon) {
+        foreach ($contributions as [$coupon, $codes]) {
             [$perCode, , $batchExact] = self::perCodeValue($coupon);
 
-            if ($perCode === null) {
+            if ($perCode === null || $codes === null) {
                 // "We cannot say" for this batch, which is not the same as nothing.
                 $unpriced++;
                 $exact = false;
@@ -321,10 +418,10 @@ class CouponSponsorship
             }
 
             $exact = $exact && $batchExact;
-            $estimated = round(($estimated ?? 0.0) + $perCode * (int) $perBatch[$coupon->id], 2);
+            $estimated = round(($estimated ?? 0.0) + $perCode * $codes, 2);
         }
 
-        return [$estimated, $unpriced, $exact, $perBatch->count()];
+        return [$estimated, $unpriced, $exact, count($contributions)];
     }
 
     /**

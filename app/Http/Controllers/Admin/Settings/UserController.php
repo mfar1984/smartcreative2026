@@ -9,6 +9,7 @@ use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateHandlerRequest;
 use App\Http\Requests\Admin\UpdateSponsorRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
+use App\Models\Coupon;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\AdminLogger;
@@ -75,10 +76,15 @@ class UserController extends Controller
             'handlers' => $activeTab === 'handler' ? $this->handlerRows($search, $status) : null,
             'sponsors' => $sponsors,
 
-            // What each sponsorship has actually given away, worked out by
-            // CouponSponsorship so this tab and the sponsor's own screen can never
-            // show two different answers.
-            'sponsorSpend' => $sponsors === null ? [] : $this->sponsorSpend($sponsors),
+            /*
+             | What each sponsorship holds and what it has actually given away,
+             | worked out by CouponSponsorship so this tab and the sponsor's own
+             | screen can never show two different answers. That guarantee is the
+             | reason this is not a clever join here: a second implementation is how
+             | the two would come to disagree about somebody's money.
+             */
+            'sponsorFigures' => $sponsors === null ? [] : $this->sponsorFigures($sponsors),
+            'sponsorBatches' => $sponsors === null ? [] : $this->sponsorBatches($sponsors),
 
             'roles' => Role::query()->orderBy('name')->get(),
             'search' => $search,
@@ -156,21 +162,17 @@ class UserController extends Controller
     /**
      * The Sponsorship tab: monitor-only accounts and what each one funded.
      *
-     * The blocks are eager loaded with their batch and their code counts, because
-     * that is the whole reason somebody opens this tab: which coupons this
-     * sponsorship is tied to, and how much of it has been used. Its own page name,
-     * so a page number from one tab is not carried into another.
+     * What each one funded is NOT eager loaded off sponsoredAllocations any more.
+     * That relation is the raw column, and a batch-level sponsorship covers blocks
+     * that leave it blank — so it under-reported, and a shared-code batch has no
+     * allocation for it to find at all. The figures are asked of CouponSponsorship
+     * per row instead, which resolves both levels of the rule. Its own page name, so
+     * a page number from one tab is not carried into another.
      */
     private function sponsorRows(string $search, ?string $status): LengthAwarePaginator
     {
         return User::query()
             ->where('is_sponsor', true)
-            ->with(['sponsoredAllocations' => fn ($query) => $query
-                ->with(['coupon:id,name,kind', 'holder'])
-                ->withCount([
-                    'codes as codes_total',
-                    'codes as codes_used' => fn ($codes) => $codes->whereNotNull('used_at'),
-                ])])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('name', 'like', "%{$search}%")
@@ -185,27 +187,55 @@ class UserController extends Controller
     }
 
     /**
-     * Sponsor id => the ringgit that sponsorship has really given away.
+     * Sponsor id => every figure for that sponsorship, CouponSponsorship's own.
      *
-     * Asked of CouponSponsorship once per row rather than worked out here in one
-     * clever join. A page of fifteen is fifteen cheap queries, and the alternative
-     * is a second implementation of the same figure — which is how this tab and the
-     * sponsor's own screen would end up disagreeing about their money.
+     * Asked once per row rather than worked out here in one clever join. A page of
+     * fifteen is fifteen cheap queries, and the alternative is a second
+     * implementation of the same figures — which is how this tab and the sponsor's
+     * own screen would end up disagreeing about their money.
      *
      * @param  LengthAwarePaginator<int, User>  $sponsors
-     * @return array<int, float>
+     * @return array<int, array<string, mixed>>
      */
-    private function sponsorSpend(LengthAwarePaginator $sponsors): array
+    private function sponsorFigures(LengthAwarePaginator $sponsors): array
     {
-        $spend = [];
+        $figures = [];
 
         foreach ($sponsors as $sponsor) {
-            $spend[$sponsor->id] = CouponSponsorship::actualForAllocations(
-                $sponsor->sponsoredAllocations->pluck('id')->all(),
-            );
+            $figures[$sponsor->id] = CouponSponsorship::forSponsor($sponsor);
         }
 
-        return $spend;
+        return $figures;
+    }
+
+    /**
+     * Sponsor id => the names of the coupons that sponsorship funds.
+     *
+     * Both halves of the rule: a batch it holds a resolved block on, and a shared
+     * batch it funded outright. The column is the whole reason somebody opens this
+     * tab, so it has to name the shared ones too.
+     *
+     * @param  LengthAwarePaginator<int, User>  $sponsors
+     * @return array<int, array<int, string>>
+     */
+    private function sponsorBatches(LengthAwarePaginator $sponsors): array
+    {
+        $batches = [];
+
+        foreach ($sponsors as $sponsor) {
+            $batches[$sponsor->id] = $sponsor->sponsoredBlocks()
+                ->with('coupon:id,name')
+                ->get()
+                ->map(fn ($block) => (string) ($block->coupon?->name ?? ''))
+                ->concat($sponsor->sponsoredSharedBatches()->pluck('name'))
+                ->filter()
+                ->unique()
+                ->sort()
+                ->values()
+                ->all();
+        }
+
+        return $batches;
     }
 
     /**
@@ -563,18 +593,21 @@ class UserController extends Controller
     /**
      * Delete a sponsorship account.
      *
-     * The blocks it funded are RELEASED rather than destroyed: sponsor_user_id is
-     * nulled by the foreign key, so the codes, who holds them and every use of them
-     * stay exactly as they are. Codes that have been printed and handed out must not
-     * disappear because an account was closed. How many blocks were released is
-     * recorded, because that is the part somebody will want to know afterwards.
+     * What it funded is RELEASED rather than destroyed: sponsor_user_id is nulled by
+     * the foreign key on both the blocks and the batches, so the codes, who holds
+     * them and every use of them stay exactly as they are. Codes that have been
+     * printed and handed out must not disappear because an account was closed. How
+     * much was released is recorded, because that is the part somebody will want to
+     * know afterwards — counted at both levels, since a batch-level tag releases the
+     * same way and a shared batch has no block to count at all.
      */
     public function destroySponsor(Request $request, User $user)
     {
         $this->refuseCrossTab($user, 'sponsorship');
 
         $label = $user->logLabel();
-        $blocks = $user->sponsoredAllocations()->count();
+        $blocks = $user->sponsoredAllocations()->count()
+            + Coupon::query()->where('sponsor_user_id', $user->id)->count();
 
         AdminLogger::audit($user, 'deleted', [
             'name' => $user->name,
@@ -590,7 +623,7 @@ class UserController extends Controller
 
         AdminLogger::activity('sponsors.delete', $blocks === 0
             ? sprintf('Deleted sponsorship account %s.', $label)
-            : sprintf('Deleted sponsorship account %s, releasing %d coupon block(s).', $label, $blocks));
+            : sprintf('Deleted sponsorship account %s, releasing %d coupon block(s) or batch(es).', $label, $blocks));
 
         return redirect()
             ->route('admin.settings.users', ['tab' => 'sponsorship'])

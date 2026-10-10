@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\CouponAllocationRequest;
 use App\Http\Requests\Admin\CouponRequest;
 use App\Models\Coupon;
+use App\Models\User;
 use App\Services\AdminLogger;
 use App\Services\Coupon\CouponIssuer;
 use App\Support\CouponDesignSample;
@@ -50,9 +51,9 @@ class CouponController extends Controller
         ]);
     }
 
-    public function create()
+    public function create(Request $request)
     {
-        return view('admin.coupon.form', $this->formData(new Coupon([
+        return view('admin.coupon.form', $this->formData($request, new Coupon([
             'kind' => Coupon::KIND_EVENT,
             'mode' => Coupon::MODE_SHARED,
             'quantity' => 0,
@@ -102,8 +103,13 @@ class CouponController extends Controller
             'discount_type' => $coupon->discount_type,
             'discount_value' => (float) $coupon->discount_value,
             'committed_amount' => $coupon->committed_amount === null ? null : (float) $coupon->committed_amount,
+            'sponsor' => $coupon->sponsor?->logLabel(),
             'expires_at' => $coupon->expires_at?->toDateString(),
         ]);
+
+        // Recorded in its own right even on a fresh batch: it decides whose money a
+        // discount comes out of and who gets a screen showing it.
+        $this->logSponsorship($coupon, null, $coupon->sponsor);
 
         if ($coupon->isUnique()) {
             return redirect()
@@ -157,22 +163,32 @@ class CouponController extends Controller
             ));
     }
 
-    public function edit(Coupon $coupon)
+    public function edit(Request $request, Coupon $coupon)
     {
-        return view('admin.coupon.form', $this->formData($coupon, 'edit'));
+        return view('admin.coupon.form', $this->formData($request, $coupon, 'edit'));
     }
 
     public function update(CouponRequest $request, Coupon $coupon)
     {
         $before = $this->snapshot($coupon);
 
+        // Read before the fill, because after it the relation would answer with the
+        // new account and the trail would name the same sponsorship twice.
+        $previousSponsor = $coupon->sponsor;
+
         $coupon->fill($request->couponAttributes());
         $this->applyDesignImage($request, $coupon);
+
+        $sponsorChanged = $coupon->isDirty('sponsor_user_id');
 
         $coupon->save();
 
         AdminLogger::activity('coupons.update', sprintf('Updated coupon %s.', $coupon->name));
         AdminLogger::audit($coupon, 'updated', $before, $this->snapshot($coupon));
+
+        if ($sponsorChanged) {
+            $this->logSponsorship($coupon, $previousSponsor, $coupon->fresh()->sponsor);
+        }
 
         return redirect()
             ->route('admin.coupons.index')
@@ -259,14 +275,60 @@ class CouponController extends Controller
             'discount_type' => $coupon->discount_type,
             'discount_value' => (float) $coupon->discount_value,
             'committed_amount' => $coupon->committed_amount === null ? null : (float) $coupon->committed_amount,
+            'sponsor' => $coupon->sponsor?->logLabel(),
             'expires_at' => $coupon->expires_at?->toDateString(),
         ];
     }
 
     /**
+     * Who funded this batch changing hands, named at both ends.
+     *
+     * NEVER SILENT. This moves the responsibility for a discount between
+     * sponsorship accounts: whose pledge it comes out of, whose screen it appears
+     * on, and whose figures it leaves. Both the old sponsorship and the new one are
+     * named in the activity line and in the audit entry, because "it used to be
+     * theirs" is the half somebody will actually be asking about afterwards.
+     *
+     * The same action slug the Report screen's per-block tagging writes, so one
+     * filter answers "who changed who funded what" whichever level it was done at.
+     */
+    private function logSponsorship(Coupon $coupon, ?User $before, ?User $after): void
+    {
+        if ($before === null && $after === null) {
+            return;
+        }
+
+        AdminLogger::activity('coupons.sponsor', match (true) {
+            $after === null => sprintf(
+                'Removed the sponsorship %s from coupon %s. It is not sponsored now.',
+                $before->logLabel(),
+                $coupon->name,
+            ),
+            $before === null => sprintf(
+                'Tagged coupon %s to sponsorship %s. It was not sponsored before.',
+                $coupon->name,
+                $after->logLabel(),
+            ),
+            default => sprintf(
+                'Moved coupon %s from sponsorship %s to %s.',
+                $coupon->name,
+                $before->logLabel(),
+                $after->logLabel(),
+            ),
+        });
+
+        AdminLogger::audit(
+            $coupon,
+            'coupon.sponsor_tagged',
+            ['coupon' => $coupon->name, 'sponsor' => $before?->logLabel()],
+            ['coupon' => $coupon->name, 'sponsor' => $after?->logLabel()],
+        );
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    private function formData(Coupon $coupon, string $mode): array
+    private function formData(Request $request, Coupon $coupon, string $mode): array
     {
         /*
          | THE DESIGN PICKER RENDERS ONE GROUP, NOT ALL OF THEM.
@@ -288,6 +350,24 @@ class CouponController extends Controller
         // group on show — custom belongs to no group at all.
         $previewed = array_values(array_unique([...array_keys($groupDesigns), $design, Coupon::DESIGN_CUSTOM]));
 
+        /*
+         | WHO FUNDED THE BATCH, offered on the form itself rather than only on the
+         | Report screen afterwards.
+         |
+         | Two things were wrong with only having it there. The owner could not find
+         | it — the control only appeared once a sponsorship account existed, and
+         | only on a batch that had blocks. And a SHARED batch could not be sponsored
+         | at all, because a shared batch never gets an allocation and the tag lived
+         | on the allocation. Nobody decided to exclude the case; it fell out of where
+         | the tag was put. See the 2026_10_16 migration.
+         |
+         | On coupons.update rather than a new slug, because it is the same action the
+         | Report screen already guards with that permission: this only moves where it
+         | is done. CouponRequest refuses a submitted value from anybody without it,
+         | so a role that cannot see the field cannot post one either.
+         */
+        $canSetSponsor = $request->user()->hasPermission('coupons.update');
+
         return [
             'coupon' => $coupon,
             'mode' => $mode,
@@ -295,6 +375,15 @@ class CouponController extends Controller
             'codeModes' => Coupon::MODES,
             'discountTypes' => Coupon::DISCOUNT_TYPES,
             'maxQuantity' => CouponRequest::MAX_QUANTITY,
+
+            'canSetSponsor' => $canSetSponsor,
+            'sponsorId' => old('sponsor_user_id', $coupon->sponsor_user_id),
+
+            // Loaded only for somebody who may actually choose one, because for
+            // everybody else it is a list of accounts with no control to use it on.
+            'sponsors' => $canSetSponsor
+                ? User::query()->where('is_sponsor', true)->orderBy('name')->get(['id', 'name'])
+                : collect(),
 
             // Offered as a starting point so the operator can accept it or type over
             // it, which is the two ways the owner asked for in one field.

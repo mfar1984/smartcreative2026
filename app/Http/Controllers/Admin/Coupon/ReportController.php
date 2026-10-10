@@ -217,7 +217,15 @@ class ReportController extends Controller
                 'codes as codes_used' => fn ($query) => $query->whereNotNull('used_at'),
             ])
             ->orderBy('id')
-            ->get();
+            ->get()
+            /*
+             | The batch is handed to each row rather than fetched by it. The screen
+             | shows whose block each one is through
+             | CouponAllocation::effectiveSponsor(), which falls back to the batch's
+             | own sponsorship — and that would be one query per block for a batch
+             | already loaded and sitting right here.
+             */
+            ->each(fn ($allocation) => $allocation->setRelation('coupon', $coupon));
     }
 
     /**

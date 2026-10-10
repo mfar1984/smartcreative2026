@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use App\Support\LocalTime;
 use App\Support\PaymentFigures;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * One use of a coupon: the redemption ledger. ONE ROW PER PARTICIPANT COVERED.
@@ -84,6 +86,19 @@ class CouponCode extends Model
         return $this->belongsTo(ShopOrder::class, 'shop_order_id');
     }
 
+    /**
+     * The minted code this use was paid for with, or null on a shared batch.
+     *
+     * One ledger row is paired to at most one issued code, which is what makes
+     * "whose block spent this" a single hop. A shared batch mints nothing, so the
+     * answer there is genuinely null rather than missing: the name on the poster was
+     * typed, and there is no block behind it.
+     */
+    public function issuedCode(): HasOne
+    {
+        return $this->hasOne(CouponIssuedCode::class, 'coupon_code_id');
+    }
+
     /* ---------------------------------------------------------------------
      | Reading
      * ------------------------------------------------------------------ */
@@ -91,6 +106,24 @@ class CouponCode extends Model
     public function isRedeemed(): bool
     {
         return $this->redeemed_at !== null;
+    }
+
+    /**
+     * Who handed out the code this use spent, or null when nobody did.
+     *
+     * Null for a shared batch, where there is no block and so no representative.
+     * Deliberately not a dash or a blank: the caller decides how "there is no
+     * handler because there is no block" should read on its own screen.
+     */
+    public function holderLabel(): ?string
+    {
+        return $this->issuedCode?->holderLabel();
+    }
+
+    /** When it was used, on the office clock. A real instant, so it is shifted. */
+    public function redeemedAtLabel(): string
+    {
+        return $this->redeemed_at === null ? '—' : LocalTime::format($this->redeemed_at);
     }
 
     /**

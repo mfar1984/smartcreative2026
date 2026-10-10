@@ -137,15 +137,54 @@ class User extends Authenticatable
     }
 
     /**
-     * The blocks of coupon codes this sponsor funded.
+     * The blocks that name this sponsorship OUTRIGHT, off their own column.
      *
-     * The ONE relation the sponsor's own area reads, and the reason it is safe: a
-     * sponsor's whole holding is reachable from their own id, so no screen in that
-     * area has to be told to narrow itself.
+     * The raw relation, and NOT what a screen should ask. A block that names nobody
+     * follows its batch — see CouponAllocation::effectiveSponsorId() — so this
+     * relation alone would miss every block a batch-level tag covers. Kept because
+     * it is the one thing that can be eager loaded and because "which blocks were
+     * pointed here by hand" is a real question when an override is being read.
+     *
+     * Everything that totals a sponsor's money reads sponsoredBlocks() below.
      */
     public function sponsoredAllocations(): HasMany
     {
         return $this->hasMany(CouponAllocation::class, 'sponsor_user_id')->orderBy('id');
+    }
+
+    /**
+     * Every block this sponsorship answers for, by EITHER level of the rule.
+     *
+     * The one query the sponsor's own area and CouponSponsorship read, and the
+     * reason the area is safe: a sponsor's whole holding is reachable from their own
+     * id, so no screen there has to be told to narrow itself.
+     *
+     * A Builder rather than a relation because the rule is an OR across two tables,
+     * which a HasMany cannot express. The rule itself is not written here — it is
+     * CouponAllocation's scope, so there is exactly one implementation of it.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<CouponAllocation>
+     */
+    public function sponsoredBlocks()
+    {
+        return CouponAllocation::query()->sponsoredBy((int) $this->id)->orderBy('coupon_allocations.id');
+    }
+
+    /**
+     * The SHARED-code batches this sponsorship funded, which have no blocks at all.
+     *
+     * A shared batch mints nothing, so it can only ever be tagged at the batch
+     * level, and it is invisible to any query that starts from allocations. This is
+     * the half of a sponsor's holding that the allocation-only version dropped.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<Coupon>
+     */
+    public function sponsoredSharedBatches()
+    {
+        return Coupon::query()
+            ->where('coupons.sponsor_user_id', $this->id)
+            ->shared()
+            ->orderBy('coupons.name');
     }
 
     /**

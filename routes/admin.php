@@ -246,10 +246,10 @@ Route::prefix('admin')->name('admin.')->group(function () {
         | sidebar shows them this and nothing else.
         |
         | THERE IS NO SPONSOR ID IN EITHER PATH, and that is the guard rather than a
-        | convenience: both read $request->user()->sponsoredAllocations(), so another
-        | sponsor's figures are not addressable from here — there is no number to
-        | change. The one id the screen does take, the block filter, is resolved
-        | against the signed-in sponsor's own blocks.
+        | convenience: both read $request->user()->sponsoredBlocks() and
+        | ->sponsoredSharedBatches(), so another sponsor's figures are not addressable
+        | from here — there is no number to change. The one id the screen does take,
+        | the block filter, is resolved against the signed-in sponsor's own blocks.
         |
         | Separate from the staff Coupon screens on purpose. Scoping those would mean
         | auditing every query in Coupon, Event and Shop, where one missed query is a

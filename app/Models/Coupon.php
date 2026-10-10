@@ -6,6 +6,7 @@ use App\Support\LocalTime;
 use App\Support\PaymentFigures;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
@@ -186,6 +187,7 @@ class Coupon extends Model
         'discount_type',
         'discount_value',
         'committed_amount',
+        'sponsor_user_id',
         'design',
         'design_path',
     ];
@@ -263,6 +265,29 @@ class Coupon extends Model
     public function holders(): HasMany
     {
         return $this->hasMany(CouponHolder::class)->orderBy('full_name');
+    }
+
+    /**
+     * Whoever FUNDED this batch: a sponsorship account, or null.
+     *
+     * Set on the coupon form, under THE CODE, because that is where the operator is
+     * already deciding what the batch is and who it is for. It is the BATCH-level
+     * half of the rule stated in full on CouponAllocation::effectiveSponsorId():
+     *
+     *   this sponsorship applies to every block in the batch, unless that block
+     *   names its own, which overrides it for that block only.
+     *
+     * It is also the ONLY way a shared-code batch can be sponsored at all, since a
+     * shared batch has no blocks for a tag to sit on. See the 2026_10_16 migration.
+     */
+    public function sponsor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'sponsor_user_id');
+    }
+
+    public function hasSponsor(): bool
+    {
+        return $this->sponsor_user_id !== null;
     }
 
     public function events(): BelongsToMany
@@ -639,6 +664,20 @@ class Coupon extends Model
     public function scopeOfKind(Builder $query, string $kind): Builder
     {
         return $query->where('kind', $kind);
+    }
+
+    /**
+     * Batches whose name IS the code, in SQL.
+     *
+     * Written the same way round as isShared(): anything that is not the unique slug
+     * reads as shared, so an older row or one written by hand keeps today's
+     * behaviour rather than silently needing minted codes it does not have.
+     */
+    public function scopeShared(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $inner) => $inner
+            ->whereNull('mode')
+            ->orWhere('mode', '!=', self::MODE_UNIQUE));
     }
 
     /**

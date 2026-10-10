@@ -85,6 +85,21 @@ class CouponRequest extends FormRequest
              */
             'committed_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999.99'],
 
+            /*
+             | Which sponsorship funded the WHOLE BATCH, which is the only level a
+             | shared code can be sponsored at and the default for every block of a
+             | unique one. See CouponAllocation::effectiveSponsorId() for the
+             | precedence between this and a block's own tag.
+             |
+             | A sponsorship account and nothing else. Without the is_sponsor
+             | condition any user id would be accepted here, which would quietly hand
+             | an administrator a sponsor's screen.
+             */
+            'sponsor_user_id' => [
+                'nullable',
+                Rule::exists('users', 'id')->where(fn ($query) => $query->where('is_sponsor', true)),
+            ],
+
             'design' => ['required', Rule::in(array_keys(Coupon::DESIGNS))],
 
             /*
@@ -108,6 +123,7 @@ class CouponRequest extends FormRequest
             'name.regex' => 'A coupon code may only contain capital letters and digits, with no spaces.',
             'name.unique' => 'That coupon code is already in use.',
             'quantity.max' => 'A coupon can allow at most '.number_format(self::MAX_QUANTITY).' uses.',
+            'sponsor_user_id.exists' => 'That is not a sponsorship account.',
             'design_image.image' => 'The coupon design must be an image.',
             'design_image.max' => 'The coupon design must be 4 MB or smaller.',
             ...$this->holderMessages(),
@@ -129,6 +145,15 @@ class CouponRequest extends FormRequest
             'mode' => $this->input('mode') ?: Coupon::MODE_SHARED,
             'quantity' => $this->quantityForValidation($coupon),
             'committed_amount' => $this->input('committed_amount') === '' ? null : $this->input('committed_amount'),
+
+            /*
+             | Merged whether or not it was posted, so an empty choice CLEARS the
+             | sponsorship rather than leaving the old one in place. "Not sponsored"
+             | has to be a thing the operator can actually choose, the same way an
+             | empty committed amount above means the pledge was recorded by mistake.
+             */
+            'sponsor_user_id' => $this->sponsorForValidation(),
+
             'remove_design_image' => $this->boolean('remove_design_image'),
         ]);
 
@@ -222,6 +247,28 @@ class CouponRequest extends FormRequest
                 }
             },
 
+            function (Validator $validator) {
+                /*
+                 | Tagging a batch to a sponsorship takes coupons.update, which is
+                 | the permission the Report screen's per-block tagging already
+                 | takes: this feature only moved where it is done, so it must not
+                 | come with a weaker guard. The create route is on coupons.create,
+                 | so a role holding only that reaches this form without the field
+                 | rendered — and a crafted post is refused here rather than
+                 | silently accepted.
+                 */
+                if (blank($this->input('sponsor_user_id'))) {
+                    return;
+                }
+
+                if (! $this->user()?->hasPermission('coupons.update')) {
+                    $validator->errors()->add(
+                        'sponsor_user_id',
+                        'You do not have permission to say which sponsorship funded a coupon.',
+                    );
+                }
+            },
+
             fn (Validator $validator) => $this->validateHolder($validator),
 
             function (Validator $validator) {
@@ -305,6 +352,7 @@ class CouponRequest extends FormRequest
             'discount_type',
             'discount_value',
             'committed_amount',
+            'sponsor_user_id',
             'design',
         ]);
     }
@@ -328,5 +376,21 @@ class CouponRequest extends FormRequest
         }
 
         return $this->input('quantity') === '' ? 0 : $this->input('quantity');
+    }
+
+    /**
+     * The chosen sponsorship, with an empty box meaning "not sponsored".
+     *
+     * Deliberately NOT pinned to the stored value when the field was absent: a role
+     * without coupons.update never sees the field, and the create route is the only
+     * place that can be reached without it. An edit always carries the field, so an
+     * absent one there is a stale form rather than a permission, and clearing is
+     * what an empty box has to mean.
+     */
+    private function sponsorForValidation(): mixed
+    {
+        $chosen = $this->input('sponsor_user_id');
+
+        return blank($chosen) ? null : $chosen;
     }
 }

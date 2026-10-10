@@ -11,23 +11,31 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 /**
- * Tying a block of codes to the sponsorship that funded it.
+ * Tying ONE BLOCK of codes to the sponsorship that funded it, overriding its batch.
  *
  * STAFF DO THIS, NOT THE SPONSOR. A sponsorship account is monitor-and-view only, so
  * the tag is applied here, on the coupon side, by whoever may edit the coupon.
  *
- * THE BLOCK IS THE UNIT, AND WHY
+ * WHERE THIS SITS NOW THERE ARE TWO LEVELS
  *
- * The owner's case is an NGO commissioning a thousand codes handed out through ten
- * representatives, and his question is whose block ran out first. That question is
- * asked of a block, so a block is what gets tagged. A batch-level tag could not
- * express it — one batch is routinely split between sponsors, and a block issued next
- * month would silently inherit a tag nobody chose.
+ * The batch's own sponsorship is set on the coupon form, under THE CODE, which is also
+ * the only level a shared code can be sponsored at. This screen is the EXCEPTION to
+ * it, for the case the batch field cannot express: one batch split between sponsors,
+ * which is routine when an NGO commissions a thousand codes through ten
+ * representatives and somebody else pays for two of the blocks.
  *
- * "Every block on this batch" is offered as a convenience, because an NGO's ten blocks
- * are usually all one sponsorship. It writes the same per-block tag ten times rather
- * than storing a second, batch-level tag: two places saying who funded a block is how
- * two screens come to disagree about whose money it is.
+ * THE RULE, which is CouponAllocation::effectiveSponsorId() and nothing else:
+ *
+ *   the batch-level sponsorship applies to every block in the batch, UNLESS that
+ *   block names its own, which overrides it for that block only.
+ *
+ * So clearing a block here does not make it unsponsored; it hands it back to its
+ * batch. The select says which of the two a blank means, because they look identical
+ * until somebody tags the batch.
+ *
+ * "Every block on this batch" stays as a convenience: it writes the same explicit
+ * per-block tag ten times, which is what somebody wants when the blocks are going
+ * one way and the batch's own figure is going another.
  */
 class AllocationSponsorController extends Controller
 {
@@ -56,36 +64,51 @@ class AllocationSponsorController extends Controller
         $applyToBatch = ($validated['apply_to'] ?? 'block') === 'batch';
 
         $blocks = $applyToBatch
-            ? $coupon->allocations()->get()
-            : collect([$allocation]);
+            ? $coupon->allocations()->with('sponsor')->get()
+            : collect([$allocation->load('sponsor')]);
+
+        // Block id => who it answered to, taken before the writes so the trail can
+        // name both ends of the move.
+        $before = $blocks->mapWithKeys(fn ($block) => [
+            $block->id => $block->sponsor?->logLabel() ?? 'not sponsored',
+        ]);
 
         foreach ($blocks as $block) {
             $block->forceFill(['sponsor_user_id' => $sponsorId])->save();
         }
 
+        /*
+         | Both ends named, because this moves responsibility for a discount between
+         | accounts and "it used to be theirs" is the half somebody will be asking
+         | about afterwards. Read before the writes above would have been neater, so
+         | it is read from the collection taken before them.
+         */
         AdminLogger::activity('coupons.sponsor', $sponsor === null
             ? sprintf(
-                'Removed the sponsorship from %s on coupon %s.',
+                'Cleared the sponsorship on %s of coupon %s, so %s follow the batch%s.',
                 $applyToBatch ? 'every block' : sprintf('block %d', $allocation->id),
                 $coupon->name,
+                $applyToBatch ? 'they' : 'it',
+                $coupon->hasSponsor() ? ' ('.$coupon->sponsor?->logLabel().')' : ', which is not sponsored',
             )
             : sprintf(
-                'Tagged %s on coupon %s to sponsorship %s.',
+                'Tagged %s on coupon %s to sponsorship %s, overriding the batch.',
                 $applyToBatch ? 'every block' : sprintf('block %d', $allocation->id),
                 $coupon->name,
                 $sponsor->logLabel(),
             ));
 
-        AdminLogger::audit($coupon, 'coupon.sponsor_tagged', null, [
-            'coupon' => $coupon->name,
-            'blocks' => $blocks->pluck('id')->all(),
-            'sponsor' => $sponsor?->logLabel(),
-        ]);
+        AdminLogger::audit(
+            $coupon,
+            'coupon.sponsor_tagged',
+            ['coupon' => $coupon->name, 'blocks' => $before->keys()->all(), 'sponsor' => $before->values()->unique()->all()],
+            ['coupon' => $coupon->name, 'blocks' => $blocks->pluck('id')->all(), 'sponsor' => $sponsor?->logLabel()],
+        );
 
         return redirect()
             ->route('admin.coupons.report.show', $coupon)
             ->with('status', $sponsor === null
-                ? 'Sponsorship removed.'
+                ? 'Sponsorship cleared. It follows the batch now.'
                 : sprintf('Tagged to %s.', $sponsor->name));
     }
 }
