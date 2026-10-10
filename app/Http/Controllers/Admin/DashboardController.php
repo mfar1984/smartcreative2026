@@ -17,6 +17,10 @@ use Illuminate\Http\Request;
  * The figures themselves come from DashboardMetrics, which reuses PaymentFigures
  * for anything involving money so this screen and the payments screen cannot
  * disagree.
+ *
+ * Permission decides which widgets appear; the signed in user decides what the
+ * tournament figures cover. A tournament handler is confined to its assigned
+ * tournaments everywhere else, so the counts it reads here are its own.
  */
 class DashboardController extends Controller
 {
@@ -40,8 +44,13 @@ class DashboardController extends Controller
          | Read once, whatever is shown. The payload is a single cached array, so
          | asking for it when only half of it will be drawn costs nothing extra, and
          | it keeps every figure on screen describing the same moment.
+         |
+         | The viewer goes in because the tournament figures are narrowed to what
+         | that viewer may see, and the cache entry is keyed on that scope. Dropping
+         | this argument would hand a tournament handler the counts for every
+         | tournament in the system.
          */
-        $data = $metrics->all(self::TREND_DAYS, self::BAR_DAYS);
+        $data = $metrics->all(self::TREND_DAYS, self::BAR_DAYS, $user);
 
         return view('admin.dashboard', [
             'can' => $can,

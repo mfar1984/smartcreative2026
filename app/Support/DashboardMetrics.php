@@ -6,8 +6,10 @@ use App\Models\Event;
 use App\Models\EventParticipant;
 use App\Models\EventRegistration;
 use App\Models\Tournament;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 /**
  * Every figure on the dashboard, worked out in one place.
@@ -19,6 +21,23 @@ use Illuminate\Support\Facades\Cache;
  * Cached for two minutes. Long enough that a dashboard is not a dozen aggregate
  * queries on every refresh, short enough that somebody who has just marked a
  * payment paid sees it when they go back to look.
+ *
+ * WHO IS LOOKING MATTERS, for one figure. A tournament handler is confined to the
+ * tournaments assigned to it everywhere else in the admin area, so the tournament
+ * counts here are narrowed the same way, through Tournament::visibleTo(). Every
+ * other figure on this screen is money, events or registrations: none of them is
+ * per tournament, and a handler holds neither payments.view nor events.view, so
+ * the controller never draws them. They are left whole on purpose rather than
+ * narrowed to nothing against a relationship that does not exist.
+ *
+ * Which means the cache key has to say what the figures COVER. Caching one payload
+ * for everybody would serve an administrator's totals to a handler, or a handler's
+ * narrowed totals to an administrator, depending on who refreshed first. So the key
+ * carries a scope segment: one shared entry for every viewer who sees everything,
+ * which is every role but a handler, and an entry per set of assigned tournaments
+ * for the viewers who do not. Keyed on the assignment set and not on the user id,
+ * because keying on the id would hand every administrator a private copy of an
+ * identical payload.
  *
  * A note on dates. `config/app.php` still hardcodes UTC and every timestamp is still
  * STORED in UTC, which is the right way round for a database. What moved is the
@@ -35,18 +54,31 @@ final class DashboardMetrics
     private const CACHE_KEY = 'admin.dashboard.metrics';
 
     /**
+     * The token every key carries, replaced by forget().
+     *
+     * A key now depends on what the figures cover, and a handler's scope cannot be
+     * named from a static method that is handed nothing. So rather than guessing at
+     * the list of live keys, forget() writes a new token and every one of them stops
+     * being found at once.
+     */
+    private const CACHE_TOKEN_KEY = 'admin.dashboard.metrics.token';
+
+    /**
      * Everything the dashboard needs, in one cached payload.
      *
      * Assembled together rather than as separate cached calls so the whole screen
      * describes one moment in time. Mixing a fresh count with a two minute old one
      * makes a total that does not add up.
      *
+     * $viewer decides what the tournament figures cover. Null means every
+     * tournament, which is what every role but a handler sees.
+     *
      * @return array<string, mixed>
      */
-    public function all(int $trendDays = 30, int $barDays = 14): array
+    public function all(int $trendDays = 30, int $barDays = 14, ?User $viewer = null): array
     {
         return Cache::remember(
-            self::CACHE_KEY . ":{$trendDays}:{$barDays}",
+            $this->cacheKey($viewer, $trendDays, $barDays),
             self::CACHE_SECONDS,
             fn (): array => [
                 'generated_at' => now(),
@@ -55,7 +87,7 @@ final class DashboardMetrics
                 'revenue' => $this->revenue($trendDays),
                 'registrations' => $this->registrations($trendDays),
                 'people' => $this->people(),
-                'tournaments' => $this->tournaments(),
+                'tournaments' => $this->tournaments($viewer),
 
                 'revenue_series' => $this->revenueSeries($trendDays),
                 'registration_series' => $this->registrationSeries($barDays),
@@ -68,11 +100,7 @@ final class DashboardMetrics
 
     public static function forget(): void
     {
-        // Only the shapes the controller asks for exist, so clearing those two is
-        // enough rather than reaching for a full cache flush.
-        foreach ([[30, 14]] as [$trend, $bars]) {
-            Cache::forget(self::CACHE_KEY . ":{$trend}:{$bars}");
-        }
+        Cache::forever(self::CACHE_TOKEN_KEY, (string) Str::uuid());
     }
 
     /* ---------------------------------------------------------------------
@@ -139,11 +167,24 @@ final class DashboardMetrics
     }
 
     /**
+     * How the tournaments this viewer may see divide across the statuses.
+     *
+     * Narrowed through Tournament::visibleTo(), the same scope the tournaments
+     * listing, the Matches and Standings pickers and the Hall of Fame all use. A
+     * handler reading the live, published and total counts for tournaments that are
+     * not theirs is the one thing on this screen that contradicted the confinement,
+     * and it is fixed by asking the question that already existed rather than a
+     * second one that would drift from it.
+     *
+     * A handler with no assignment lands on zero, which is the safe direction and
+     * the same answer the tournaments listing gives them.
+     *
      * @return array{live: int, total: int, published: int}
      */
-    private function tournaments(): array
+    private function tournaments(?User $viewer): array
     {
         $byStatus = Tournament::query()
+            ->visibleTo($viewer)
             ->selectRaw('status, COUNT(*) as total')
             ->groupBy('status')
             ->pluck('total', 'status');
@@ -330,6 +371,54 @@ final class DashboardMetrics
                 'filled' => $event->filledPercent(),
             ])
             ->all();
+    }
+
+    /* ---------------------------------------------------------------------
+     | Caching
+     * ------------------------------------------------------------------ */
+
+    /**
+     * The key for one viewer's payload, naming what the figures cover.
+     *
+     * The scope segment, not the user id, is what separates entries: every viewer
+     * who sees every tournament shares the one entry they share today, and a
+     * restricted viewer gets an entry belonging to their set of assignments. Two
+     * handlers assigned the same tournaments would read the same figures anyway, so
+     * they are correct to share one.
+     */
+    private function cacheKey(?User $viewer, int $trendDays, int $barDays): string
+    {
+        return sprintf(
+            '%s:%s:%s:%d:%d',
+            self::CACHE_KEY,
+            Cache::get(self::CACHE_TOKEN_KEY, 'first'),
+            $this->scope($viewer),
+            $trendDays,
+            $barDays,
+        );
+    }
+
+    /**
+     * What this viewer's figures cover, as a short key segment.
+     *
+     * Hashed rather than spelled out: a handler running thirty tournaments would
+     * otherwise push the key past what a cache store will accept as a key, and the
+     * segment only has to tell two assignment sets apart. Sorted first so the same
+     * set written in a different order is the same scope, and an empty assignment is
+     * its own scope rather than being mistaken for seeing everything.
+     */
+    private function scope(?User $viewer): string
+    {
+        if ($viewer === null || ! $viewer->isRestrictedToAssignedTournaments()) {
+            return 'all';
+        }
+
+        $assigned = $viewer->handledTournaments()
+            ->orderBy('tournaments.id')
+            ->pluck('tournaments.id')
+            ->implode(',');
+
+        return 'assigned-'.md5($assigned);
     }
 
     /* ---------------------------------------------------------------------
