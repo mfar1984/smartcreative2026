@@ -40,6 +40,7 @@ class CouponDesignDownloadTest extends CouponTestCase
 
     /** Where the card sits on the canvas. Nothing drawn may leave it. */
     private const CARD_LEFT = 40.0;
+
     private const CARD_RIGHT = 680.0;
 
     /**
@@ -95,8 +96,8 @@ class CouponDesignDownloadTest extends CouponTestCase
         libxml_clear_errors();
         libxml_use_internal_errors($internal);
 
-        $this->assertSame([], $errors, $note . ' produced XML errors.');
-        $this->assertNotFalse($xml, $note . ' did not parse as XML.');
+        $this->assertSame([], $errors, $note.' produced XML errors.');
+        $this->assertNotFalse($xml, $note.' did not parse as XML.');
         $this->assertSame('svg', $xml->getName());
 
         return $xml;
@@ -128,7 +129,7 @@ class CouponDesignDownloadTest extends CouponTestCase
     {
         $nodes = $svg->xpath('//*[local-name()="text"]') ?: [];
 
-        $this->assertNotSame([], $nodes, $note . ' drew no text at all.');
+        $this->assertNotSame([], $nodes, $note.' drew no text at all.');
 
         foreach ($nodes as $node) {
             $value = trim((string) $node);
@@ -208,12 +209,12 @@ class CouponDesignDownloadTest extends CouponTestCase
         // the whole label on one line, which is why both shapes are accepted.
         $this->assertTrue(
             str_contains($drawn, '50% OFF') || (str_contains($drawn, 'PERCENT') && str_contains($drawn, '50')),
-            $design . ' lost the discount.',
+            $design.' lost the discount.',
         );
 
-        $this->assertStringContainsString($coupon->name, $drawn, $design . ' lost the code.');
-        $this->assertStringContainsString($coupon->expiresLabel(), $drawn, $design . ' lost the expiry.');
-        $this->assertStringContainsString('UNDERGROUND RUNNERS', $drawn, $design . ' lost what it is for.');
+        $this->assertStringContainsString($coupon->name, $drawn, $design.' lost the code.');
+        $this->assertStringContainsString($coupon->expiresLabel(), $drawn, $design.' lost the expiry.');
+        $this->assertStringContainsString('UNDERGROUND RUNNERS', $drawn, $design.' lost what it is for.');
 
         $this->assertTextStaysInsideTheCard($xml, $design);
     }
@@ -227,14 +228,14 @@ class CouponDesignDownloadTest extends CouponTestCase
         $xml = $this->parse($this->download($coupon->fresh())->getContent(), $design);
         $drawn = $this->drawnText($xml);
 
-        $this->assertStringContainsString('25.00', $drawn, $design . ' lost the discount.');
+        $this->assertStringContainsString('25.00', $drawn, $design.' lost the discount.');
         $this->assertTrue(
             str_contains($drawn, 'RM') || str_contains($drawn, 'RINGGIT'),
-            $design . ' does not say the discount is in ringgit.',
+            $design.' does not say the discount is in ringgit.',
         );
 
-        $this->assertStringContainsString($coupon->name, $drawn, $design . ' lost the code.');
-        $this->assertStringContainsString($coupon->expiresLabel(), $drawn, $design . ' lost the expiry.');
+        $this->assertStringContainsString($coupon->name, $drawn, $design.' lost the code.');
+        $this->assertStringContainsString($coupon->expiresLabel(), $drawn, $design.' lost the expiry.');
 
         $this->assertTextStaysInsideTheCard($xml, $design);
     }
@@ -261,7 +262,7 @@ class CouponDesignDownloadTest extends CouponTestCase
             $this->assertStringContainsString(
                 number_format($value, 2),
                 $this->drawnText($xml),
-                $design . ' cut the figure instead of setting it smaller.',
+                $design.' cut the figure instead of setting it smaller.',
             );
 
             $this->assertTextStaysInsideTheCard($xml, $design);
@@ -306,8 +307,8 @@ class CouponDesignDownloadTest extends CouponTestCase
         $drawn = $this->drawnText($xml);
 
         // Cut, and said to be cut.
-        $this->assertStringNotContainsString(self::VERY_LONG_TITLE, $drawn, $design . ' drew the whole title.');
-        $this->assertStringContainsString('…', $drawn, $design . ' cut the title without saying so.');
+        $this->assertStringNotContainsString(self::VERY_LONG_TITLE, $drawn, $design.' drew the whole title.');
+        $this->assertStringContainsString('…', $drawn, $design.' cut the title without saying so.');
 
         // The beginning survives, which is the part that identifies the event.
         $this->assertStringContainsString('10TH ANNIVERSARY', $drawn);
@@ -411,7 +412,7 @@ class CouponDesignDownloadTest extends CouponTestCase
         $response->assertOk();
         $response->assertHeader('Content-Type', 'image/png');
         $this->assertStringContainsString(
-            'coupon-' . $coupon->name . '-custom.png',
+            'coupon-'.$coupon->name.'-custom.png',
             (string) $response->headers->get('Content-Disposition'),
         );
 
@@ -437,7 +438,7 @@ class CouponDesignDownloadTest extends CouponTestCase
         Storage::fake('public');
 
         $coupon = $this->percentageCoupon(20, ['design' => Coupon::DESIGN_CUSTOM]);
-        $coupon->design_path = Coupon::DESIGN_DIRECTORY . '/deleted.png';
+        $coupon->design_path = Coupon::DESIGN_DIRECTORY.'/deleted.png';
         $coupon->save();
 
         $this->download($coupon->fresh())->assertNotFound();

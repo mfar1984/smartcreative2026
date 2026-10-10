@@ -219,7 +219,7 @@ class CouponPaymentPageTest extends CouponTestCase
 
         $this->applyTo($registration, $coupon->name)
             ->assertSessionHasErrors([
-                'voucher_code' => 'We have already received RM 80.00 against this registration, so a coupon cannot be applied to it now. Contact us quoting ' . $registration->reference . '.',
+                'voucher_code' => 'We have already received RM 80.00 against this registration, so a coupon cannot be applied to it now. Contact us quoting '.$registration->reference.'.',
             ]);
     }
 
@@ -269,7 +269,7 @@ class CouponPaymentPageTest extends CouponTestCase
             'fulfilment' => ShopOrder::FULFILMENT_ONLINE,
             'payment_method' => ShopOrder::METHOD_GATEWAY,
             'customer_name' => 'Aminah Yusof',
-            'customer_email' => 'buyer-' . uniqid() . '@example.com',
+            'customer_email' => 'buyer-'.uniqid().'@example.com',
             'customer_phone' => '0123456789',
             'address_line_1' => '1 Jalan Satu',
             'postcode' => '40000',

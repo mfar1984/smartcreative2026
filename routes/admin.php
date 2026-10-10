@@ -143,6 +143,40 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('report');
 
             /*
+            | One batch opened up: the sponsor's figures, the blocks of codes that
+            | have been issued, who handles each one, and which codes are spent.
+            |
+            | Same permission as the report it drills in from. The export is the same
+            | rows as a file, so it is the same permission too — but it writes an
+            | activity line, because the file carries working codes plus the
+            | handlers' names, emails, phones and IC numbers.
+            |
+            | Declared under the `report` prefix rather than `{coupon}/...` so these
+            | paths cannot be swallowed by the coupon parameter below.
+            */
+            Route::get('report/{coupon}', [CouponReportController::class, 'show'])
+                ->middleware('permission:coupons.view')
+                ->whereNumber('coupon')
+                ->name('report.show');
+
+            Route::get('report/{coupon}/export', [CouponReportController::class, 'exportCsv'])
+                ->middleware('permission:coupons.view')
+                ->whereNumber('coupon')
+                ->name('report.export');
+
+            /*
+            | Another block of codes, with its own handler.
+            |
+            | On coupons.update, because issuing codes changes what the coupon allows:
+            | it is the unique-mode equivalent of raising the use cap, which that
+            | permission already governs. POST, because it mints rows.
+            */
+            Route::post('{coupon}/codes', [CouponController::class, 'issueCodes'])
+                ->middleware('permission:coupons.update')
+                ->whereNumber('coupon')
+                ->name('codes.store');
+
+            /*
             | The rest of the design picker, fetched a group at a time.
             |
             | The form renders the current choice and one group; this hands back the

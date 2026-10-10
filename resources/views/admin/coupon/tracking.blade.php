@@ -69,6 +69,15 @@
                         <th scope="col" class="{{ $head }}">Code typed</th>
                         <th scope="col" class="{{ $head }}">Coupon</th>
                         <th scope="col" class="{{ $head }}">Used on</th>
+
+                        {{-- Who this row covered.
+                             A use is a PARTICIPANT now, so a group of ten entering one
+                             code writes ten rows that share a code, a reference and a
+                             timestamp. Without this column they read as ten duplicates;
+                             with it they read as what they are. Blank when the use covers
+                             the registration as a whole rather than one named head. --}}
+                        <th scope="col" class="{{ $head }}">Used by</th>
+
                         <th scope="col" class="{{ $head }}">Reference</th>
                         <th scope="col" class="{{ $head }} text-right">Discount</th>
                         <th scope="col" class="{{ $head }}">When</th>
@@ -91,6 +100,13 @@
 
                             <td class="px-5 py-3 text-gray-600">
                                 {{ $redemption->usedOnLabel() }}
+                            </td>
+
+                            {{-- The REDEEMER's name, and only their name. Their IC, phone
+                                 and payment details are on the registration and stay
+                                 there. --}}
+                            <td class="px-5 py-3 text-gray-700">
+                                {{ $redemption->participant_name ?? '—' }}
                             </td>
 
                             <td class="px-5 py-3 whitespace-nowrap">
@@ -124,7 +140,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="6" class="px-5 py-12 text-center">
+                            <td colspan="7" class="px-5 py-12 text-center">
                                 <x-admin.icon name="activity" class="w-10 h-10 mx-auto text-gray-300" />
 
                                 <p class="text-sm font-semibold text-gray-700 mt-3">

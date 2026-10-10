@@ -18,7 +18,7 @@
 @section('content')
     <x-admin.page-card
         title="Coupons"
-        description="The code is the coupon's name, and Uses is how many times it may be typed. Tick it on an event or a product to let that discount be used there."
+        description="A shared coupon's name is the code people type; an individual-code coupon generates codes you hand out. Tick a coupon on an event or a product to let that discount be used there."
         :flush="true">
 
         <x-slot:actions>
@@ -98,6 +98,14 @@
 
                             <td class="px-5 py-3 text-gray-600 whitespace-nowrap">
                                 {{ $coupon->kindLabel() }}
+
+                                {{-- Which of the two models this batch follows. Without it
+                                     the Uses column beside it is ambiguous: the same
+                                     numbers mean uses of one shared code in one case and
+                                     codes handed out in the other. --}}
+                                <span class="block text-xs text-gray-400 mt-0.5">
+                                    {{ $coupon->modeLabel() }}
+                                </span>
                             </td>
 
                             <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">
@@ -114,8 +122,13 @@
                                     <span class="block text-xs text-gray-400">no limit</span>
                                 @else
                                     {{ number_format($coupon->redeemed_count) }} / {{ number_format($coupon->quantity) }}
+
+                                    {{-- Said in codes for a batch that hands them out, because that
+                                         is the thing the operator gave away, even though a code and
+                                         a use are the same quantity. Kept on one line so the number
+                                         and the words are not separated by markup. --}}
                                     <span class="block text-xs text-gray-400">
-                                        {{ number_format(max(0, (int) $coupon->quantity - $coupon->redeemed_count)) }} uses left
+                                        {{ number_format(max(0, (int) $coupon->quantity - $coupon->redeemed_count)) . ($coupon->isUnique() ? ' codes left' : ' uses left') }}
                                     </span>
                                 @endif
                             </td>

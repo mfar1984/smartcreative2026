@@ -3,6 +3,7 @@
 namespace Tests\Feature\Coupon;
 
 use App\Models\Coupon;
+use App\Models\CouponAllocation;
 use App\Models\Event;
 use App\Models\EventAddon;
 use App\Models\EventAddonVariant;
@@ -13,6 +14,7 @@ use App\Models\Setting;
 use App\Models\ShopOrder;
 use App\Models\ShopProduct;
 use App\Models\User;
+use App\Services\Coupon\CouponIssuer;
 use App\Support\Cart;
 use App\Support\ParticipantOptions;
 use App\Support\PaymentSettings;
@@ -83,6 +85,42 @@ abstract class CouponTestCase extends TestCase
     }
 
     /* ---------------------------------------------------------------------
+     | Unique-code coupons
+     * ------------------------------------------------------------------ */
+
+    /**
+     * A unique-code coupon with no codes yet.
+     *
+     * `quantity` is left at zero deliberately: in unique mode it is the number of
+     * codes in existence, and only CouponIssuer writes it.
+     *
+     * @param  array<string, mixed>  $overrides
+     */
+    protected function uniqueCoupon(array $overrides = []): Coupon
+    {
+        return $this->coupon($overrides + [
+            'mode' => Coupon::MODE_UNIQUE,
+            'quantity' => 0,
+        ]);
+    }
+
+    /**
+     * A block of codes on a unique batch, optionally handled by somebody.
+     *
+     * @param  array<string, mixed>  $holder  full_name, email, ic_number, phone
+     */
+    protected function issue(Coupon $coupon, int $count, array $holder = []): CouponAllocation
+    {
+        return app(CouponIssuer::class)->issue($coupon, $count, $holder);
+    }
+
+    /** The first unused code in a block, which is what a registrant would be given. */
+    protected function codeFrom(CouponAllocation $allocation): string
+    {
+        return (string) $allocation->codes()->unused()->orderBy('id')->firstOrFail()->code;
+    }
+
+    /* ---------------------------------------------------------------------
      | Events and registrations
      * ------------------------------------------------------------------ */
 
@@ -92,7 +130,7 @@ abstract class CouponTestCase extends TestCase
     protected function event(array $overrides = []): Event
     {
         return Event::create($overrides + [
-            'slug' => 'event-' . uniqid(),
+            'slug' => 'event-'.uniqid(),
             'title' => 'Hari Sukan Negara',
             'category' => 'Community',
             'starts_at' => now()->addWeek()->toDateString(),
@@ -131,14 +169,14 @@ abstract class CouponTestCase extends TestCase
         for ($i = 1; $i <= $people; $i++) {
             $registration->participants()->create([
                 'role' => ParticipantOptions::ROLE_PARTICIPANT,
-                'full_name' => 'Member ' . $i,
-                'ic_number' => '900101' . str_pad((string) $i, 6, '0', STR_PAD_LEFT),
-                'address_line_1' => $i . ' Jalan Sibu',
+                'full_name' => 'Member '.$i,
+                'ic_number' => '900101'.str_pad((string) $i, 6, '0', STR_PAD_LEFT),
+                'address_line_1' => $i.' Jalan Sibu',
                 'city' => 'Sibu',
                 'state' => 'Sarawak',
                 'country' => 'Malaysia',
-                'phone' => '01400000' . $i,
-                'email' => 'member' . $i . '-' . uniqid() . '@example.com',
+                'phone' => '01400000'.$i,
+                'email' => 'member'.$i.'-'.uniqid().'@example.com',
                 'gender' => 'male',
                 'race' => 'malay',
             ]);
@@ -184,9 +222,9 @@ abstract class CouponTestCase extends TestCase
     protected function product(array $overrides = []): ShopProduct
     {
         return ShopProduct::create($overrides + [
-            'slug' => 'jersey-' . uniqid(),
+            'slug' => 'jersey-'.uniqid(),
             'name' => 'Team Jersey',
-            'sku' => 'SKU-' . strtoupper(uniqid()),
+            'sku' => 'SKU-'.strtoupper(uniqid()),
             'short_description' => 'A jersey.',
             'description' => 'A jersey.',
             'price' => 50.00,
@@ -210,8 +248,8 @@ abstract class CouponTestCase extends TestCase
     {
         Setting::write('shop.enabled', '1', 'shop');
         Setting::write('integration.payments.provider', PaymentSettings::PROVIDER_CHIP, 'integration.payments');
-        Setting::write('integration.payments.chip_brand_id', 'brand-' . uniqid(), 'integration.payments');
-        Setting::write('integration.payments.chip_api_key', 'key-' . uniqid(), 'integration.payments');
+        Setting::write('integration.payments.chip_brand_id', 'brand-'.uniqid(), 'integration.payments');
+        Setting::write('integration.payments.chip_api_key', 'key-'.uniqid(), 'integration.payments');
         Setting::write('integration.payments.currency', 'MYR', 'integration.payments');
 
         ShopSettings::flush();
@@ -223,7 +261,7 @@ abstract class CouponTestCase extends TestCase
         Http::fake([
             'gate.chip-in.asia/api/v1/purchases/' => Http::response([
                 'id' => $purchaseId,
-                'checkout_url' => 'https://gate.chip-in.asia/p/' . $purchaseId,
+                'checkout_url' => 'https://gate.chip-in.asia/p/'.$purchaseId,
             ]),
         ]);
     }
@@ -263,7 +301,7 @@ abstract class CouponTestCase extends TestCase
     {
         return $extra + [
             'customer_name' => 'Aminah Yusof',
-            'customer_email' => 'buyer-' . uniqid() . '@example.com',
+            'customer_email' => 'buyer-'.uniqid().'@example.com',
             'customer_phone' => '0123456789',
             'address_line_1' => '1 Jalan Satu',
             'postcode' => '40000',
@@ -283,13 +321,13 @@ abstract class CouponTestCase extends TestCase
         return $extra + [
             'role' => ParticipantOptions::ROLE_PARTICIPANT,
             'full_name' => 'Member One',
-            'ic_number' => '9001010' . random_int(10000, 99999),
+            'ic_number' => '9001010'.random_int(10000, 99999),
             'address_line_1' => '1 Jalan Sibu',
             'city' => 'Sibu',
             'state' => 'Sarawak',
             'country' => 'Malaysia',
             'phone' => '0140000001',
-            'email' => 'member-' . uniqid() . '@example.com',
+            'email' => 'member-'.uniqid().'@example.com',
             'gender' => 'male',
             'race' => 'malay',
         ];
@@ -312,7 +350,7 @@ abstract class CouponTestCase extends TestCase
     protected function userWith(array $permissions): User
     {
         $role = Role::create([
-            'slug' => 'staff-' . uniqid(),
+            'slug' => 'staff-'.uniqid(),
             'name' => 'Staff',
             'is_active' => true,
         ]);
@@ -330,8 +368,8 @@ abstract class CouponTestCase extends TestCase
 
         return User::create([
             'name' => 'Staff',
-            'username' => 'staff-' . uniqid(),
-            'email' => uniqid() . '@example.com',
+            'username' => 'staff-'.uniqid(),
+            'email' => uniqid().'@example.com',
             'password' => 'secret-password',
             'role_id' => $role->id,
             'is_active' => true,

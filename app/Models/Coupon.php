@@ -12,20 +12,31 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
- * One batch of coupons.
+ * One batch of coupons, in one of two modes.
  *
- * THE NAME IS THE CODE, and `quantity` is how many times that one code may be used:
+ * SHARED — the original, and still the default.
  *
- *   quantity > 0  the shared code may be used that many times, then it is spent.
- *   quantity = 0  no limit at all.
+ *   THE NAME IS THE CODE, and `quantity` is how many times that one code may be used:
  *
- * Nothing is minted up front, and that is a deliberate reversal. Handing out N unique
- * codes only buys a per-person audit trail if there is a membership database to issue
- * them against, and this system has none: a unique bearer code is used by whoever
- * reads it, so the uniqueness bought nothing while being far harder to distribute
- * than one shared code. If membership ever arrives, per-person codes can be added
- * then — coupon_codes already records which registration or order each use belongs
- * to, and those carry the person's details.
+ *     quantity > 0  the shared code may be used that many times, then it is spent.
+ *     quantity = 0  no limit at all.
+ *
+ *   Nothing is minted. One code on a poster, typed by everybody who sees it.
+ *
+ * UNIQUE — N codes minted up front, each tagged to a holder.
+ *
+ *   `quantity` is the total number of codes issued, maintained by the system as blocks
+ *   are issued, so remaining() and isExhausted() read exactly as they always did. The
+ *   batch name is NOT a code in this mode: only an issued code redeems.
+ *
+ * WHY BOTH, WHEN MINTING WAS DELIBERATELY REMOVED
+ *
+ * It was removed because a unique bearer code bought no per-person audit: with no
+ * membership database, whoever read the code used it, and nobody could say whose code
+ * was whose. The missing half was IDENTITY. The owner now supplies it by hand — each
+ * code is tagged to a holder (an NGO, a company or a person, with optional email, IC
+ * and phone) — so a unique code finally means something: which representative's
+ * allocation ran out, and whose is untouched.
  *
  * Everything money-shaped is deliberately NOT here. What a batch takes off a charge is
  * CouponDiscount's job, and claiming a use of it is CouponRedeemer's, because that one
@@ -41,6 +52,29 @@ class Coupon extends Model
     public const KINDS = [
         self::KIND_EVENT => 'Event Registration',
         self::KIND_SHOP => 'Shop',
+    ];
+
+    /** One code on a poster, with a use cap. Today's behaviour and the default. */
+    public const MODE_SHARED = 'shared';
+
+    /** N minted codes, each optionally tagged to the holder it was issued to. */
+    public const MODE_UNIQUE = 'unique';
+
+    /**
+     * Mode slug => label and what it is for, as the radio on the form reads.
+     *
+     * Named by what the operator is deciding — one code or many — rather than by the
+     * mechanism, because the mechanism is not the question he is answering.
+     */
+    public const MODES = [
+        self::MODE_SHARED => [
+            'label' => 'One shared code',
+            'help' => 'The coupon name is the code. Everybody types the same thing, up to the limit.',
+        ],
+        self::MODE_UNIQUE => [
+            'label' => 'Individual codes',
+            'help' => 'Codes are generated and handed out, each one optionally tagged to the representative holding it.',
+        ],
     ];
 
     public const DISCOUNT_PERCENTAGE = 'percentage';
@@ -145,13 +179,28 @@ class Coupon extends Model
 
     protected $fillable = [
         'kind',
+        'mode',
         'name',
         'quantity',
         'expires_at',
         'discount_type',
         'discount_value',
+        'committed_amount',
         'design',
         'design_path',
+    ];
+
+    /**
+     * Shared unless told otherwise, in PHP as well as in the column default.
+     *
+     * Without this a freshly created batch reads `mode` as null until it is reloaded,
+     * so isUnique() would be answered off an absent value rather than off the one the
+     * database actually stored. Same answer either way here, but a mode decided by
+     * whether the model has been refreshed is the sort of thing that is only wrong
+     * once.
+     */
+    protected $attributes = [
+        'mode' => self::MODE_SHARED,
     ];
 
     protected function casts(): array
@@ -160,6 +209,7 @@ class Coupon extends Model
             'quantity' => 'integer',
             'expires_at' => 'date',
             'discount_value' => 'decimal:2',
+            'committed_amount' => 'decimal:2',
         ];
     }
 
@@ -184,6 +234,35 @@ class Coupon extends Model
     public function redemptions(): HasMany
     {
         return $this->hasMany(CouponCode::class)->whereNotNull('redeemed_at');
+    }
+
+    /**
+     * The blocks of codes that have been issued, in unique mode.
+     *
+     * Each one is a separate issue to a separate holder. Empty for a shared batch, and
+     * that is normal.
+     */
+    public function allocations(): HasMany
+    {
+        return $this->hasMany(CouponAllocation::class)->orderBy('id');
+    }
+
+    /**
+     * Every minted code in the batch, across all its allocations.
+     *
+     * Not to be confused with codes() above. These are the STOCK — units of allocation
+     * handed out to representatives. That one is the LEDGER, written at the moment of
+     * use. Unique mode has both, shared mode has only the ledger.
+     */
+    public function issuedCodes(): HasMany
+    {
+        return $this->hasMany(CouponIssuedCode::class)->orderBy('id');
+    }
+
+    /** Whoever this batch's blocks were issued to. */
+    public function holders(): HasMany
+    {
+        return $this->hasMany(CouponHolder::class)->orderBy('full_name');
     }
 
     public function events(): BelongsToMany
@@ -216,12 +295,63 @@ class Coupon extends Model
     }
 
     /* ---------------------------------------------------------------------
+     | Which of the two models this batch follows
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Whether this batch mints codes.
+     *
+     * Compared against the unique slug rather than away from the shared one, so a
+     * value that is neither — an older row, or something written by hand — reads as
+     * shared and keeps today's behaviour instead of silently needing minted codes it
+     * does not have.
+     */
+    public function isUnique(): bool
+    {
+        return $this->mode === self::MODE_UNIQUE;
+    }
+
+    public function isShared(): bool
+    {
+        return ! $this->isUnique();
+    }
+
+    public function modeLabel(): string
+    {
+        return self::MODES[$this->isUnique() ? self::MODE_UNIQUE : self::MODE_SHARED]['label'];
+    }
+
+    /** How many codes have been minted across every block. Zero for a shared batch. */
+    public function issuedCount(): int
+    {
+        return $this->isUnique() ? $this->issuedCodes()->count() : 0;
+    }
+
+    /**
+     * How a unique batch's stock reads: codes used of codes issued.
+     *
+     * Said in codes rather than in uses because that is the thing the operator handed
+     * out, even though a code and a use are the same quantity.
+     */
+    public function unusedCodeCount(): int
+    {
+        return $this->isUnique() ? $this->issuedCodes()->unused()->count() : 0;
+    }
+
+    /* ---------------------------------------------------------------------
      | How many uses are left
      * ------------------------------------------------------------------ */
 
+    /**
+     * Whether the code may be used without limit.
+     *
+     * Only ever true of a SHARED batch. In unique mode `quantity` is the number of
+     * codes in existence, so zero means there is no stock rather than no limit — and
+     * reading it as unlimited would offer a batch with nothing to give.
+     */
     public function isUnlimited(): bool
     {
-        return (int) $this->quantity <= 0;
+        return ! $this->isUnique() && (int) $this->quantity <= 0;
     }
 
     /**
@@ -471,21 +601,35 @@ class Coupon extends Model
     }
 
     /**
-     * Whether a string is already some other batch's name, which is its code.
+     * Whether a string is already a code somebody could type.
      *
-     * One namespace now, because there is only one kind of code. The ledger's own
-     * `code` column is history rather than a namespace — it holds a copy of the name
-     * as it was typed — so it is deliberately not searched: a batch renamed after a
-     * use would otherwise block its old name for ever.
+     * TWO NAMESPACES, ONE BOX. A shared batch's name and a unique batch's minted codes
+     * both go into the same Voucher Code field on the public form, so a name that
+     * collides with an issued code would make one of the two unreachable. Both are
+     * searched.
+     *
+     * The LEDGER's own `code` column is deliberately not searched. It is history — a
+     * copy of the string as it was typed — so a batch renamed after a use would
+     * otherwise block its own old name for ever.
      */
     public static function codeTaken(string $code, ?int $ignoreCouponId = null): bool
     {
         $code = Str::upper(trim($code));
 
-        return self::query()
+        $nameTaken = self::query()
             ->where('name', $code)
             ->when($ignoreCouponId !== null, fn (Builder $query) => $query->whereKeyNot($ignoreCouponId))
             ->exists();
+
+        if ($nameTaken) {
+            return true;
+        }
+
+        /*
+         | An issued code is not ignored for the batch being edited: renaming a unique
+         | batch to one of its own codes would give one string two meanings.
+         */
+        return CouponIssuedCode::query()->where('code', $code)->exists();
     }
 
     /* ---------------------------------------------------------------------

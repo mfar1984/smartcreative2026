@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Admin\Coupon;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\CouponAllocationRequest;
 use App\Http\Requests\Admin\CouponRequest;
 use App\Models\Coupon;
 use App\Services\AdminLogger;
+use App\Services\Coupon\CouponIssuer;
 use App\Support\CouponDesignSample;
+use App\Support\CouponHolderIdentity;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -51,36 +54,69 @@ class CouponController extends Controller
     {
         return view('admin.coupon.form', $this->formData(new Coupon([
             'kind' => Coupon::KIND_EVENT,
+            'mode' => Coupon::MODE_SHARED,
             'quantity' => 0,
             'discount_type' => Coupon::DISCOUNT_PERCENTAGE,
             'design' => 'classic',
         ]), 'create'));
     }
 
-    public function store(CouponRequest $request)
+    public function store(CouponRequest $request, CouponIssuer $issuer)
     {
         $coupon = new Coupon($request->couponAttributes());
         $this->applyDesignImage($request, $coupon);
 
+        /*
+         | A unique batch is saved with no stock and then issues its first block, so
+         | `quantity` is only ever written by the issuer. The alternative — trusting the
+         | typed figure and minting to match — is two sources of truth for how many
+         | codes exist, and a short mint would silently promise uses nobody holds.
+         */
+        $wanted = (int) $coupon->quantity;
+
+        if ($coupon->isUnique()) {
+            $coupon->quantity = 0;
+        }
+
         $coupon->save();
+
+        if ($coupon->isUnique()) {
+            $issuer->issue($coupon, $wanted, $request->holderFields());
+            $coupon->refresh();
+        }
 
         AdminLogger::activity('coupons.create', sprintf(
             'Created coupon %s: %s off %s, %s, expires %s.',
             $coupon->name,
             $coupon->discountLabel(),
             $coupon->kindLabel(),
-            $coupon->isUnlimited() ? 'unlimited uses' : $coupon->quantity.' uses',
+            $this->allowanceLabel($coupon),
             $coupon->expiresLabel(),
         ));
 
         AdminLogger::audit($coupon, 'created', null, [
             'name' => $coupon->name,
             'kind' => $coupon->kind,
+            'mode' => $coupon->mode,
             'quantity' => $coupon->quantity,
             'discount_type' => $coupon->discount_type,
             'discount_value' => (float) $coupon->discount_value,
+            'committed_amount' => $coupon->committed_amount === null ? null : (float) $coupon->committed_amount,
             'expires_at' => $coupon->expires_at?->toDateString(),
         ]);
+
+        if ($coupon->isUnique()) {
+            return redirect()
+                ->route('admin.coupons.report.show', $coupon)
+                ->with('status', sprintf(
+                    'Coupon %s created with %d individual %s, handled by %s. They work until %s.',
+                    $coupon->name,
+                    $coupon->quantity,
+                    (int) $coupon->quantity === 1 ? 'code' : 'codes',
+                    $coupon->allocations()->with('holder')->get()->last()?->holderLabel() ?? CouponHolderIdentity::UNASSIGNED,
+                    $coupon->expiresLabel(),
+                ));
+        }
 
         return redirect()
             ->route('admin.coupons.index')
@@ -95,6 +131,32 @@ class CouponController extends Controller
                 ));
     }
 
+    /**
+     * Issue another block of codes, with its own handler.
+     *
+     * A NEW ALLOCATION, never a top-up. The owner's workflow is "a hundred more,
+     * handled by somebody else", and growing a single quantity could not express the
+     * second holder — which is the whole thing the report has to answer.
+     */
+    public function issueCodes(CouponAllocationRequest $request, Coupon $coupon, CouponIssuer $issuer)
+    {
+        $count = (int) $request->validated('quantity');
+
+        $allocation = $issuer->issue($coupon, $count, $request->holderFields());
+
+        return redirect()
+            ->route('admin.coupons.report.show', $coupon)
+            ->with('status', sprintf(
+                '%d more %s generated for %s. %s now has %d %s in total.',
+                $count,
+                $count === 1 ? 'code' : 'codes',
+                $allocation->holderLabel(),
+                $coupon->name,
+                $coupon->fresh()->quantity,
+                (int) $coupon->fresh()->quantity === 1 ? 'code' : 'codes',
+            ));
+    }
+
     public function edit(Coupon $coupon)
     {
         return view('admin.coupon.form', $this->formData($coupon, 'edit'));
@@ -102,14 +164,7 @@ class CouponController extends Controller
 
     public function update(CouponRequest $request, Coupon $coupon)
     {
-        $before = [
-            'name' => $coupon->name,
-            'kind' => $coupon->kind,
-            'quantity' => $coupon->quantity,
-            'discount_type' => $coupon->discount_type,
-            'discount_value' => (float) $coupon->discount_value,
-            'expires_at' => $coupon->expires_at?->toDateString(),
-        ];
+        $before = $this->snapshot($coupon);
 
         $coupon->fill($request->couponAttributes());
         $this->applyDesignImage($request, $coupon);
@@ -117,14 +172,7 @@ class CouponController extends Controller
         $coupon->save();
 
         AdminLogger::activity('coupons.update', sprintf('Updated coupon %s.', $coupon->name));
-        AdminLogger::audit($coupon, 'updated', $before, [
-            'name' => $coupon->name,
-            'kind' => $coupon->kind,
-            'quantity' => $coupon->quantity,
-            'discount_type' => $coupon->discount_type,
-            'discount_value' => (float) $coupon->discount_value,
-            'expires_at' => $coupon->expires_at?->toDateString(),
-        ]);
+        AdminLogger::audit($coupon, 'updated', $before, $this->snapshot($coupon));
 
         return redirect()
             ->route('admin.coupons.index')
@@ -182,6 +230,40 @@ class CouponController extends Controller
      * ------------------------------------------------------------------ */
 
     /**
+     * What a batch allows, in words, for the trail entry.
+     *
+     * Three different sentences because they are three different things: codes handed
+     * out, a capped shared code, and a shared code with no cap at all.
+     */
+    private function allowanceLabel(Coupon $coupon): string
+    {
+        if ($coupon->isUnique()) {
+            return $coupon->quantity.' individual codes';
+        }
+
+        return $coupon->isUnlimited() ? 'unlimited uses' : $coupon->quantity.' uses';
+    }
+
+    /**
+     * The fields worth recording either side of an edit.
+     *
+     * @return array<string, mixed>
+     */
+    private function snapshot(Coupon $coupon): array
+    {
+        return [
+            'name' => $coupon->name,
+            'kind' => $coupon->kind,
+            'mode' => $coupon->mode,
+            'quantity' => $coupon->quantity,
+            'discount_type' => $coupon->discount_type,
+            'discount_value' => (float) $coupon->discount_value,
+            'committed_amount' => $coupon->committed_amount === null ? null : (float) $coupon->committed_amount,
+            'expires_at' => $coupon->expires_at?->toDateString(),
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function formData(Coupon $coupon, string $mode): array
@@ -210,8 +292,9 @@ class CouponController extends Controller
             'coupon' => $coupon,
             'mode' => $mode,
             'kinds' => Coupon::KINDS,
+            'codeModes' => Coupon::MODES,
             'discountTypes' => Coupon::DISCOUNT_TYPES,
-            'maxQuantity' => \App\Http\Requests\Admin\CouponRequest::MAX_QUANTITY,
+            'maxQuantity' => CouponRequest::MAX_QUANTITY,
 
             // Offered as a starting point so the operator can accept it or type over
             // it, which is the two ways the owner asked for in one field.

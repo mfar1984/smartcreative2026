@@ -56,7 +56,7 @@ class CouponVoucherFieldTest extends CouponTestCase
         $response->assertSee('Voucher Code');
 
         // Scoped to this event, so a code is checked against the right batches.
-        $response->assertSee('data-voucher-event="' . $event->slug . '"', false);
+        $response->assertSee('data-voucher-event="'.$event->slug.'"', false);
     }
 
     public function test_the_field_is_absent_when_every_ticked_batch_has_expired(): void
@@ -327,7 +327,7 @@ class CouponVoucherFieldTest extends CouponTestCase
             ]);
 
             $response->assertJson(['ok' => false]);
-            $this->assertSame($expected, $response->json('message'), 'Wrong message for ' . $code);
+            $this->assertSame($expected, $response->json('message'), 'Wrong message for '.$code);
         }
     }
 

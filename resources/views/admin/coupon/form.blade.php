@@ -19,6 +19,7 @@
         $input = 'w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
 
         $kind = old('kind', $coupon->kind ?: Coupon::KIND_EVENT);
+        $codeMode = old('mode', $coupon->mode ?: Coupon::MODE_SHARED);
         $discountType = old('discount_type', $coupon->discount_type ?: Coupon::DISCOUNT_PERCENTAGE);
         $quantity = old('quantity', $coupon->quantity ?? 0);
 
@@ -30,6 +31,12 @@
         // locked — raising it is safe. See CouponRequest.
         $used = $coupon->exists ? $coupon->redeemedCount() : 0;
         $isUsed = $used > 0;
+
+        // How the codes work is locked as soon as there is anything behind it: issued
+        // codes in somebody's hands, or uses already honoured.
+        $isUnique = $codeMode === Coupon::MODE_UNIQUE;
+        $hasIssued = $coupon->exists && $coupon->isUnique() && $coupon->issuedCount() > 0;
+        $isModeLocked = $isUsed || $hasIssued;
     @endphp
 
     <x-admin.page-card
@@ -85,8 +92,41 @@
             {{-- ---------------- The code ---------------- --}}
             <x-admin.panel title="The Code" icon="identification">
                 <x-admin.field-row
+                    label="How The Codes Work"
+                    help="One code everybody types, or individual codes you hand out."
+                    :required="true"
+                    error="mode">
+
+                    <div class="space-y-2">
+                        @foreach ($codeModes as $value => $option)
+                            <label class="flex items-start gap-3 rounded-lg border px-3.5 py-3 cursor-pointer transition hover:border-blue-300 has-checked:border-blue-600 has-checked:bg-blue-50 border-gray-300">
+                                <input type="radio" name="mode" value="{{ $value }}"
+                                       @checked($codeMode === $value)
+                                       @disabled($isModeLocked)
+                                       data-code-mode
+                                       class="mt-0.5 shrink-0 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-900">
+                                    <span class="block font-semibold">{{ $option['label'] }}</span>
+                                    <span class="block text-xs text-gray-600 mt-0.5">{{ $option['help'] }}</span>
+                                </span>
+                            </label>
+                        @endforeach
+                    </div>
+
+                    @if ($isModeLocked)
+                        {{-- A disabled radio sends nothing, so the stored value has to be
+                             carried or the save would wipe it. --}}
+                        <input type="hidden" name="mode" value="{{ $coupon->mode }}">
+                        <p class="text-xs text-amber-700 mt-2 font-semibold">
+                            This coupon already has codes or uses behind it, so how its codes
+                            work is fixed.
+                        </p>
+                    @endif
+                </x-admin.field-row>
+
+                <x-admin.field-row
                     label="Coupon Code"
-                    help="This is what people type. Capital letters and digits only. Generate one or type your own."
+                    help="The name of the coupon. In shared mode it is also what people type."
                     for="name"
                     :required="true"
                     error="name">
@@ -109,7 +149,10 @@
                     </div>
 
                     <p class="text-xs text-gray-500 mt-1.5" data-code-note>
-                        @if ((int) $quantity > 0)
+                        @if ($isUnique)
+                            A label for this batch. The codes people type are generated below,
+                            and this name is not one of them.
+                        @elseif ((int) $quantity > 0)
                             Everybody types this same code, up to the limit below.
                         @else
                             Everybody types this same code, and there is no limit on it.
@@ -118,31 +161,117 @@
                 </x-admin.field-row>
 
                 <x-admin.field-row
-                    label="How Many Uses"
-                    help="How many times the code may be used. 0 means no limit."
+                    :label="$isUnique ? 'How Many Codes' : 'How Many Uses'"
+                    :help="$isUnique ? 'How many individual codes to generate now.' : 'How many times the code may be used. 0 means no limit.'"
                     for="quantity"
                     :required="true"
                     error="quantity">
 
-                    <input type="number" id="quantity" name="quantity" required min="0" max="{{ $maxQuantity }}"
-                           value="{{ $quantity }}"
-                           data-quantity
-                           class="{{ $input }}">
+                    @if ($hasIssued)
+                        {{-- Not the operator's to type once codes exist: the figure IS the
+                             stock. More codes come from the Issue panel on the report, as a
+                             new block with its own handler. --}}
+                        <input type="number" id="quantity" value="{{ $coupon->quantity }}" disabled
+                               class="{{ $input }} bg-gray-50 text-gray-500">
+                        <input type="hidden" name="quantity" value="{{ $coupon->quantity }}">
 
-                    @if ($isUsed)
-                        {{-- Raising it is safe, so the field stays open. Only going below
-                             what has already been honoured is refused. --}}
-                        <p class="text-xs text-amber-700 mt-1.5 font-semibold">
-                            Used {{ $used }} {{ $used === 1 ? 'time' : 'times' }} already, so the limit
-                            cannot go below {{ $used }}. Raising it is fine.
+                        <p class="text-xs text-gray-600 mt-1.5">
+                            {{ number_format($coupon->quantity) }} codes have been generated across
+                            {{ number_format($coupon->allocations()->count()) }}
+                            {{ Str::plural('block', $coupon->allocations()->count()) }}.
+                            <a href="{{ route('admin.coupons.report.show', $coupon) }}"
+                               class="font-semibold text-blue-600 hover:underline">Generate more</a>
+                            as a new block with its own handler.
+                        </p>
+                    @else
+                        <input type="number" id="quantity" name="quantity" required
+                               min="{{ $isUnique ? 1 : 0 }}" max="{{ $maxQuantity }}"
+                               value="{{ $quantity }}"
+                               data-quantity
+                               class="{{ $input }}">
+
+                        @if ($isUsed)
+                            {{-- Raising it is safe, so the field stays open. Only going below
+                                 what has already been honoured is refused. --}}
+                            <p class="text-xs text-amber-700 mt-1.5 font-semibold">
+                                Used {{ $used }} {{ $used === 1 ? 'time' : 'times' }} already, so the limit
+                                cannot go below {{ $used }}. Raising it is fine.
+                            </p>
+                        @endif
+
+                        <p class="text-xs text-gray-500 mt-1.5" data-quantity-note>
+                            @if ($isUnique)
+                                1,000 codes fund 1,000 participants. Generate more later as a
+                                separate block for a different handler.
+                            @else
+                                Set 50 and the code works for the first fifty people who type it.
+                                Set 0 and it works for everybody.
+                            @endif
                         </p>
                     @endif
-
-                    <p class="text-xs text-gray-500 mt-1.5">
-                        Set 50 and the code works for the first fifty people who type it.
-                        Set 0 and it works for everybody.
-                    </p>
                 </x-admin.field-row>
+
+                {{-- ---------------- Who handles the first block ---------------- --}}
+                @if ($mode === 'create')
+                    <div data-handler-row @class(['hidden' => ! $isUnique])>
+                        <x-admin.field-row
+                            label="Who Will Handle These"
+                            help="Optional. The representative these codes are given to, so a code can be traced back to whoever is holding it."
+                            error="holder_full_name">
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label for="holder_full_name" class="block text-xs font-semibold text-gray-600 mb-1">
+                                        Name, NGO or company
+                                    </label>
+                                    {{-- No picklist here: the batch does not exist yet, so
+                                         there are no handlers on it to offer. The Issue
+                                         Codes panel on the report offers the growing list. --}}
+                                    <input type="text" id="holder_full_name" name="holder_full_name" maxlength="190"
+                                           value="{{ old('holder_full_name') }}"
+                                           class="{{ $input }}">
+                                </div>
+
+                                <div>
+                                    <label for="holder_email" class="block text-xs font-semibold text-gray-600 mb-1">
+                                        Email
+                                    </label>
+                                    <input type="email" id="holder_email" name="holder_email" maxlength="190"
+                                           value="{{ old('holder_email') }}"
+                                           class="{{ $input }}">
+                                </div>
+
+                                <div>
+                                    <label for="holder_ic_number" class="block text-xs font-semibold text-gray-600 mb-1">
+                                        IC number
+                                    </label>
+                                    <input type="text" id="holder_ic_number" name="holder_ic_number" maxlength="32"
+                                           value="{{ old('holder_ic_number') }}"
+                                           class="{{ $input }}">
+                                </div>
+
+                                <div>
+                                    <label for="holder_phone" class="block text-xs font-semibold text-gray-600 mb-1">
+                                        Phone
+                                    </label>
+                                    <input type="text" id="holder_phone" name="holder_phone" maxlength="32"
+                                           value="{{ old('holder_phone') }}"
+                                           class="{{ $input }}">
+                                </div>
+                            </div>
+
+                            @error('holder_email')
+                                <p class="text-xs text-red-600 mt-1.5 font-semibold">{{ $message }}</p>
+                            @enderror
+
+                            <p class="text-xs text-gray-500 mt-2">
+                                All four are optional. Leave them blank and the codes are generated
+                                unassigned. A phone number on its own is not enough to identify a
+                                handler, so pair it with a name, an email or an IC number.
+                            </p>
+                        </x-admin.field-row>
+                    </div>
+                @endif
 
                 <x-admin.field-row
                     label="Date Expired"
@@ -206,6 +335,27 @@
                         Capped at whatever is being charged, so it can never make a total
                         negative. On a grouping event that charges add-ons per participant, a
                         fixed amount is owed once per head.
+                    </p>
+                </x-admin.field-row>
+
+                <x-admin.field-row
+                    label="Sponsorship Committed"
+                    help="Optional. What the sponsor said they would give, in RM."
+                    for="committed_amount"
+                    error="committed_amount">
+
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm font-semibold text-gray-500 shrink-0 w-6">RM</span>
+                        <input type="number" id="committed_amount" name="committed_amount"
+                               step="0.01" min="0"
+                               value="{{ old('committed_amount', $coupon->committed_amount) }}"
+                               class="{{ $input }}">
+                    </div>
+
+                    <p class="text-xs text-gray-500 mt-1.5">
+                        Recorded as typed and never used in any calculation. The report shows it
+                        beside what the codes are estimated to be worth and what they have
+                        actually given away, kept plainly apart.
                     </p>
                 </x-admin.field-row>
             </x-admin.panel>
@@ -287,6 +437,8 @@
         const generate = document.querySelector('[data-generate]');
         const quantity = document.querySelector('[data-quantity]');
         const codeNote = document.querySelector('[data-code-note]');
+        const quantityNote = document.querySelector('[data-quantity-note]');
+        const handlerRow = document.querySelector('[data-handler-row]');
         const unit = document.querySelector('[data-unit]');
         const value = document.querySelector('[data-discount-value]');
         const percentageNote = document.querySelector('[data-percentage-note]');
@@ -308,14 +460,40 @@
             code.setSelectionRange(caret, caret);
         });
 
+        function isUniqueMode() {
+            return document.querySelector('[data-code-mode]:checked')?.value === 'unique';
+        }
+
         function syncQuantity() {
-            if (!codeNote) {
-                return;
+            const unique = isUniqueMode();
+
+            if (codeNote) {
+                codeNote.textContent = unique
+                    ? 'A label for this batch. The codes people type are generated below, and this name is not one of them.'
+                    : (Number(quantity?.value || 0) > 0
+                        ? 'Everybody types this same code, up to the limit below.'
+                        : 'Everybody types this same code, and there is no limit on it.');
             }
 
-            codeNote.textContent = Number(quantity?.value || 0) > 0
-                ? 'Everybody types this same code, up to the limit below.'
-                : 'Everybody types this same code, and there is no limit on it.';
+            if (quantityNote) {
+                quantityNote.textContent = unique
+                    ? '1,000 codes fund 1,000 participants. Generate more later as a separate block for a different handler.'
+                    : 'Set 50 and the code works for the first fifty people who type it. Set 0 and it works for everybody.';
+            }
+
+            // Unlimited has no meaning for codes you print and hand out, so the floor
+            // moves with the mode rather than being refused only on save.
+            if (quantity) {
+                quantity.min = unique ? '1' : '0';
+
+                if (unique && Number(quantity.value || 0) < 1) {
+                    quantity.value = '';
+                }
+            }
+
+            // The handler fields belong to a block of codes, so they only exist when
+            // there are blocks.
+            handlerRow?.classList.toggle('hidden', !unique);
         }
 
         function syncDiscount() {
@@ -336,6 +514,7 @@
         }
 
         quantity?.addEventListener('input', syncQuantity);
+        document.querySelectorAll('[data-code-mode]').forEach((el) => el.addEventListener('change', syncQuantity));
         document.querySelectorAll('[data-discount-type]').forEach((el) => el.addEventListener('change', syncDiscount));
 
         // The design field is the chooser's own: it owns the radios, the inline

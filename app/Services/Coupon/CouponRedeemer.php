@@ -4,33 +4,59 @@ namespace App\Services\Coupon;
 
 use App\Models\Coupon;
 use App\Models\CouponCode;
+use App\Models\CouponIssuedCode;
+use App\Models\EventParticipant;
 use App\Models\EventRegistration;
 use App\Models\ShopOrder;
 use App\Services\AdminLogger;
 use App\Support\CouponDiscount;
 use App\Support\PaymentFigures;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * Claiming one use of a coupon, safely, while other people are submitting.
+ * Claiming uses of a coupon, safely, while other people are submitting.
  *
  * The last remaining use is a contended resource. Two registrations submitted in the
  * same second must not both be given it, and a check done before the transaction is
  * worth nothing: by the time the write lands the answer it was based on is history.
  *
  * So every claim runs inside a transaction and takes a row lock on the BATCH, and the
- * expiry and the number of uses already spent are BOTH re-read inside that
- * transaction. The caller that loses the race gets CouponOutcome::RAN_OUT, which is a
- * value rather than an exception precisely so the public form can fall back to the
- * normal price without catching anything.
+ * expiry, the number of uses already spent and — in unique mode — the holder's unused
+ * balance are ALL re-read inside that transaction. The caller that loses the race gets
+ * CouponOutcome::RAN_OUT, which is a value rather than an exception precisely so the
+ * public form can fall back to the normal price without catching anything.
+ *
+ * A USE IS A PARTICIPANT
+ *
+ * On an event that charges add-ons per participant the discount already applies per
+ * head, so the cap has to count the same way or the cap and the money disagree. A
+ * group of ten entering one code once charges TEN uses and writes TEN ledger rows,
+ * each naming the person it covered and holding that person's share of the discount.
+ * On an event that does not charge per participant, one registration is one use.
+ *
+ * That is what makes the sponsor's arithmetic come out: a thousand codes fund a hundred
+ * groups of ten, which at RM7.50 a head is exactly RM7,500 — the committed figure, with
+ * no blow-out.
+ *
+ * A PARTIAL APPLICATION IS REFUSED
+ *
+ * Ten participants against five remaining uses is refused outright, with a message
+ * naming the five. It does NOT discount five and charge five, and the reason is not
+ * squeamishness: the registration stores ONE discount figure with no record of which
+ * participants it covered, so a later Recheck Totals or a removed participant would
+ * have nothing to recompute against. That is the phantom-money shape this project has
+ * already chased twice.
  *
  * WHAT IS CLAIMED
  *
- * One ledger row, written at the moment of use. `quantity` is the cap on how many such
- * rows a batch may have; 0 means there is no cap. Nothing is pre-minted, so there is
- * no row to hunt for and no row to lock — the batch lock is what serialises the count
- * and the insert, and it is held until the commit.
+ *   shared mode  ledger rows, counted against `quantity`. Nothing is pre-minted, so
+ *                the batch lock is what serialises the count and the insert.
+ *   unique mode  the same ledger rows, PLUS that many codes marked used inside the
+ *                allocation the typed code belongs to. The typed code is always one of
+ *                them. The batch lock covers both, so the stock and the ledger cannot
+ *                drift apart.
  *
  * Nothing in here works out what a discount is worth. CouponDiscount does that, and it
  * is handed the charge by the caller, so the figure on the registration and the figure
@@ -39,10 +65,16 @@ use Illuminate\Support\Str;
 class CouponRedeemer
 {
     /**
-     * Claim one use of a batch and record what it gave.
+     * Claim a batch's uses and record what they gave.
      *
      * @param  float  $charge  what is owed before the discount
-     * @param  int  $times  how many heads a fixed discount is owed for; see CouponDiscount
+     * @param  int  $times  the head count. Both the multiplier for a fixed discount
+     *                      (see CouponDiscount) and the number of uses charged — they
+     *                      are deliberately the same number, so the cap and the money
+     *                      agree about how many people were covered.
+     * @param  CouponIssuedCode|null  $issued  in unique mode, the individual code that
+     *                                         was typed. It says which allocation the
+     *                                         uses come out of.
      */
     public function claim(
         Coupon $coupon,
@@ -50,6 +82,7 @@ class CouponRedeemer
         int $times = 1,
         ?EventRegistration $registration = null,
         ?ShopOrder $order = null,
+        ?CouponIssuedCode $issued = null,
     ): CouponOutcome {
         if (round($charge, 2) <= 0) {
             return CouponOutcome::failed(CouponOutcome::NOTHING_TO_DISCOUNT);
@@ -61,7 +94,10 @@ class CouponRedeemer
             return CouponOutcome::failed(CouponOutcome::NOTHING_TO_DISCOUNT);
         }
 
-        $outcome = DB::transaction(function () use ($coupon, $discount, $registration, $order) {
+        $uses = max(1, $times);
+        $people = $this->peopleCovered($registration, $uses);
+
+        $outcome = DB::transaction(function () use ($coupon, $discount, $uses, $people, $registration, $order, $issued) {
             /*
              | The batch itself, re-read under a lock.
              |
@@ -80,43 +116,98 @@ class CouponRedeemer
             }
 
             /*
-             | The cap, counted under the same lock that is about to write the row.
+             | WHICH CODES ARE BEING SPENT, re-read under the same lock.
              |
-             | This is the whole of the race protection. Two claims arriving together
-             | serialise on the batch row, so the second one counts the first one's
-             | committed ledger row and is told it ran out — rather than both reading
-             | "one left" and both writing.
+             | In unique mode this is the allocation check: the typed code identifies
+             | the block, and the uses come out of that block and no other. A group of
+             | ten against a block with five left is refused and told whose block it
+             | was, even when the batch as a whole has hundreds going spare.
              |
-             | Counted rather than cached on the batch: a stored counter is a second
-             | source of truth for money, and the ledger is already the record Tracking
-             | and Report read.
+             | Held inside the lock for exactly the reason the cap is: two group
+             | registrations racing for the last five codes of one representative must
+             | not both win.
              */
-            if (! $locked->isUnlimited()) {
+            $spending = collect();
+
+            if ($locked->isUnique()) {
+                if ($issued === null) {
+                    return CouponOutcome::failed(CouponOutcome::NEEDS_CODE);
+                }
+
+                $typed = CouponIssuedCode::query()
+                    ->whereKey($issued->id)
+                    ->where('coupon_id', $locked->id)
+                    ->with('allocation.holder')
+                    ->first();
+
+                if ($typed === null) {
+                    return CouponOutcome::failed(CouponOutcome::NOT_FOUND);
+                }
+
+                if ($typed->isUsed()) {
+                    return CouponOutcome::failed(CouponOutcome::ALREADY_USED);
+                }
+
+                $available = CouponIssuedCode::query()
+                    ->where('coupon_allocation_id', $typed->coupon_allocation_id)
+                    ->unused()
+                    ->count();
+
+                if ($available < $uses) {
+                    return CouponOutcome::shortOfUses(
+                        remaining: $available,
+                        needed: $uses,
+                        holder: $typed->allocation?->holderLabel(),
+                    );
+                }
+
+                $spending = $this->codesToSpend($typed, $uses);
+            } elseif (! $locked->isUnlimited()) {
+                /*
+                 | The cap, counted under the same lock that is about to write the rows.
+                 |
+                 | This is the whole of the race protection for a shared batch. Two
+                 | claims arriving together serialise on the batch row, so the second
+                 | one counts the first one's committed ledger rows and is told how
+                 | many are really left — rather than both reading "five left" and both
+                 | writing ten.
+                 |
+                 | Counted rather than cached on the batch: a stored counter is a second
+                 | source of truth for money, and the ledger is already the record
+                 | Tracking and Report read.
+                 */
                 $spent = CouponCode::query()
                     ->where('coupon_id', $locked->id)
                     ->whereNotNull('redeemed_at')
                     ->count();
 
-                if ($spent >= (int) $locked->quantity) {
-                    return CouponOutcome::failed(CouponOutcome::RAN_OUT);
+                $left = max(0, (int) $locked->quantity - $spent);
+
+                if ($left < $uses) {
+                    return CouponOutcome::shortOfUses(remaining: $left, needed: $uses);
                 }
             }
 
             /*
-             | The row records the use. `code` holds the string that was typed, which
-             | is the batch name, so every ledger line still shows a code and the trail
-             | survives a later rename.
+             | ONE ROW PER PARTICIPANT. Every row points at the same registration and
+             | carries the same typed string, which is the batch name for a shared
+             | batch and the individual code for a unique one, so the trail survives a
+             | later rename.
              */
-            $code = CouponCode::create([
-                'coupon_id' => $locked->id,
-                'code' => $locked->name,
-                'redeemed_at' => now(),
-                'discount_amount' => $discount,
-                'event_registration_id' => $registration?->id,
-                'shop_order_id' => $order?->id,
-            ]);
+            $typedLabel = $locked->isUnique()
+                ? ($spending->first()?->code ?? $issued?->code ?? $locked->name)
+                : $locked->name;
 
-            return CouponOutcome::ok($code, $discount);
+            $rows = $this->writeLedger($locked, $typedLabel, $discount, $uses, $people, $registration, $order);
+
+            /*
+             | The stock, marked spent in the same transaction and paired one to one
+             | with the rows it paid for. A code therefore knows which person it
+             | covered — by name only — which is what the sponsor's report reads.
+             */
+            $this->spendCodes($spending, $rows);
+
+            return CouponOutcome::ok($rows[0], $discount, $rows, $uses);
         });
 
         if ($outcome->succeeded()) {
@@ -127,10 +218,15 @@ class CouponRedeemer
     }
 
     /**
-     * Claim one use by the code somebody typed.
+     * Claim by the code somebody typed.
      *
-     * The code is the batch name, matched case-insensitively with the whitespace
-     * trimmed, because it is read off a poster and typed back in.
+     * TWO NAMESPACES, ONE BOX. A shared batch is reached by its NAME, which is its
+     * code; a unique batch is reached only by an individual code that was issued to
+     * somebody. Both arrive in the same Voucher Code field, so both are resolved here,
+     * and Coupon::codeTaken() is what keeps one from shadowing the other.
+     *
+     * Matched case-insensitively with the whitespace trimmed, because the code is read
+     * off a poster or a slip of paper and typed back in.
      *
      * @param  string  $kind  Coupon::KIND_EVENT or Coupon::KIND_SHOP
      */
@@ -148,7 +244,7 @@ class CouponRedeemer
             return CouponOutcome::failed(CouponOutcome::NOT_FOUND);
         }
 
-        $batch = Coupon::query()->where('name', $typed)->first();
+        [$batch, $issued] = self::resolve($typed);
 
         if ($batch === null) {
             return CouponOutcome::failed(CouponOutcome::NOT_FOUND);
@@ -158,12 +254,191 @@ class CouponRedeemer
             return CouponOutcome::failed(CouponOutcome::WRONG_KIND);
         }
 
-        return $this->claim($batch, $charge, $times, $registration, $order);
+        return $this->claim($batch, $charge, $times, $registration, $order, $issued);
+    }
+
+    /**
+     * What a typed string refers to: the batch, and the individual code if it was one.
+     *
+     * The one place that resolution happens, so the advisory lookup the public form
+     * does and the claim that actually spends a use can never disagree about what a
+     * string means.
+     *
+     * A unique batch's NAME resolves to nothing. It is not a code: only an issued code
+     * says whose allocation to draw from, so accepting the name would spend somebody's
+     * block at random.
+     *
+     * @return array{0: Coupon|null, 1: CouponIssuedCode|null}
+     */
+    public static function resolve(string $typed): array
+    {
+        $typed = Str::upper(trim($typed));
+
+        if ($typed === '') {
+            return [null, null];
+        }
+
+        $batch = Coupon::query()->where('name', $typed)->first();
+
+        if ($batch !== null) {
+            return $batch->isUnique() ? [null, null] : [$batch, null];
+        }
+
+        $issued = CouponIssuedCode::query()
+            ->where('code', $typed)
+            ->with(['coupon', 'allocation.holder'])
+            ->first();
+
+        return $issued === null || $issued->coupon === null
+            ? [null, null]
+            : [$issued->coupon, $issued];
     }
 
     /* ---------------------------------------------------------------------
      | Internals
      * ------------------------------------------------------------------ */
+
+    /**
+     * Who each use covered, in order, or an empty list when nobody is named.
+     *
+     * A row names a participant only when the uses and the heads line up exactly —
+     * one use for one entrant, ten uses for ten entrants. A group counted as a SINGLE
+     * use is not attributable to any one of them, so naming the first person would be
+     * a guess with somebody's name on it.
+     *
+     * @return Collection<int, EventParticipant>
+     */
+    private function peopleCovered(?EventRegistration $registration, int $uses): Collection
+    {
+        if ($registration === null) {
+            return collect();
+        }
+
+        $registration->loadMissing('participants');
+
+        $participants = $registration->participants->sortBy('id')->values();
+
+        return $participants->count() === $uses ? $participants : collect();
+    }
+
+    /**
+     * The codes this claim will spend: the typed one first, then the rest of its block.
+     *
+     * The typed code is always included and always first, because whoever holds it
+     * handed it over — spending somebody else's slip and leaving theirs unused would
+     * make the printed codes and the report disagree.
+     *
+     * @return Collection<int, CouponIssuedCode>
+     */
+    private function codesToSpend(CouponIssuedCode $typed, int $uses): Collection
+    {
+        $spending = collect([$typed]);
+
+        if ($uses <= 1) {
+            return $spending;
+        }
+
+        return $spending->concat(
+            CouponIssuedCode::query()
+                ->where('coupon_allocation_id', $typed->coupon_allocation_id)
+                ->unused()
+                ->whereKeyNot($typed->id)
+                ->orderBy('id')
+                ->limit($uses - 1)
+                ->get()
+                ->all(),
+        );
+    }
+
+    /**
+     * One ledger row per use, with the discount split across them.
+     *
+     * @param  Collection<int, EventParticipant>  $people
+     * @return array<int, CouponCode>
+     */
+    private function writeLedger(
+        Coupon $coupon,
+        string $typedLabel,
+        float $discount,
+        int $uses,
+        Collection $people,
+        ?EventRegistration $registration,
+        ?ShopOrder $order,
+    ): array {
+        $shares = $this->split($discount, $uses);
+        $now = now();
+        $rows = [];
+
+        for ($i = 0; $i < $uses; $i++) {
+            $person = $people->get($i);
+
+            $rows[] = CouponCode::create([
+                'coupon_id' => $coupon->id,
+                'code' => $typedLabel,
+                'redeemed_at' => $now,
+                'discount_amount' => $shares[$i],
+                'event_registration_id' => $registration?->id,
+
+                // The REDEEMER, by name only. Never their IC or phone: a
+                // sponsor-facing view reads these rows.
+                'event_participant_id' => $person?->id,
+                'participant_name' => $person?->full_name,
+
+                'shop_order_id' => $order?->id,
+            ]);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Mark the spent codes used and pair each one to the row it paid for.
+     *
+     * @param  Collection<int, CouponIssuedCode>  $spending
+     * @param  array<int, CouponCode>  $rows
+     */
+    private function spendCodes(Collection $spending, array $rows): void
+    {
+        if ($spending->isEmpty()) {
+            return;
+        }
+
+        $now = now();
+
+        foreach ($spending->values() as $index => $code) {
+            CouponIssuedCode::query()->whereKey($code->id)->update([
+                'used_at' => $now,
+                'coupon_code_id' => $rows[$index]->id,
+                'updated_at' => $now,
+            ]);
+        }
+    }
+
+    /**
+     * One discount split across N ledger rows, to the cent, adding back up exactly.
+     *
+     * Done in cents and the remainder handed to the earliest rows, because the
+     * alternative — rounding each share — loses or invents money: a third of RM10 three
+     * ways is 3.33 three times, which is RM9.99. The sum of these shares is the figure
+     * on the registration, and Report totals this column, so a cent adrift here is a
+     * cent adrift in the books.
+     *
+     * @return array<int, float>
+     */
+    private function split(float $discount, int $uses): array
+    {
+        $cents = (int) round($discount * 100);
+        $base = intdiv($cents, $uses);
+        $extra = $cents - ($base * $uses);
+
+        $shares = [];
+
+        for ($i = 0; $i < $uses; $i++) {
+            $shares[] = round(($base + ($i < $extra ? 1 : 0)) / 100, 2);
+        }
+
+        return $shares;
+    }
 
     /**
      * Every redemption leaves a trail entry.
@@ -180,16 +455,18 @@ class CouponRedeemer
         $target = $registration?->reference ?? $order?->reference ?? 'no record';
 
         AdminLogger::activity('coupons.redeem', sprintf(
-            'Coupon %s redeemed on %s for %s.',
+            'Coupon %s redeemed on %s for %s%s.',
             $outcome->code?->codeLabel() ?? $coupon->name,
             $target,
             PaymentFigures::money($outcome->discount),
+            $outcome->uses > 1 ? sprintf(' across %d participants', $outcome->uses) : '',
         ));
 
         AdminLogger::audit($coupon, 'coupon.redeemed', null, [
             'coupon' => $coupon->name,
             'code' => $outcome->code?->codeLabel(),
             'discount' => $outcome->discount,
+            'uses' => $outcome->uses,
             'used_on' => $target,
             'remaining' => $coupon->fresh()?->remaining(),
         ]);

@@ -36,8 +36,8 @@ class CouponGatewayAmountTest extends CouponTestCase
         parent::setUp();
 
         Setting::write('integration.payments.provider', PaymentSettings::PROVIDER_CHIP, 'integration.payments');
-        Setting::write('integration.payments.chip_brand_id', 'brand-' . uniqid(), 'integration.payments');
-        Setting::write('integration.payments.chip_api_key', 'key-' . uniqid(), 'integration.payments');
+        Setting::write('integration.payments.chip_brand_id', 'brand-'.uniqid(), 'integration.payments');
+        Setting::write('integration.payments.chip_api_key', 'key-'.uniqid(), 'integration.payments');
         Setting::write('integration.payments.currency', 'MYR', 'integration.payments');
     }
 
@@ -55,7 +55,7 @@ class CouponGatewayAmountTest extends CouponTestCase
     {
         Http::fake([
             'gate.chip-in.asia/api/v1/purchases/' => Http::response([
-                'id' => 'pur_test_' . uniqid(),
+                'id' => 'pur_test_'.uniqid(),
                 'checkout_url' => 'https://gate.chip-in.asia/p/test',
             ]),
         ]);
@@ -202,7 +202,7 @@ class CouponGatewayAmountTest extends CouponTestCase
         $order = app(ShopOrderWriter::class)->place(
             [
                 'customer_name' => 'Aminah Yusof',
-                'customer_email' => 'buyer-' . uniqid() . '@example.com',
+                'customer_email' => 'buyer-'.uniqid().'@example.com',
                 'customer_phone' => '0123456789',
                 'address_line_1' => '1 Jalan Satu',
                 'postcode' => '40000',
@@ -243,7 +243,7 @@ class CouponGatewayAmountTest extends CouponTestCase
         $order = app(ShopOrderWriter::class)->place(
             [
                 'customer_name' => 'Aminah Yusof',
-                'customer_email' => 'buyer-' . uniqid() . '@example.com',
+                'customer_email' => 'buyer-'.uniqid().'@example.com',
                 'customer_phone' => '0123456789',
                 'address_line_1' => '1 Jalan Satu',
                 'postcode' => '40000',

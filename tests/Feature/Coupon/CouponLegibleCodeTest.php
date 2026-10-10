@@ -27,7 +27,7 @@ class CouponLegibleCodeTest extends CouponTestCase
             $this->assertStringNotContainsString(
                 $character,
                 Coupon::CODE_ALPHABET,
-                $character . ' is confusable and must not be in the generator alphabet.',
+                $character.' is confusable and must not be in the generator alphabet.',
             );
         }
 
@@ -44,7 +44,7 @@ class CouponLegibleCodeTest extends CouponTestCase
 
     public function test_the_generator_never_emits_an_excluded_character(): void
     {
-        $pattern = '/^[' . preg_quote(Coupon::CODE_ALPHABET, '/') . ']{' . Coupon::CODE_LENGTH . '}$/';
+        $pattern = '/^['.preg_quote(Coupon::CODE_ALPHABET, '/').']{'.Coupon::CODE_LENGTH.'}$/';
 
         for ($i = 0; $i < 3000; $i++) {
             $code = Coupon::generateCode();
@@ -52,7 +52,7 @@ class CouponLegibleCodeTest extends CouponTestCase
             $this->assertMatchesRegularExpression($pattern, $code);
 
             foreach (str_split(Coupon::CODE_EXCLUDED) as $character) {
-                $this->assertStringNotContainsString($character, $code, $code . ' contains ' . $character . '.');
+                $this->assertStringNotContainsString($character, $code, $code.' contains '.$character.'.');
             }
         }
     }
@@ -64,7 +64,7 @@ class CouponLegibleCodeTest extends CouponTestCase
         $this->actingAs($this->couponAdmin())
             ->get(route('admin.coupons.create'))
             ->assertOk()
-            ->assertSee('const ALPHABET = "' . Coupon::CODE_ALPHABET . '"', false);
+            ->assertSee('const ALPHABET = "'.Coupon::CODE_ALPHABET.'"', false);
     }
 
     /* ---------------------------------------------------------------------

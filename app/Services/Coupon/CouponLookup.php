@@ -3,6 +3,7 @@
 namespace App\Services\Coupon;
 
 use App\Models\Coupon;
+use App\Models\CouponIssuedCode;
 
 /**
  * What a typed string turned out to be, before anything is claimed.
@@ -27,12 +28,12 @@ readonly class CouponLookup
     public function __construct(
         public string $status,
         public ?Coupon $coupon = null,
-    ) {
-    }
+        public ?CouponIssuedCode $issued = null,
+    ) {}
 
-    public static function found(Coupon $coupon): self
+    public static function found(Coupon $coupon, ?CouponIssuedCode $issued = null): self
     {
-        return new self(CouponOutcome::OK, $coupon);
+        return new self(CouponOutcome::OK, $coupon, $issued);
     }
 
     public static function failed(string $status): self
@@ -45,10 +46,16 @@ readonly class CouponLookup
         return $this->status === CouponOutcome::OK && $this->coupon !== null;
     }
 
-    /** What somebody typed, or would type, to use this: the batch name. */
+    /**
+     * What somebody typed, or would type, to use this.
+     *
+     * The individual code when one was given, otherwise the batch name. In unique mode
+     * the name is not a code at all, so echoing it back — onto the drawn ticket, among
+     * other places — would print a string that redeems nothing.
+     */
     public function typedCode(): ?string
     {
-        return $this->coupon?->name;
+        return $this->issued?->code ?? $this->coupon?->name;
     }
 
     /** What to tell whoever typed it, in the words CouponOutcome already uses. */

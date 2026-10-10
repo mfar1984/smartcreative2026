@@ -311,7 +311,7 @@ class CouponRegressionGuardTest extends CouponTestCase
             'fulfilment' => ShopOrder::FULFILMENT_ONLINE,
             'payment_method' => ShopOrder::METHOD_GATEWAY,
             'customer_name' => 'Aminah Yusof',
-            'customer_email' => 'buyer-' . uniqid() . '@example.com',
+            'customer_email' => 'buyer-'.uniqid().'@example.com',
             'customer_phone' => '0123456789',
             'address_line_1' => '1 Jalan Satu',
             'postcode' => '40000',

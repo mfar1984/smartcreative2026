@@ -129,7 +129,7 @@ class CouponRedemptionTest extends CouponTestCase
         for ($i = 0; $i < 12; $i++) {
             $this->assertTrue(
                 $this->redeemer()->claimByCode($coupon->name, Coupon::KIND_EVENT, 100)->succeeded(),
-                'Use ' . ($i + 1) . ' should have been allowed.',
+                'Use '.($i + 1).' should have been allowed.',
             );
         }
 
@@ -223,7 +223,7 @@ class CouponRedemptionTest extends CouponTestCase
         $code = $coupon->name;
 
         $this->assertTrue(
-            $this->redeemer()->claimByCode(' ' . strtolower($code) . ' ', Coupon::KIND_EVENT, 100)->succeeded(),
+            $this->redeemer()->claimByCode(' '.strtolower($code).' ', Coupon::KIND_EVENT, 100)->succeeded(),
         );
     }
 
@@ -238,7 +238,7 @@ class CouponRedemptionTest extends CouponTestCase
         for ($i = 0; $i < 4; $i++) {
             $outcome = $this->redeemer()->claimByCode($coupon->name, Coupon::KIND_EVENT, 100);
 
-            $this->assertTrue($outcome->succeeded(), 'Use ' . ($i + 1) . ' should have been allowed.');
+            $this->assertTrue($outcome->succeeded(), 'Use '.($i + 1).' should have been allowed.');
             $this->assertSame(7.5, $outcome->discount);
         }
 

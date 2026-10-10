@@ -40,7 +40,7 @@ class CouponShopOrderTest extends CouponTestCase
     {
         return [
             'customer_name' => 'Aminah Yusof',
-            'customer_email' => 'buyer-' . uniqid() . '@example.com',
+            'customer_email' => 'buyer-'.uniqid().'@example.com',
             'customer_phone' => '0123456789',
             'address_line_1' => '1 Jalan Satu',
             'postcode' => '40000',

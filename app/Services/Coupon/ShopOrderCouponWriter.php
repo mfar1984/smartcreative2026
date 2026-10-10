@@ -31,8 +31,7 @@ class ShopOrderCouponWriter
     public function __construct(
         private readonly CouponRedeemer $redeemer,
         private readonly ShopOrderWriter $orders,
-    ) {
-    }
+    ) {}
 
     /**
      * Claim one use by the code somebody typed and reduce this order by it.

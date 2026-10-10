@@ -140,9 +140,14 @@ class CouponAvailability
     /**
      * Resolve a typed string against the batches on offer.
      *
-     * One namespace, because there is one kind of code: the batch name. Matched
-     * case-insensitively and with the whitespace trimmed, because the code is read off
-     * a poster or a phone and typed back in.
+     * TWO NAMESPACES, ONE BOX. A shared batch is reached by its NAME, which is its
+     * code; a unique batch is reached only by an individual code that was issued to
+     * somebody. Resolution is CouponRedeemer::resolve()'s job, called here rather than
+     * repeated, so this advisory answer and the claim that actually spends a use can
+     * never disagree about what a string means.
+     *
+     * Matched case-insensitively and with the whitespace trimmed, because the code is
+     * read off a poster or a slip of paper and typed back in.
      *
      * A real code whose batch is not ticked here answers WRONG_KIND — "that coupon
      * cannot be used here" — rather than "not recognised". It is the truthful answer
@@ -159,7 +164,7 @@ class CouponAvailability
             return CouponLookup::failed(CouponOutcome::NOT_FOUND);
         }
 
-        $batch = Coupon::query()->where('name', $typed)->first();
+        [$batch, $issued] = CouponRedeemer::resolve($typed);
 
         if ($batch === null) {
             return CouponLookup::failed(CouponOutcome::NOT_FOUND);
@@ -182,6 +187,12 @@ class CouponAvailability
             return CouponLookup::failed(CouponOutcome::EXPIRED);
         }
 
+        // An individual code that has already been spent. Answered before the batch's
+        // own exhaustion, because "yours is used" is the specific truth.
+        if ($issued !== null && $issued->isUsed()) {
+            return CouponLookup::failed(CouponOutcome::ALREADY_USED);
+        }
+
         if ($batch->isExhausted()) {
             return CouponLookup::failed(CouponOutcome::RAN_OUT);
         }
@@ -191,6 +202,6 @@ class CouponAvailability
             return CouponLookup::failed(CouponOutcome::WRONG_KIND);
         }
 
-        return CouponLookup::found($batch);
+        return CouponLookup::found($batch, $issued);
     }
 }

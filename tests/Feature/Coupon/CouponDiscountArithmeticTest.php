@@ -146,7 +146,7 @@ class CouponDiscountArithmeticTest extends CouponTestCase
                 'min_players' => $mode === Event::MODE_MANAGER ? 2 : 1,
             ]);
 
-            $this->assertSame(1, CouponDiscount::timesFor($event, 5), $mode . ' must not charge per head.');
+            $this->assertSame(1, CouponDiscount::timesFor($event, 5), $mode.' must not charge per head.');
         }
     }
 

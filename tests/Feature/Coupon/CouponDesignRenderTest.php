@@ -58,22 +58,22 @@ class CouponDesignRenderTest extends CouponTestCase
 
         // The discount. Asserted on the figure rather than the whole label, because
         // 'bold' stacks the number over its unit instead of printing them on one line.
-        $this->assertStringContainsString($ticket->heroValue(), $html, $design . ' lost the discount.');
+        $this->assertStringContainsString($ticket->heroValue(), $html, $design.' lost the discount.');
         $this->assertTrue(
             str_contains($html, '%') || str_contains($html, 'PERCENT'),
-            $design . ' does not say the discount is a percentage.',
+            $design.' does not say the discount is a percentage.',
         );
 
-        $this->assertStringContainsString($code, $html, $design . ' lost the code.');
-        $this->assertStringContainsString($coupon->expiresLabel(), $html, $design . ' lost the expiry.');
+        $this->assertStringContainsString($code, $html, $design.' lost the code.');
+        $this->assertStringContainsString($coupon->expiresLabel(), $html, $design.' lost the expiry.');
 
         // What it is for, in full. A title cut short on the server would be a design
         // deciding what the coupon says.
-        $this->assertStringContainsString(e(self::LONG_TITLE), $html, $design . ' lost what it is for.');
+        $this->assertStringContainsString(e(self::LONG_TITLE), $html, $design.' lost what it is for.');
 
         // Long values are wrapped rather than clipped, which is what keeps a narrow
         // phone from losing the end of a code.
-        $this->assertStringContainsString('break-', $html, $design . ' has nothing to wrap long values.');
+        $this->assertStringContainsString('break-', $html, $design.' has nothing to wrap long values.');
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('designs')]
@@ -84,15 +84,15 @@ class CouponDesignRenderTest extends CouponTestCase
 
         $html = $this->render($coupon, self::LONG_TITLE, $code);
 
-        $this->assertStringContainsString('25.00', $html, $design . ' lost the discount.');
+        $this->assertStringContainsString('25.00', $html, $design.' lost the discount.');
         $this->assertTrue(
             str_contains($html, 'RM') || str_contains($html, 'RINGGIT'),
-            $design . ' does not say the discount is in ringgit.',
+            $design.' does not say the discount is in ringgit.',
         );
 
-        $this->assertStringContainsString($code, $html, $design . ' lost the code.');
-        $this->assertStringContainsString($coupon->expiresLabel(), $html, $design . ' lost the expiry.');
-        $this->assertStringContainsString(e(self::LONG_TITLE), $html, $design . ' lost what it is for.');
+        $this->assertStringContainsString($code, $html, $design.' lost the code.');
+        $this->assertStringContainsString($coupon->expiresLabel(), $html, $design.' lost the expiry.');
+        $this->assertStringContainsString(e(self::LONG_TITLE), $html, $design.' lost what it is for.');
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('designs')]
@@ -125,7 +125,7 @@ class CouponDesignRenderTest extends CouponTestCase
             'quantity' => 1,
         ]);
 
-        $coupon->design_path = Coupon::DESIGN_DIRECTORY . '/sample.png';
+        $coupon->design_path = Coupon::DESIGN_DIRECTORY.'/sample.png';
         $coupon->save();
 
         $code = $coupon->name;

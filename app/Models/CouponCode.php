@@ -8,16 +8,41 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One use of a coupon: the redemption ledger.
+ * One use of a coupon: the redemption ledger. ONE ROW PER PARTICIPANT COVERED.
  *
  * A row here is written at the moment somebody redeems, never before. It records what
  * was typed, when, what it came to in ringgit, and which registration or order it paid
  * for — which is everything Tracking and Report read.
  *
- * `code` holds a copy of the string as it was typed, which under the current model is
- * the batch name. Stored rather than read off the batch so the audit trail survives a
- * rename, and so per-person codes could be added later without this table changing
- * shape. It stays nullable for the rows written before the ledger existed.
+ * A USE IS A PARTICIPANT, not a registration, on an event that charges per
+ * participant. A group of ten entering one code once writes TEN rows: all ten point at
+ * the same registration, all ten carry the same typed code, each one names the person
+ * it covered and holds that person's share of the discount. On an event that does not
+ * charge per participant, one registration is still one row.
+ *
+ * Three things fall out of that shape, which is why it was chosen:
+ *
+ *   "show me the ten people under this coupon" is a query on this table and nothing
+ *   more.
+ *
+ *   the use cap is a row count, which is what CouponRedeemer's lock already
+ *   serialises — no second counter to keep in step with the money.
+ *
+ *   the shares add up to the discount on the registration exactly, so Report's
+ *   "given away" total is unchanged by the split.
+ *
+ * `code` holds a copy of the string as it was typed: the batch name for a shared
+ * batch, or the individual code for a unique one. Stored rather than read off the
+ * batch so the audit trail survives a rename. It stays nullable for the rows written
+ * before the ledger existed.
+ *
+ * `participant_name` IS THE REDEEMER, AND IT IS A NAME ONLY.
+ *
+ * Not their IC, not their phone, not anything else on the registration. A redeemer is
+ * a member of the public; a sponsor-facing view reads these rows, and what this table
+ * can reach is what that view can leak. The representative who handed the code out is
+ * a different person entirely and lives on CouponHolder, with contact details, because
+ * the office does need to trace them.
  */
 class CouponCode extends Model
 {
@@ -27,6 +52,8 @@ class CouponCode extends Model
         'redeemed_at',
         'discount_amount',
         'event_registration_id',
+        'event_participant_id',
+        'participant_name',
         'shop_order_id',
     ];
 

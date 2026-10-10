@@ -134,7 +134,17 @@ class CouponPublicRedemptionTest extends CouponTestCase
             'max_players' => 20,
         ]);
 
-        $coupon = $this->fixedCoupon(10, ['quantity' => 2]);
+        /*
+         | Three uses, because three heads are being discounted.
+         |
+         | This said 2 when a registration was one use however many people it
+         | covered, and the discount still came to RM30 — three heads' worth of money
+         | taken out of a batch that only allowed two. That is the blow-out the
+         | per-participant count exists to stop: a thousand codes have to fund a
+         | thousand heads, not a thousand group entries. A cap below the head count is
+         | now refused outright, which is asserted on its own further down.
+         */
+        $coupon = $this->fixedCoupon(10, ['quantity' => 3]);
         $event->coupons()->attach($coupon);
 
         $this->post(route('registration.store', ['event' => $event->slug]), [
@@ -154,6 +164,10 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $this->assertSame(3, $registration->participants()->count());
         $this->assertSame('30.00', $registration->discount_amount);
         $this->assertSame('270.00', $registration->amount);
+
+        // And the batch was charged three uses, not one: the cap and the money count
+        // the same way, so a batch can never give away more than it allows.
+        $this->assertSame(0, $coupon->fresh()->remaining());
     }
 
     /* ---------------------------------------------------------------------
@@ -289,7 +303,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $order = ShopOrder::query()->sole();
 
         // To its own confirmation page, not away to a gateway.
-        $response->assertRedirectContains('/order/' . $order->reference);
+        $response->assertRedirectContains('/order/'.$order->reference);
 
         $this->assertSame('40.00', $order->discount_total);
         $this->assertSame('0.00', $order->grand_total);
@@ -521,7 +535,7 @@ class CouponPublicRedemptionTest extends CouponTestCase
         $this->assertTrue($registration->awaitingPayment());
 
         // Straight to the payment page, as it always did.
-        $response->assertRedirectContains('/registration/payment/' . $registration->reference);
+        $response->assertRedirectContains('/registration/payment/'.$registration->reference);
     }
 
     public function test_an_order_with_no_code_typed_still_reaches_the_gateway(): void

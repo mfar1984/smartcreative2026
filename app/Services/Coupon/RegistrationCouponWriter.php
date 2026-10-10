@@ -30,12 +30,20 @@ use Illuminate\Support\Facades\DB;
  *
  * registration_fee and addons_total are not touched. They are what the entry was
  * charged for, and a discount does not change what was bought.
+ *
+ * HOW MANY USES THIS SPENDS
+ *
+ * One number does both jobs: CouponDiscount::timesFor() is the head count, which is
+ * the multiplier for a fixed discount AND the number of uses charged. They are
+ * deliberately the same, so a group of ten on a per-participant event is discounted
+ * ten times and charged ten uses — the cap and the money agree about how many people
+ * were covered. CouponRedeemer writes one ledger row per head, and
+ * `coupon_code_id` here points at the first of them, which is what names the code on
+ * screen.
  */
 class RegistrationCouponWriter
 {
-    public function __construct(private readonly CouponRedeemer $redeemer)
-    {
-    }
+    public function __construct(private readonly CouponRedeemer $redeemer) {}
 
     /**
      * Claim one use of a batch and reduce this registration by it.

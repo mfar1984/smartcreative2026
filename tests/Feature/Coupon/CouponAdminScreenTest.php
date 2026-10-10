@@ -320,7 +320,7 @@ class CouponAdminScreenTest extends CouponTestCase
         $coupon = Coupon::query()->sole();
 
         $this->assertTrue($coupon->hasCustomDesign());
-        $this->assertStringStartsWith(Coupon::DESIGN_DIRECTORY . '/', $coupon->design_path);
+        $this->assertStringStartsWith(Coupon::DESIGN_DIRECTORY.'/', $coupon->design_path);
         Storage::disk('public')->assertExists($coupon->design_path);
     }
 
@@ -723,7 +723,7 @@ class CouponAdminScreenTest extends CouponTestCase
             $this->assertSame(
                 1,
                 \App\Models\Permission::query()->where('slug', $slug)->count(),
-                $slug . ' must exist exactly once.',
+                $slug.' must exist exactly once.',
             );
         }
 

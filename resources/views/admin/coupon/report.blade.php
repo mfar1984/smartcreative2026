@@ -20,7 +20,7 @@
 @section('content')
     <x-admin.page-card
         title="Coupon Report"
-        description="One row per coupon: how many uses it allows, how many have been taken, how many are left, and what they gave away."
+        description="One row per coupon: how many uses it allows, how many have been taken, how many are left, and what they gave away. Open a coupon for its sponsorship figures and who is holding its codes."
         :flush="true">
 
         <x-slot:actions>
@@ -140,7 +140,11 @@
 
                         <tr class="hover:bg-blue-50/40 align-top">
                             <td class="px-5 py-3">
-                                <span class="font-mono font-semibold text-gray-900">{{ $batch->name }}</span>
+                                {{-- The code opens the batch: its sponsorship figures, the
+                                     blocks of codes issued, who handles each one and which
+                                     are spent. Same permission as this list. --}}
+                                <a href="{{ route('admin.coupons.report.show', $batch) }}"
+                                   class="font-mono font-semibold text-blue-600 hover:underline">{{ $batch->name }}</a>
                                 <span class="block text-xs text-gray-500 mt-0.5">
                                     expires {{ $batch->expiresLabel() }}
                                 </span>
@@ -148,6 +152,9 @@
 
                             <td class="px-5 py-3 text-gray-600 whitespace-nowrap">
                                 {{ $batch->kindLabel() }}
+                                <span class="block text-xs text-gray-400 mt-0.5">
+                                    {{ $batch->modeLabel() }}
+                                </span>
                             </td>
 
                             <td class="px-5 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">
