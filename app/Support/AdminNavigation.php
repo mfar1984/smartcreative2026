@@ -39,6 +39,24 @@ class AdminNavigation
                 'permission' => 'dashboard.view',
             ],
 
+            /*
+            | A sponsor's own area. Deliberately above Modules and outside it: a
+            | sponsorship account holds this permission and admin.access and nothing
+            | else, so this is the only thing in its sidebar and it should not be
+            | sitting under a heading that lists nine modules it cannot reach.
+            |
+            | Not a Coupon child for the same reason. The Coupon group is the staff
+            | view of every batch; this is one sponsor's own blocks.
+            */
+            [
+                'kind' => 'item',
+                'label' => 'Sponsorship',
+                'icon' => 'cash',
+                'route' => 'admin.sponsorship.index',
+                'active' => 'admin.sponsorship.*',
+                'permission' => 'sponsorship.portal.view',
+            ],
+
             [
                 'kind' => 'section',
                 // Deliberately not "Event": the group below already carries

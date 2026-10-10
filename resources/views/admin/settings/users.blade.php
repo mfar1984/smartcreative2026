@@ -373,6 +373,208 @@
                 </div>
             </div>
         @endif
+
+        {{-- ==================== Sponsorship ==================== --}}
+        @if ($activeTab === 'sponsorship')
+            <div class="flex flex-wrap items-start justify-between gap-4 mb-5">
+                <x-admin.section-intro
+                    title="Sponsorship"
+                    description="Accounts that monitor the coupons they funded. They sign in at the same /admin/login and can only look."
+                    icon="cash"
+                    class="mb-0" />
+
+                @if ($canCreateSponsor)
+                    <button type="button" data-open-dialog="sponsor-create" class="{{ $addButton }}">
+                        <x-admin.icon name="plus" class="w-4 h-4" />
+                        Add Sponsorship
+                    </button>
+                @endif
+            </div>
+
+            {{-- Said here because the Funded column below is read only, and a
+                 sponsorship that has been tagged to nothing sees an empty screen. --}}
+            <p class="text-xs text-gray-500 mb-4">
+                A sponsorship is tied to the coupon blocks it paid for on Coupon &rarr; Report,
+                under Blocks Issued. The role is set automatically, so there is nothing to pick here.
+            </p>
+
+            <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <x-admin.filter-bar
+                    :action="route('admin.settings.users')"
+                    :reset="$isFiltered ? route('admin.settings.users', ['tab' => 'sponsorship']) : null">
+
+                    <input type="hidden" name="tab" value="sponsorship">
+
+                    <div class="relative flex-1 min-w-56">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">
+                            <x-admin.icon name="search" class="w-4 h-4" />
+                        </span>
+                        <label for="q" class="sr-only">Search sponsorship accounts</label>
+                        <input type="search" id="q" name="q" value="{{ $search }}"
+                               placeholder="Search name, username or email..."
+                               class="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                    </div>
+
+                    <label for="status" class="sr-only">Status</label>
+                    <select id="status" name="status"
+                            class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                        <option value="">All Status</option>
+                        <option value="active" @selected($status === 'active')>Active</option>
+                        <option value="inactive" @selected($status === 'inactive')>Inactive</option>
+                    </select>
+                </x-admin.filter-bar>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-left">
+                            <tr>
+                                <th scope="col" class="{{ $head }} w-12">#</th>
+                                <th scope="col" class="{{ $head }}">Sponsorship</th>
+                                <th scope="col" class="{{ $head }}">Email</th>
+                                <th scope="col" class="{{ $head }}">Status</th>
+                                <th scope="col" class="{{ $head }}">Funded</th>
+                                <th scope="col" class="{{ $head }} text-right">Committed</th>
+                                <th scope="col" class="{{ $head }} text-right">Used</th>
+                                <th scope="col" class="{{ $head }} text-center">Actions</th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-gray-100">
+                            @forelse ($sponsors as $index => $row)
+                                @php
+                                    $blocks = $row->sponsoredAllocations;
+                                    $codes = $blocks->sum(fn ($block) => (int) $block->codes_total);
+                                    $usedCodes = $blocks->sum(fn ($block) => (int) $block->codes_used);
+                                    $batches = $blocks->pluck('coupon.name')->filter()->unique();
+
+                                    // Assembled in one string rather than across
+                                    // several lines of markup, so the sentence a
+                                    // reader sees is the sentence in the source.
+                                    $fundedLine = sprintf(
+                                        '%s %s · %s of %s %s used',
+                                        number_format($blocks->count()),
+                                        Str::plural('block', $blocks->count()),
+                                        number_format($usedCodes),
+                                        number_format($codes),
+                                        Str::plural('code', $codes),
+                                    );
+                                @endphp
+
+                                <tr class="hover:bg-blue-50/40 align-top">
+                                    <td class="px-6 py-3 text-gray-500">{{ $sponsors->firstItem() + $index }}</td>
+
+                                    <td class="px-6 py-3">
+                                        <div class="flex items-center gap-3">
+                                            <span class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0" aria-hidden="true">
+                                                {{ strtoupper(substr($row->name, 0, 1)) }}
+                                            </span>
+                                            <div class="min-w-0">
+                                                <span class="block font-semibold text-gray-900 truncate">{{ $row->name }}</span>
+                                                <code class="block text-xs text-gray-500 truncate">{{ $row->username }}</code>
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    <td class="px-6 py-3 text-gray-600">{{ $row->email }}</td>
+
+                                    <td class="px-6 py-3 whitespace-nowrap">
+                                        @if ($row->is_active)
+                                            <x-admin.badge tone="green" :dot="true">Active</x-admin.badge>
+                                        @else
+                                            <x-admin.badge tone="gray" :dot="true">Inactive</x-admin.badge>
+                                        @endif
+                                    </td>
+
+                                    {{-- What the account is tied to, and the state of it. This
+                                         column is the whole reason somebody opens this tab. --}}
+                                    <td class="px-6 py-3">
+                                        @if ($blocks->isEmpty())
+                                            <span class="text-xs text-gray-400">— Not tagged to any coupon yet</span>
+                                        @else
+                                            @foreach ($batches as $batchName)
+                                                <span class="block text-xs text-gray-700">{{ $batchName }}</span>
+                                            @endforeach
+                                            <span class="block text-xs text-gray-500 mt-0.5">{{ $fundedLine }}</span>
+                                        @endif
+                                    </td>
+
+                                    <td class="px-6 py-3 text-right tabular-nums whitespace-nowrap">
+                                        @if ($row->sponsor_committed_amount === null)
+                                            <span class="text-xs text-gray-400">—</span>
+                                        @else
+                                            {{ \App\Support\PaymentFigures::money((float) $row->sponsor_committed_amount) }}
+                                        @endif
+                                    </td>
+
+                                    <td class="px-6 py-3 text-right font-semibold text-gray-900 tabular-nums whitespace-nowrap">
+                                        {{ \App\Support\PaymentFigures::money($sponsorSpend[$row->id] ?? 0) }}
+                                    </td>
+
+                                    <td class="px-6 py-3 whitespace-nowrap">
+                                        <div class="flex items-center justify-center gap-1">
+                                            @if ($canUpdateSponsor)
+                                                <button type="button" data-open-dialog="sponsor-edit-{{ $row->id }}"
+                                                        class="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition"
+                                                        title="Edit {{ $row->name }}" aria-label="Edit {{ $row->name }}">
+                                                    <x-admin.icon name="pencil" class="w-4 h-4" />
+                                                </button>
+                                            @endif
+
+                                            @if ($canDeleteSponsor)
+                                                @php
+                                                    $confirm = $blocks->isEmpty()
+                                                        ? sprintf('Delete %s? This cannot be undone.', $row->name)
+                                                        : sprintf(
+                                                            'Delete %s? %d coupon block(s) will be released, keeping every code and every use. This cannot be undone.',
+                                                            $row->name,
+                                                            $blocks->count(),
+                                                        );
+                                                @endphp
+
+                                                <form action="{{ route('admin.settings.users.sponsors.destroy', $row) }}" method="POST"
+                                                      onsubmit="return confirm('{{ addslashes($confirm) }}');">
+                                                    @csrf
+                                                    @method('DELETE')
+                                                    <button type="submit"
+                                                            class="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
+                                                            title="Delete {{ $row->name }}" aria-label="Delete {{ $row->name }}">
+                                                        <x-admin.icon name="trash" class="w-4 h-4" />
+                                                    </button>
+                                                </form>
+                                            @endif
+
+                                            @if (! $canUpdateSponsor && ! $canDeleteSponsor)
+                                                <span class="text-xs text-gray-400">View only</span>
+                                            @endif
+                                        </div>
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="8" class="px-6 py-12 text-center text-sm text-gray-500">
+                                        @if ($isFiltered)
+                                            No sponsorship accounts match the current filters.
+                                        @else
+                                            No sponsorship accounts yet.
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="px-6 py-3.5 border-t border-gray-200">
+                    @if ($sponsors->hasPages())
+                        {{ $sponsors->links() }}
+                    @else
+                        <p class="text-xs text-gray-500">
+                            Showing {{ $sponsors->total() }} {{ Str::plural('account', $sponsors->total()) }}
+                        </p>
+                    @endif
+                </div>
+            </div>
+        @endif
     </x-admin.settings-shell>
 
     {{-- ===================== Create dialog: user ===================== --}}
@@ -670,6 +872,161 @@
             </div>
         @endforeach
     @endif
+
+    {{-- ===================== Create dialog: sponsorship ===================== --}}
+    @if ($activeTab === 'sponsorship' && $canCreateSponsor)
+        <div id="sponsor-create" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="sponsor-create-title">
+            <div class="fixed inset-0 bg-gray-900/50" data-close-dialog></div>
+
+            <div class="relative min-h-full flex items-start justify-center p-4">
+                <div class="relative w-full max-w-lg bg-white rounded-xl shadow-xl my-8">
+                    <div class="flex items-center justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                        <h2 id="sponsor-create-title" class="text-base font-bold text-gray-900">Add Sponsorship</h2>
+                        <button type="button" data-close-dialog class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition" aria-label="Close">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <form action="{{ route('admin.settings.users.sponsors.store') }}" method="POST" class="p-6 space-y-4">
+                        @csrf
+
+                        <div>
+                            <label for="sponsor-create-name" class="{{ $label }}">Sponsor Name <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="text" id="sponsor-create-name" name="name" required maxlength="120" value="{{ old('name') }}" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">A company, an NGO or a person. This is what the account is called on screen.</p>
+                        </div>
+
+                        <div>
+                            <label for="sponsor-create-username" class="{{ $label }}">Username <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="text" id="sponsor-create-username" name="username" required maxlength="120" value="{{ old('username') }}" autocomplete="off" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">What they sign in with at /admin/login.</p>
+                        </div>
+
+                        <div>
+                            <label for="sponsor-create-email" class="{{ $label }}">Email <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="email" id="sponsor-create-email" name="email" required maxlength="190" value="{{ old('email') }}" class="{{ $input }}">
+                        </div>
+
+                        <div>
+                            <label for="sponsor-create-committed" class="{{ $label }}">Committed Amount (RM)</label>
+                            <input type="number" id="sponsor-create-committed" name="sponsor_committed_amount" min="0" step="0.01"
+                                   value="{{ old('sponsor_committed_amount') }}" class="{{ $input }}">
+                            {{-- Said plainly, because the figure is a promise and not a
+                                 calculation: nothing in the system can work it out, and the
+                                 sponsor's own screen keeps it apart from what was really used. --}}
+                            <p class="text-xs text-gray-500 mt-1">
+                                What this sponsor pledged. Optional, typed by hand, and never worked out from a coupon.
+                            </p>
+                        </div>
+
+                        <div>
+                            <label for="sponsor-create-password" class="{{ $label }}">Password <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="password" id="sponsor-create-password" name="password" required autocomplete="new-password" class="{{ $input }}">
+                            <p class="text-xs text-gray-500 mt-1">At least 10 characters, with letters, numbers and a symbol.</p>
+                        </div>
+
+                        <div>
+                            <label for="sponsor-create-password-confirm" class="{{ $label }}">Confirm Password <span class="text-red-600" aria-hidden="true">*</span></label>
+                            <input type="password" id="sponsor-create-password-confirm" name="password_confirmation" required autocomplete="new-password" class="{{ $input }}">
+                        </div>
+
+                        <x-admin.toggle name="is_active" id="sponsor-create-active" :checked="old('is_active', true)" label="Account is active" />
+
+                        <p class="text-xs text-gray-500">
+                            The sponsorship role is assigned automatically and is view only. Tag the coupon
+                            blocks it funded on Coupon &rarr; Report afterwards.
+                        </p>
+
+                        <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                            <button type="button" data-close-dialog class="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                Cancel
+                            </button>
+                            <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">
+                                Create Sponsorship
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    {{-- ===================== Edit dialogs: sponsorship ===================== --}}
+    @if ($activeTab === 'sponsorship' && $canUpdateSponsor)
+        @foreach ($sponsors as $row)
+            <div id="sponsor-edit-{{ $row->id }}" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="sponsor-edit-title-{{ $row->id }}">
+                <div class="fixed inset-0 bg-gray-900/50" data-close-dialog></div>
+
+                <div class="relative min-h-full flex items-start justify-center p-4">
+                    <div class="relative w-full max-w-lg bg-white rounded-xl shadow-xl my-8">
+                        <div class="flex items-center justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                            <h2 id="sponsor-edit-title-{{ $row->id }}" class="text-base font-bold text-gray-900">Edit {{ $row->name }}</h2>
+                            <button type="button" data-close-dialog class="p-1 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition" aria-label="Close">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <form action="{{ route('admin.settings.users.sponsors.update', $row) }}" method="POST" class="p-6 space-y-4">
+                            @csrf
+                            @method('PUT')
+
+                            <div>
+                                <label for="sponsor-edit-name-{{ $row->id }}" class="{{ $label }}">Sponsor Name <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="text" id="sponsor-edit-name-{{ $row->id }}" name="name" required maxlength="120" value="{{ $row->name }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="sponsor-edit-username-{{ $row->id }}" class="{{ $label }}">Username <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="text" id="sponsor-edit-username-{{ $row->id }}" name="username" required maxlength="120" value="{{ $row->username }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="sponsor-edit-email-{{ $row->id }}" class="{{ $label }}">Email <span class="text-red-600" aria-hidden="true">*</span></label>
+                                <input type="email" id="sponsor-edit-email-{{ $row->id }}" name="email" required maxlength="190" value="{{ $row->email }}" class="{{ $input }}">
+                            </div>
+
+                            <div>
+                                <label for="sponsor-edit-committed-{{ $row->id }}" class="{{ $label }}">Committed Amount (RM)</label>
+                                <input type="number" id="sponsor-edit-committed-{{ $row->id }}" name="sponsor_committed_amount" min="0" step="0.01"
+                                       value="{{ $row->sponsor_committed_amount }}" class="{{ $input }}">
+                                <p class="text-xs text-gray-500 mt-1">Leave blank for no pledge recorded, which is not the same as zero.</p>
+                            </div>
+
+                            <div>
+                                <label for="sponsor-edit-password-{{ $row->id }}" class="{{ $label }}">New Password</label>
+                                <input type="password" id="sponsor-edit-password-{{ $row->id }}" name="password" autocomplete="new-password" class="{{ $input }}">
+                                <p class="text-xs text-gray-500 mt-1">Leave blank to keep the current password.</p>
+                            </div>
+
+                            <div>
+                                <label for="sponsor-edit-password-confirm-{{ $row->id }}" class="{{ $label }}">Confirm New Password</label>
+                                <input type="password" id="sponsor-edit-password-confirm-{{ $row->id }}" name="password_confirmation" autocomplete="new-password" class="{{ $input }}">
+                            </div>
+
+                            <x-admin.toggle
+                                name="is_active"
+                                id="sponsor-edit-active-{{ $row->id }}"
+                                :checked="$row->is_active"
+                                label="Account is active" />
+
+                            <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                                <button type="button" data-close-dialog class="px-4 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                    Cancel
+                                </button>
+                                <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        @endforeach
+    @endif
 @endsection
 
 @push('scripts')
@@ -709,7 +1066,14 @@
         // Reopen the create dialog of the active tab when validation sent the
         // user back with errors.
         @if ($errors->any() && old('username'))
-            document.getElementById('{{ $activeTab === 'handler' ? 'handler-create' : 'user-create' }}')?.classList.remove('hidden');
+            @php
+                $createDialog = match ($activeTab) {
+                    'handler' => 'handler-create',
+                    'sponsorship' => 'sponsor-create',
+                    default => 'user-create',
+                };
+            @endphp
+            document.getElementById('{{ $createDialog }}')?.classList.remove('hidden');
             document.body.classList.add('overflow-hidden');
         @endif
     })();

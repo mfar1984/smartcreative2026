@@ -408,6 +408,40 @@ class RolesAndPermissionsSeeder extends Seeder
                 'update' => ['handlers.update', 'Update handler accounts'],
                 'delete' => ['handlers.delete', 'Delete handler accounts'],
             ],
+            /*
+            | The Sponsorship tab on the same screen: the monitor-only accounts a
+            | sponsor, an NGO or a chairman signs in with to watch the coupons they
+            | funded.
+            |
+            | Its own four slugs for the same reason Handler has its own: somebody
+            | trusted to open an account for a sponsor has no business editing an
+            | administrator.
+            |
+            | Granted to no role here, which leaves it with super admin only. A
+            | sponsor must not manage sponsors, so the sponsor role deliberately
+            | holds none of these.
+            */
+            'Sponsorship' => [
+                'view' => ['sponsors.view', 'View sponsorship accounts'],
+                'create' => ['sponsors.create', 'Create sponsorship accounts'],
+                'update' => ['sponsors.update', 'Update sponsorship accounts'],
+                'delete' => ['sponsors.delete', 'Delete sponsorship accounts'],
+            ],
+        ],
+
+        /*
+        | The sponsor's OWN area, which is a different thing from managing sponsors.
+        |
+        | One permission, held by the sponsor role and by no staff role. It guards a
+        | screen that shows only the blocks the signed-in sponsorship funded, so
+        | granting it to anybody else would show them an empty page rather than
+        | somebody else's figures — but it is kept off the staff roles anyway,
+        | because the staff answer is Coupon then Report.
+        */
+        'Sponsorship' => [
+            'Sponsor Area' => [
+                'view' => ['sponsorship.portal.view', 'See their own sponsorship area'],
+            ],
         ],
 
         'Logging' => [
@@ -614,6 +648,31 @@ class RolesAndPermissionsSeeder extends Seeder
                 'tournaments.rules.view',
                 'tournaments.halloffame.view',
                 'tournaments.halloffame.publish',
+            ],
+        ],
+
+        /*
+        | A sponsor, an NGO or a chairman watching the coupons they paid for. Signs
+        | in at the same /admin/login and, once in, the navigation shows their own
+        | area and nothing else.
+        |
+        | MONITOR AND VIEW ONLY: two permissions, and neither of them writes
+        | anything. No dashboard — the dashboard totals every tournament and every
+        | payment in the system, which is none of a sponsor's business. No coupon
+        | permissions either: the staff Coupon screens show every batch, every
+        | sponsor's figures and participants' details, so a sponsor gets a
+        | purpose-built screen instead of those with a filter bolted on.
+        |
+        | A system role, so is_protected is true the same way the handler's is: it is
+        | what the login landing depends on, and it must not be deleted by accident.
+        */
+        'sponsor' => [
+            'name' => 'Sponsorship',
+            'description' => 'Monitors the coupon blocks they funded. Read only.',
+            'is_protected' => true,
+            'permissions' => [
+                'admin.access',
+                'sponsorship.portal.view',
             ],
         ],
 

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Coupon;
 use App\Models\CouponCode;
 use App\Models\CouponIssuedCode;
+use App\Models\User;
 use App\Services\AdminLogger;
 use App\Support\CouponHolderIdentity;
 use App\Support\CouponSponsorship;
@@ -124,6 +125,15 @@ class ReportController extends Controller
             'state' => $state,
             'isFiltered' => $allocationId !== null || $state !== '',
             'canIssue' => $request->user()->hasPermission('coupons.update'),
+
+            /*
+             | The sponsorship accounts a block can be tagged to. Loaded only for
+             | somebody who may actually tag one, because for everybody else it is a
+             | list of accounts with no control to use it on.
+             */
+            'sponsors' => $request->user()->hasPermission('coupons.update')
+                ? User::query()->where('is_sponsor', true)->orderBy('name')->get(['id', 'name'])
+                : collect(),
         ]);
     }
 
@@ -201,7 +211,7 @@ class ReportController extends Controller
         }
 
         return $coupon->allocations()
-            ->with('holder')
+            ->with(['holder', 'sponsor:id,name'])
             ->withCount([
                 'codes as codes_total',
                 'codes as codes_used' => fn ($query) => $query->whereNotNull('used_at'),

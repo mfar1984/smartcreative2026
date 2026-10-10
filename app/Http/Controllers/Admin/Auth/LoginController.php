@@ -100,14 +100,22 @@ class LoginController extends Controller
          */
         $locations->record($user, (string) $request->ip(), $request->userAgent());
 
-        // A handler holds only the Tournament permissions, so the dashboard would
-        // open near-empty for them. Land them on the tournaments list instead, the
-        // one screen their navigation leads with. Every other role keeps landing on
-        // the dashboard exactly as before. Branched here because this is the single
-        // place the post-login destination is chosen.
-        $landing = $user->isHandler()
-            ? route('admin.tournaments.index')
-            : route('admin.dashboard');
+        /*
+         | A handler holds only the Tournament permissions, so the dashboard would
+         | open near-empty for them. Land them on the tournaments list instead, the
+         | one screen their navigation leads with.
+         |
+         | A sponsor is narrower still: they do not hold dashboard.view at all, so
+         | the dashboard would answer 403 and the one thing they signed in for is
+         | their own area. Every other role keeps landing on the dashboard exactly as
+         | before. Branched here because this is the single place the post-login
+         | destination is chosen.
+         */
+        $landing = match (true) {
+            $user->isHandler() => route('admin.tournaments.index'),
+            $user->isSponsor() => route('admin.sponsorship.index'),
+            default => route('admin.dashboard'),
+        };
 
         return redirect()->intended($landing);
     }

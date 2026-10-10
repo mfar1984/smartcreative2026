@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Admin\Settings;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreHandlerRequest;
+use App\Http\Requests\Admin\StoreSponsorRequest;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateHandlerRequest;
+use App\Http\Requests\Admin\UpdateSponsorRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\AdminLogger;
+use App\Support\CouponSponsorship;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -23,18 +26,21 @@ class UserController extends Controller
     public const TABS = [
         'users' => ['label' => 'Users', 'icon' => 'users'],
         'handler' => ['label' => 'Handler', 'icon' => 'trophy'],
+        'sponsorship' => ['label' => 'Sponsorship', 'icon' => 'cash'],
     ];
 
     /**
      * The permission each tab needs before it is drawn at all.
      *
-     * Two separate sets on purpose: a role can be given handler management
-     * without being given administrator management. A tab the role cannot see is
-     * not rendered and cannot be reached by editing the query string either.
+     * Three separate sets on purpose: a role can be given handler management, or
+     * sponsorship management, without being given administrator management. A tab
+     * the role cannot see is not rendered and cannot be reached by editing the
+     * query string either.
      */
     private const TAB_PERMISSIONS = [
         'users' => 'users.view',
         'handler' => 'handlers.view',
+        'sponsorship' => 'sponsors.view',
     ];
 
     public function index(Request $request)
@@ -48,6 +54,7 @@ class UserController extends Controller
         $activeTab = $this->resolveTab($request->query('tab'), $tabs);
 
         $search = trim((string) $request->query('q'));
+        $sponsors = null;
 
         $status = $request->query('status');
         $status = in_array($status, ['active', 'inactive'], true) ? $status : null;
@@ -55,13 +62,23 @@ class UserController extends Controller
         $roleId = $request->query('role');
         $roleId = is_numeric($roleId) ? (int) $roleId : null;
 
+        if ($activeTab === 'sponsorship') {
+            $sponsors = $this->sponsorRows($search, $status);
+        }
+
         return view('admin.settings.users', [
             'tabs' => $tabs,
             'activeTab' => $activeTab,
 
-            // Only the tab being drawn is queried, so the other list costs nothing.
+            // Only the tab being drawn is queried, so the other lists cost nothing.
             'users' => $activeTab === 'users' ? $this->userRows($search, $status, $roleId) : null,
             'handlers' => $activeTab === 'handler' ? $this->handlerRows($search, $status) : null,
+            'sponsors' => $sponsors,
+
+            // What each sponsorship has actually given away, worked out by
+            // CouponSponsorship so this tab and the sponsor's own screen can never
+            // show two different answers.
+            'sponsorSpend' => $sponsors === null ? [] : $this->sponsorSpend($sponsors),
 
             'roles' => Role::query()->orderBy('name')->get(),
             'search' => $search,
@@ -74,21 +91,25 @@ class UserController extends Controller
             'canCreateHandler' => $request->user()->hasPermission('handlers.create'),
             'canUpdateHandler' => $request->user()->hasPermission('handlers.update'),
             'canDeleteHandler' => $request->user()->hasPermission('handlers.delete'),
+            'canCreateSponsor' => $request->user()->hasPermission('sponsors.create'),
+            'canUpdateSponsor' => $request->user()->hasPermission('sponsors.update'),
+            'canDeleteSponsor' => $request->user()->hasPermission('sponsors.delete'),
         ]);
     }
 
     /**
-     * The Users tab: administrator accounts, handlers excluded.
+     * The Users tab: administrator accounts, handlers and sponsors excluded.
      *
-     * The exclusion is what keeps the two tabs from overlapping. Without it an
-     * account would appear on both lists and be editable from either, which is
-     * the opposite of keeping the two permissions apart.
+     * The exclusions are what keep the three tabs from overlapping. Without them
+     * an account would appear on two lists and be editable from either, which is
+     * the opposite of keeping the permissions apart.
      */
     private function userRows(string $search, ?string $status, ?int $roleId): LengthAwarePaginator
     {
         return User::query()
             ->with('role:id,name,slug,is_active')
             ->where('is_handler', false)
+            ->where('is_sponsor', false)
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('name', 'like', "%{$search}%")
@@ -115,6 +136,10 @@ class UserController extends Controller
         return User::query()
             ->with('handledTournaments')
             ->where('is_handler', true)
+            // Said out loud rather than relied on: the two flags are written as
+            // constants by different endpoints, so an account can only ever be one
+            // of the two, and this tab must not list a sponsor even so.
+            ->where('is_sponsor', false)
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($inner) use ($search) {
                     $inner->where('name', 'like', "%{$search}%")
@@ -126,6 +151,61 @@ class UserController extends Controller
             ->orderBy('name')
             ->paginate(15, ['*'], 'handler_page')
             ->withQueryString();
+    }
+
+    /**
+     * The Sponsorship tab: monitor-only accounts and what each one funded.
+     *
+     * The blocks are eager loaded with their batch and their code counts, because
+     * that is the whole reason somebody opens this tab: which coupons this
+     * sponsorship is tied to, and how much of it has been used. Its own page name,
+     * so a page number from one tab is not carried into another.
+     */
+    private function sponsorRows(string $search, ?string $status): LengthAwarePaginator
+    {
+        return User::query()
+            ->where('is_sponsor', true)
+            ->with(['sponsoredAllocations' => fn ($query) => $query
+                ->with(['coupon:id,name,kind', 'holder'])
+                ->withCount([
+                    'codes as codes_total',
+                    'codes as codes_used' => fn ($codes) => $codes->whereNotNull('used_at'),
+                ])])
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($inner) use ($search) {
+                    $inner->where('name', 'like', "%{$search}%")
+                        ->orWhere('username', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                });
+            })
+            ->when($status !== null, fn ($query) => $query->where('is_active', $status === 'active'))
+            ->orderBy('name')
+            ->paginate(15, ['*'], 'sponsor_page')
+            ->withQueryString();
+    }
+
+    /**
+     * Sponsor id => the ringgit that sponsorship has really given away.
+     *
+     * Asked of CouponSponsorship once per row rather than worked out here in one
+     * clever join. A page of fifteen is fifteen cheap queries, and the alternative
+     * is a second implementation of the same figure — which is how this tab and the
+     * sponsor's own screen would end up disagreeing about their money.
+     *
+     * @param  LengthAwarePaginator<int, User>  $sponsors
+     * @return array<int, float>
+     */
+    private function sponsorSpend(LengthAwarePaginator $sponsors): array
+    {
+        $spend = [];
+
+        foreach ($sponsors as $sponsor) {
+            $spend[$sponsor->id] = CouponSponsorship::actualForAllocations(
+                $sponsor->sponsoredAllocations->pluck('id')->all(),
+            );
+        }
+
+        return $spend;
     }
 
     /**
@@ -143,22 +223,38 @@ class UserController extends Controller
     }
 
     /**
-     * Refuse a row that belongs to the other tab.
+     * Which tab an account belongs to, decided by its flags and nothing else.
      *
-     * The two tabs are two lists over one table, so an id from one is a valid
-     * route parameter on the other's routes. Without this a role granted only
-     * handler management could edit an administrator by changing the number in
+     * One answer per account, so the three lists cannot overlap however the row
+     * was written.
+     */
+    private function tabFor(User $user): string
+    {
+        if ($user->isHandler()) {
+            return 'handler';
+        }
+
+        return $user->isSponsor() ? 'sponsorship' : 'users';
+    }
+
+    /**
+     * Refuse a row that belongs to another tab.
+     *
+     * The three tabs are three lists over one table, so an id from one is a valid
+     * route parameter on another's routes. Without this a role granted only
+     * sponsorship management could edit an administrator by changing the number in
      * the URL, which would undo the whole point of keeping the permissions apart.
      */
-    private function refuseCrossTab(User $user, bool $handler): void
+    private function refuseCrossTab(User $user, string $tab): void
     {
-        if ($user->isHandler() === $handler) {
+        if ($this->tabFor($user) === $tab) {
             return;
         }
 
-        throw new AccessDeniedHttpException($handler
-            ? 'That account is not a handler.'
-            : 'Handler accounts are managed on the Handler tab.');
+        throw new AccessDeniedHttpException(sprintf(
+            'That account is managed on the %s tab.',
+            self::TABS[$this->tabFor($user)]['label'],
+        ));
     }
 
     public function store(StoreUserRequest $request)
@@ -181,7 +277,7 @@ class UserController extends Controller
 
     public function update(UpdateUserRequest $request, User $user)
     {
-        $this->refuseCrossTab($user, false);
+        $this->refuseCrossTab($user, 'users');
 
         $validated = $request->validated();
 
@@ -233,7 +329,7 @@ class UserController extends Controller
 
     public function destroy(Request $request, User $user)
     {
-        $this->refuseCrossTab($user, false);
+        $this->refuseCrossTab($user, 'users');
 
         if ($user->is($request->user())) {
             return redirect()
@@ -310,7 +406,7 @@ class UserController extends Controller
 
     public function updateHandler(UpdateHandlerRequest $request, User $user)
     {
-        $this->refuseCrossTab($user, true);
+        $this->refuseCrossTab($user, 'handler');
 
         $validated = $request->validated();
 
@@ -353,7 +449,7 @@ class UserController extends Controller
      */
     public function destroyHandler(Request $request, User $user)
     {
-        $this->refuseCrossTab($user, true);
+        $this->refuseCrossTab($user, 'handler');
 
         $label = $user->logLabel();
         $assigned = $user->handledTournaments()->count();
@@ -376,6 +472,129 @@ class UserController extends Controller
         return redirect()
             ->route('admin.settings.users', ['tab' => 'handler'])
             ->with('status', 'Handler deleted.');
+    }
+
+    /* ---------------------------------------------------------------------
+     | Sponsorship tab
+     *
+     | A sponsor is an ordinary users row carrying the sponsor role with
+     | is_sponsor set. These three endpoints are the only ones that write that
+     | pair, and they write it as a constant.
+     |
+     | A sponsorship account is MONITOR AND VIEW ONLY: the role holds nothing but
+     | admin access and its own area, so it creates, edits and deletes nothing.
+     | Which blocks of codes it funded is tagged on the coupon side by staff, not
+     | here — this screen opens the account and records what was pledged.
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Create a sponsorship account.
+     *
+     * The role is not a field on this form and no role is ever read from the
+     * request. If it were, a role granted only sponsors.create could mint a super
+     * admin by posting a role_id, which is a straight privilege escalation. So the
+     * role is looked up by its fixed slug and written last, where nothing in the
+     * payload can reach it.
+     */
+    public function storeSponsor(StoreSponsorRequest $request)
+    {
+        $role = Role::where('slug', Role::SPONSOR)->firstOrFail();
+
+        $attributes = $request->validated();
+        $attributes['role_id'] = $role->id;
+        $attributes['is_sponsor'] = true;
+
+        $user = User::create($attributes);
+
+        AdminLogger::activity('sponsors.create', sprintf('Created sponsorship account %s.', $user->logLabel()));
+        AdminLogger::audit($user, 'created', null, [
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'role_id' => $user->role_id,
+            'is_sponsor' => true,
+            'sponsor_committed_amount' => $user->sponsor_committed_amount,
+            'is_active' => $user->is_active,
+        ]);
+
+        return redirect()
+            ->route('admin.settings.users', ['tab' => 'sponsorship'])
+            ->with('status', sprintf('Sponsorship account %s created.', $user->username));
+    }
+
+    public function updateSponsor(UpdateSponsorRequest $request, User $user)
+    {
+        $this->refuseCrossTab($user, 'sponsorship');
+
+        $validated = $request->validated();
+
+        $before = [
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'sponsor_committed_amount' => $user->sponsor_committed_amount,
+            'is_active' => $user->is_active,
+        ];
+
+        // A blank password field leaves the existing password in place.
+        if (blank($validated['password'] ?? null)) {
+            unset($validated['password']);
+        }
+
+        // Neither the role nor the flag is in the payload, so an edit here cannot
+        // turn a sponsor into anything else.
+        $user->update($validated);
+
+        AdminLogger::activity('sponsors.update', sprintf('Updated sponsorship account %s.', $user->logLabel()));
+        AdminLogger::audit($user, 'updated', $before, [
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'sponsor_committed_amount' => $user->sponsor_committed_amount,
+            'is_active' => $user->is_active,
+            'password' => array_key_exists('password', $validated) ? '[redacted]' : null,
+        ]);
+
+        return redirect()
+            ->route('admin.settings.users', ['tab' => 'sponsorship'])
+            ->with('status', sprintf('Sponsorship account %s updated.', $user->username));
+    }
+
+    /**
+     * Delete a sponsorship account.
+     *
+     * The blocks it funded are RELEASED rather than destroyed: sponsor_user_id is
+     * nulled by the foreign key, so the codes, who holds them and every use of them
+     * stay exactly as they are. Codes that have been printed and handed out must not
+     * disappear because an account was closed. How many blocks were released is
+     * recorded, because that is the part somebody will want to know afterwards.
+     */
+    public function destroySponsor(Request $request, User $user)
+    {
+        $this->refuseCrossTab($user, 'sponsorship');
+
+        $label = $user->logLabel();
+        $blocks = $user->sponsoredAllocations()->count();
+
+        AdminLogger::audit($user, 'deleted', [
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'role_id' => $user->role_id,
+            'is_sponsor' => true,
+            'sponsor_committed_amount' => $user->sponsor_committed_amount,
+            'sponsored_blocks' => $blocks,
+        ], null);
+
+        $user->delete();
+
+        AdminLogger::activity('sponsors.delete', $blocks === 0
+            ? sprintf('Deleted sponsorship account %s.', $label)
+            : sprintf('Deleted sponsorship account %s, releasing %d coupon block(s).', $label, $blocks));
+
+        return redirect()
+            ->route('admin.settings.users', ['tab' => 'sponsorship'])
+            ->with('status', 'Sponsorship account deleted.');
     }
 
     private function activeSuperAdminCount(): int

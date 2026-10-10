@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\Campaign\AudienceController;
 use App\Http\Controllers\Admin\Campaign\CampaignController;
 use App\Http\Controllers\Admin\Campaign\CampaignReportController;
 use App\Http\Controllers\Admin\Campaign\CampaignTemplateController;
+use App\Http\Controllers\Admin\Coupon\AllocationSponsorController;
 use App\Http\Controllers\Admin\Coupon\CouponController;
 use App\Http\Controllers\Admin\Coupon\CouponDesignController;
 use App\Http\Controllers\Admin\Coupon\CouponDesignPickerController;
@@ -33,6 +34,7 @@ use App\Http\Controllers\Admin\Shop\OrderController as ShopOrderController;
 use App\Http\Controllers\Admin\Shop\ProductController as ShopProductController;
 use App\Http\Controllers\Admin\Shop\SettingsController as ShopSettingsController;
 use App\Http\Controllers\Admin\Shop\TrackingController as ShopTrackingController;
+use App\Http\Controllers\Admin\Sponsorship\SponsorAreaController;
 use App\Http\Controllers\Admin\Tournament\HallOfFameController;
 use App\Http\Controllers\Admin\Tournament\MatchController;
 use App\Http\Controllers\Admin\Tournament\PointRuleController;
@@ -177,6 +179,21 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('codes.store');
 
             /*
+            | Which sponsorship funded a block.
+            |
+            | On coupons.update, because it is an edit to the coupon's own
+            | distribution, and done HERE rather than in the sponsor's area because a
+            | sponsorship account is monitor-and-view only: staff decide who funded
+            | what. Declared under the `report` prefix, where the blocks are shown, so
+            | the path cannot be swallowed by the `{coupon}` parameter below.
+            */
+            Route::put('report/{coupon}/allocations/{allocation}/sponsor', [AllocationSponsorController::class, 'update'])
+                ->middleware('permission:coupons.update')
+                ->whereNumber('coupon')
+                ->whereNumber('allocation')
+                ->name('allocations.sponsor');
+
+            /*
             | The rest of the design picker, fetched a group at a time.
             |
             | The form renders the current choice and one group; this hands back the
@@ -217,6 +234,38 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:coupons.delete')
                 ->whereNumber('coupon')
                 ->name('destroy');
+        });
+
+        /*
+        |----------------------------------------------------------------------
+        | Sponsorship — the sponsor's OWN area
+        |----------------------------------------------------------------------
+        |
+        | Two read-only routes, on their own permission, which the sponsor role holds
+        | and no staff role is given. A sponsor lands here after signing in and the
+        | sidebar shows them this and nothing else.
+        |
+        | THERE IS NO SPONSOR ID IN EITHER PATH, and that is the guard rather than a
+        | convenience: both read $request->user()->sponsoredAllocations(), so another
+        | sponsor's figures are not addressable from here — there is no number to
+        | change. The one id the screen does take, the block filter, is resolved
+        | against the signed-in sponsor's own blocks.
+        |
+        | Separate from the staff Coupon screens on purpose. Scoping those would mean
+        | auditing every query in Coupon, Event and Shop, where one missed query is a
+        | leak; these two are written knowing they are scoped.
+        |
+        */
+        Route::prefix('sponsorship')->name('sponsorship.')->group(function () {
+            Route::get('/', [SponsorAreaController::class, 'index'])
+                ->middleware('permission:sponsorship.portal.view')
+                ->name('index');
+
+            // The same rows as a file, so the same permission — and an activity line,
+            // because a list of names is a disclosure even when it is only names.
+            Route::get('export', [SponsorAreaController::class, 'exportCsv'])
+                ->middleware('permission:sponsorship.portal.view')
+                ->name('export');
         });
 
         /*
@@ -1273,15 +1322,15 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('roles.destroy');
 
             /*
-             | User Management - tabs: Users, Handler
+             | User Management - tabs: Users, Handler, Sponsorship
              |
-             | One screen, two lists, two sets of permissions. The index takes
-             | either, because the screen draws only the tabs the role holds; the
-             | write endpoints take one each, so handler management can be granted
-             | without administrator management.
+             | One screen, three lists, three sets of permissions. The index takes
+             | any of them, because the screen draws only the tabs the role holds;
+             | the write endpoints take one each, so handler or sponsorship
+             | management can be granted without administrator management.
              */
             Route::get('users', [UserController::class, 'index'])
-                ->middleware('permission:users.view|handlers.view')
+                ->middleware('permission:users.view|handlers.view|sponsors.view')
                 ->name('users');
             Route::post('users', [UserController::class, 'store'])
                 ->middleware('permission:users.create')
@@ -1304,6 +1353,22 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::delete('users/handlers/{user}', [UserController::class, 'destroyHandler'])
                 ->middleware('permission:handlers.delete')
                 ->name('users.handlers.destroy');
+
+            /*
+             | Sponsorship accounts. Which blocks of codes a sponsorship funded is
+             | tagged on the coupon's own Report screen, because a sponsorship
+             | account is monitor-and-view only; these three only manage the
+             | accounts and what each one pledged.
+             */
+            Route::post('users/sponsors', [UserController::class, 'storeSponsor'])
+                ->middleware('permission:sponsors.create')
+                ->name('users.sponsors.store');
+            Route::put('users/sponsors/{user}', [UserController::class, 'updateSponsor'])
+                ->middleware('permission:sponsors.update')
+                ->name('users.sponsors.update');
+            Route::delete('users/sponsors/{user}', [UserController::class, 'destroySponsor'])
+                ->middleware('permission:sponsors.delete')
+                ->name('users.sponsors.destroy');
 
             // Logging - tabs: Activity Log, Audit Log
             Route::get('logging', [LoggingController::class, 'index'])

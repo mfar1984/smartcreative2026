@@ -19,7 +19,19 @@
          layouts/admin.blade.php is built the same way, so both bottom borders land
          on the same pixel. Change one and change the other. --}}
     <div class="h-16 shrink-0 flex items-center justify-center px-4 border-b border-gray-200">
-        <a href="{{ route('admin.dashboard') }}" class="flex items-center gap-2 min-w-0">
+        @php
+            /*
+             | Where the logo goes. The dashboard for everybody who may read it, and
+             | a sponsor's own area for a sponsor — a sponsorship account does not
+             | hold dashboard.view, so the brand would otherwise be a link straight
+             | to a 403 on the one screen they are allowed to be on.
+             */
+            $brandHome = auth()->user()?->isSponsor()
+                ? route('admin.sponsorship.index')
+                : route('admin.dashboard');
+        @endphp
+
+        <a href="{{ $brandHome }}" class="flex items-center gap-2 min-w-0">
             {{-- Uploaded under Settings, General Config, Branding. Falls back to the
                  file shipped with the project when nothing has been uploaded, and
                  BrandingSettings holds that fallback so it is not repeated here. --}}

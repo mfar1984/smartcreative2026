@@ -37,6 +37,7 @@ class CouponAllocation extends Model
     protected $fillable = [
         'coupon_id',
         'coupon_holder_id',
+        'sponsor_user_id',
         'quantity',
         'issued_at',
     ];
@@ -62,6 +63,24 @@ class CouponAllocation extends Model
     public function holder(): BelongsTo
     {
         return $this->belongsTo(CouponHolder::class, 'coupon_holder_id');
+    }
+
+    /**
+     * Whoever FUNDED this block: a sponsorship account, or null.
+     *
+     * Not to be confused with the holder. The holder hands the codes out; the
+     * sponsor paid for them, and is the one who gets a monitor-only screen showing
+     * this block and nothing else. One sponsor per block, so a discount is never
+     * counted on two sponsors' screens at once.
+     */
+    public function sponsor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'sponsor_user_id');
+    }
+
+    public function hasSponsor(): bool
+    {
+        return $this->sponsor_user_id !== null;
     }
 
     public function codes(): HasMany

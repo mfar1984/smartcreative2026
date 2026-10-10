@@ -6,6 +6,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -27,6 +28,8 @@ class User extends Authenticatable
         'role_id',
         'is_active',
         'is_handler',
+        'is_sponsor',
+        'sponsor_committed_amount',
         'password_changed_at',
     ];
 
@@ -52,6 +55,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
             'is_handler' => 'boolean',
+            'is_sponsor' => 'boolean',
+            'sponsor_committed_amount' => 'decimal:2',
             'last_login_at' => 'datetime',
             'password_changed_at' => 'datetime',
         ];
@@ -112,11 +117,35 @@ class User extends Authenticatable
     }
 
     /**
+     * Whether this user is a sponsorship account.
+     *
+     * A sponsor is a users row carrying the sponsor role with this flag set. The
+     * flag is what the post-login landing and the Sponsorship tab ask, so neither
+     * has to read role logic to tell a sponsor apart.
+     */
+    public function isSponsor(): bool
+    {
+        return $this->is_sponsor === true;
+    }
+
+    /**
      * The tournaments this user has been assigned to run.
      */
     public function handledTournaments(): BelongsToMany
     {
         return $this->belongsToMany(Tournament::class, 'tournament_handler')->withTimestamps();
+    }
+
+    /**
+     * The blocks of coupon codes this sponsor funded.
+     *
+     * The ONE relation the sponsor's own area reads, and the reason it is safe: a
+     * sponsor's whole holding is reachable from their own id, so no screen in that
+     * area has to be told to narrow itself.
+     */
+    public function sponsoredAllocations(): HasMany
+    {
+        return $this->hasMany(CouponAllocation::class, 'sponsor_user_id')->orderBy('id');
     }
 
     /**

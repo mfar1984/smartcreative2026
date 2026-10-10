@@ -20,6 +20,13 @@ class Role extends Model
      */
     public const HANDLER = 'handler';
 
+    /**
+     * The sponsorship role: a monitor-and-view account that only ever sees the
+     * coupon blocks it funded. A system role, so the slug is fixed and the
+     * Sponsorship tab assigns it server side rather than reading one from a form.
+     */
+    public const SPONSOR = 'sponsor';
+
     protected $fillable = [
         'slug',
         'name',

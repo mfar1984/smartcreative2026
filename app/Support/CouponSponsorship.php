@@ -4,6 +4,8 @@ namespace App\Support;
 
 use App\Models\Coupon;
 use App\Models\CouponCode;
+use App\Models\CouponIssuedCode;
+use App\Models\User;
 
 /**
  * A sponsor's four figures, kept apart on purpose.
@@ -84,6 +86,76 @@ class CouponSponsorship
     }
 
     /**
+     * The same four figures for ONE SPONSORSHIP ACCOUNT, scoped to the blocks it funded.
+     *
+     * Here rather than in the sponsor's controller on purpose. A second
+     * implementation of "what has this sponsorship given away" is how two screens
+     * come to show a sponsor two different answers, so every figure below is worked
+     * out by the methods above: the estimate through perCodeValue(), the actual off
+     * the same ledger column, and remaining from the actual and never the estimate.
+     *
+     * WHAT IS SCOPED, AND WHAT THAT MEANS
+     *
+     *   COMMITTED   the sponsor's OWN pledge, off their account. Deliberately not the
+     *               batch's committed_amount: one batch can carry blocks from two
+     *               sponsors, so reusing it would show this sponsor somebody else's
+     *               money.
+     *   ESTIMATED   their codes x what one code of that batch is probably worth,
+     *               summed per batch because a sponsor may fund blocks on more than
+     *               one. Still an ESTIMATE, labelled as one.
+     *   ACTUAL      the real discount on the ledger rows their own codes paid for.
+     *   REMAINING   their pledge less that actual, floored at zero.
+     *
+     * A batch whose codes have no knowable value contributes nothing to the estimate
+     * and is counted in `unpriced`, so the screen can say why the estimate is short
+     * rather than quietly understating it.
+     *
+     * @return array{
+     *     committed: float|null,
+     *     estimated: float|null,
+     *     actual: float,
+     *     remaining: float|null,
+     *     codes: int,
+     *     used: int,
+     *     unused: int,
+     *     blocks: int,
+     *     batches: int,
+     *     unpriced: int,
+     *     exact: bool,
+     * }
+     */
+    public static function forSponsor(User $sponsor): array
+    {
+        $committed = $sponsor->sponsor_committed_amount === null
+            ? null
+            : round((float) $sponsor->sponsor_committed_amount, 2);
+
+        $allocationIds = $sponsor->sponsoredAllocations()->pluck('id')->all();
+
+        $codes = self::sponsorCodes($allocationIds);
+        $used = self::sponsorCodes($allocationIds)->whereNotNull('used_at')->count();
+        $total = $codes->count();
+
+        $actual = self::actualForAllocations($allocationIds);
+
+        [$estimated, $unpriced, $exact, $batches] = self::sponsorEstimate($allocationIds);
+
+        return [
+            'committed' => $committed,
+            'estimated' => $estimated,
+            'actual' => $actual,
+            'remaining' => $committed === null ? null : round(max(0.0, $committed - $actual), 2),
+            'codes' => $total,
+            'used' => $used,
+            'unused' => max(0, $total - $used),
+            'blocks' => count($allocationIds),
+            'batches' => $batches,
+            'unpriced' => $unpriced,
+            'exact' => $exact,
+        ];
+    }
+
+    /**
      * What the batch has really given away, in ringgit.
      *
      * Summed off the ledger, which is the same column the Report's "given away" total
@@ -93,6 +165,31 @@ class CouponSponsorship
     {
         return round((float) CouponCode::query()
             ->where('coupon_id', $coupon->id)
+            ->whereNotNull('redeemed_at')
+            ->sum('discount_amount'), 2);
+    }
+
+    /**
+     * What a set of blocks has really given away, in ringgit.
+     *
+     * The SAME ledger column as actual() above, reached through the codes those
+     * blocks issued: an issued code points at the one ledger row it paid for, so a
+     * sponsor's spend is the sum over their own codes and nothing else. Narrowed by
+     * block rather than by batch, because a batch can carry another sponsor's blocks.
+     *
+     * @param  array<int, int>  $allocationIds
+     */
+    public static function actualForAllocations(array $allocationIds): float
+    {
+        if ($allocationIds === []) {
+            return 0.0;
+        }
+
+        return round((float) CouponCode::query()
+            ->whereIn('id', CouponIssuedCode::query()
+                ->whereIn('coupon_allocation_id', $allocationIds)
+                ->whereNotNull('coupon_code_id')
+                ->select('coupon_code_id'))
             ->whereNotNull('redeemed_at')
             ->sum('discount_amount'), 2);
     }
@@ -170,6 +267,65 @@ class CouponSponsorship
     /* ---------------------------------------------------------------------
      | Internals
      * ------------------------------------------------------------------ */
+
+    /**
+     * The codes issued inside a set of blocks.
+     *
+     * Returns a fresh builder each call so a count and a filtered count do not share
+     * one — adding a where to a builder that has already been counted is the kind of
+     * reuse that makes two figures on one screen disagree.
+     *
+     * @param  array<int, int>  $allocationIds
+     * @return \Illuminate\Database\Eloquent\Builder<CouponIssuedCode>
+     */
+    private static function sponsorCodes(array $allocationIds)
+    {
+        return CouponIssuedCode::query()->whereIn('coupon_allocation_id', $allocationIds ?: [0]);
+    }
+
+    /**
+     * The estimate across every batch a sponsor holds blocks on.
+     *
+     * Per batch, because what one code is worth is a property of its batch: 50% of a
+     * RM15 event is RM7.50 a code there and something else on the batch beside it.
+     * Summed rather than averaged, so the figure is the sponsor's own codes and not a
+     * blend of everybody's.
+     *
+     * @param  array<int, int>  $allocationIds
+     * @return array{0: float|null, 1: int, 2: bool, 3: int}
+     */
+    private static function sponsorEstimate(array $allocationIds): array
+    {
+        if ($allocationIds === []) {
+            return [null, 0, true, 0];
+        }
+
+        $perBatch = self::sponsorCodes($allocationIds)
+            ->selectRaw('coupon_id, COUNT(*) as codes')
+            ->groupBy('coupon_id')
+            ->pluck('codes', 'coupon_id');
+
+        $estimated = null;
+        $unpriced = 0;
+        $exact = true;
+
+        foreach (Coupon::query()->whereIn('id', $perBatch->keys())->get() as $coupon) {
+            [$perCode, , $batchExact] = self::perCodeValue($coupon);
+
+            if ($perCode === null) {
+                // "We cannot say" for this batch, which is not the same as nothing.
+                $unpriced++;
+                $exact = false;
+
+                continue;
+            }
+
+            $exact = $exact && $batchExact;
+            $estimated = round(($estimated ?? 0.0) + $perCode * (int) $perBatch[$coupon->id], 2);
+        }
+
+        return [$estimated, $unpriced, $exact, $perBatch->count()];
+    }
 
     /**
      * The prices of whatever this batch is ticked on, above zero.

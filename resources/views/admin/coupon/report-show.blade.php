@@ -121,6 +121,7 @@
                         <thead class="bg-gray-50 text-left">
                             <tr>
                                 <th scope="col" class="{{ $head }}">Handler</th>
+                                <th scope="col" class="{{ $head }}">Sponsorship</th>
                                 <th scope="col" class="{{ $head }}">Issued</th>
                                 <th scope="col" class="{{ $head }} text-right">Codes</th>
                                 <th scope="col" class="{{ $head }} text-right">Used</th>
@@ -160,6 +161,47 @@
                                         @endif
                                     </td>
 
+                                    {{-- Who FUNDED the block, which is not who hands it out.
+                                         Tagged here by staff, because a sponsorship account
+                                         is monitor-and-view only and tags nothing itself. --}}
+                                    <td class="px-5 py-3">
+                                        @if ($canIssue && $sponsors->isNotEmpty())
+                                            <form action="{{ route('admin.coupons.allocations.sponsor', ['coupon' => $coupon, 'allocation' => $allocation]) }}"
+                                                  method="POST" class="flex flex-wrap items-center gap-1.5">
+                                                @csrf
+                                                @method('PUT')
+
+                                                <label for="sponsor-{{ $allocation->id }}" class="sr-only">
+                                                    Sponsorship for {{ $allocation->holderLabel() }}
+                                                </label>
+                                                <select id="sponsor-{{ $allocation->id }}" name="sponsor_user_id"
+                                                        class="rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                                                    <option value="">Not sponsored</option>
+                                                    @foreach ($sponsors as $sponsor)
+                                                        <option value="{{ $sponsor->id }}" @selected($allocation->sponsor_user_id === $sponsor->id)>
+                                                            {{ $sponsor->name }}
+                                                        </option>
+                                                    @endforeach
+                                                </select>
+
+                                                <label class="inline-flex items-center gap-1 text-xs text-gray-500">
+                                                    <input type="checkbox" name="apply_to" value="batch"
+                                                           class="rounded border-gray-300 text-blue-600 focus:ring-blue-500/40">
+                                                    All blocks
+                                                </label>
+
+                                                <button type="submit"
+                                                        class="rounded-lg border border-transparent bg-gray-100 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-200 transition">
+                                                    Save
+                                                </button>
+                                            </form>
+                                        @else
+                                            <span @class(['text-sm', 'text-gray-900' => $allocation->hasSponsor(), 'text-gray-500 italic' => ! $allocation->hasSponsor()])>
+                                                {{ $allocation->sponsor?->name ?? 'Not sponsored' }}
+                                            </span>
+                                        @endif
+                                    </td>
+
                                     <td class="px-5 py-3 text-gray-600 whitespace-nowrap tabular-nums">
                                         {{ $allocation->issuedLabel() }}
                                     </td>
@@ -189,7 +231,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="7" class="px-5 py-6 text-center text-sm text-gray-500">
+                                    <td colspan="8" class="px-5 py-6 text-center text-sm text-gray-500">
                                         No codes have been generated yet.
                                     </td>
                                 </tr>
