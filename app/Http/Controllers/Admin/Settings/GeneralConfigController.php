@@ -223,6 +223,35 @@ class GeneralConfigController extends Controller
     }
 
     /**
+     * Force the public site live right now, in one click.
+     *
+     * Clears both of the two things that can hold the site — the manual switch
+     * AND the scheduled window — at once, because the owner can turn the switch
+     * off and still be held by a window that is running. This is separate from
+     * the save form on purpose: saving with the switch off must keep a future
+     * window intact, so clearing the window belongs on its own deliberate action
+     * and not in the ordinary save. The heading, message and exempt list are left
+     * alone; they describe the page, not whether it shows.
+     */
+    public function bringBackMaintenance(Request $request)
+    {
+        foreach (['enabled' => '0', 'window_start' => '', 'window_end' => '', 'expected_return_at' => ''] as $key => $value) {
+            MaintenanceSettings::write($key, $value);
+        }
+
+        // The reader memoises the group per request, and the redirect draws the
+        // "in force now" line again, so a stale value here would still report the
+        // site held.
+        MaintenanceSettings::flush();
+
+        AdminLogger::activity('settings.maintenance.update', 'Brought the public site back now (cleared switch and window).');
+
+        return redirect()
+            ->route('admin.settings.general', ['tab' => 'maintenance'])
+            ->with('status', 'Maintenance settings saved.');
+    }
+
+    /**
      * The holding page as a visitor would see it, inside the admin, with the site
      * still up.
      *

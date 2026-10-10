@@ -896,6 +896,15 @@
                 $saidReturn = \App\Support\LocalTime::formatWallClock($maintenanceState['return_at']);
             @endphp
 
+            {{-- Stands outside the save form below so it is not a form nested in a
+                 form. The button that fires it lives in the "In Force Now" block
+                 and reaches it by its id. --}}
+            @if ($canUpdateMaintenance && in_array($maintenanceState['state'], [\App\Support\MaintenanceSettings::STATE_MANUAL, \App\Support\MaintenanceSettings::STATE_WINDOW_RUNNING], true))
+                <form id="maintenance-bring-back" action="{{ route('admin.settings.maintenance.bring-back') }}" method="POST" class="hidden">
+                    @csrf
+                </form>
+            @endif
+
             <form action="{{ route('admin.settings.maintenance.update') }}" method="POST">
                 @csrf
                 @method('PUT')
@@ -952,6 +961,17 @@
                                     The expected return time ({{ $saidReturn }}) has passed, so the holding page
                                     is not showing it. Set a new one or clear it.
                                 </p>
+                            @endif
+
+                            {{-- One click to force the site live: clears the switch and the
+                                 window at once. Only while the site is actually being held by
+                                 hand or by a running window — there is nothing to bring back
+                                 when it is off, pending or finished. --}}
+                            @if ($canUpdateMaintenance && in_array($maintenanceState['state'], [\App\Support\MaintenanceSettings::STATE_MANUAL, \App\Support\MaintenanceSettings::STATE_WINDOW_RUNNING], true))
+                                <button type="submit" form="maintenance-bring-back"
+                                        class="mt-3 bg-red-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 transition shadow-sm">
+                                    Bring the site back now
+                                </button>
                             @endif
                         </div>
                     </x-admin.field-row>

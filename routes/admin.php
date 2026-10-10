@@ -1217,6 +1217,12 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->middleware('permission:settings.maintenance.update')
                 ->name('maintenance.update');
 
+            // One click to force the public site live: clears the switch and the
+            // window at once. POST, so a prefetch or pasted link cannot fire it.
+            Route::post('maintenance/bring-back', [GeneralConfigController::class, 'bringBackMaintenance'])
+                ->middleware('permission:settings.maintenance.update')
+                ->name('maintenance.bring-back');
+
             /*
             | The holding page, drawn inside the admin so it can be checked without
             | taking the public site down. Behind the view permission, not the
