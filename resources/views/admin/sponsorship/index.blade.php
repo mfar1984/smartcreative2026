@@ -5,7 +5,7 @@
 
     $head = 'px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500';
     $select = 'rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
-    $exportButton = 'inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition shrink-0';
+    $exportButton = 'inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm shrink-0';
 @endphp
 
 @section('title', 'Sponsorship')
@@ -127,40 +127,34 @@
 
         {{-- ==================== Your Blocks ==================== --}}
         @if ($activeTab === 'blocks')
-            <div class="flex flex-wrap items-start justify-between gap-4 mb-5">
-                <x-admin.section-intro
-                    title="Your Blocks"
-                    description="Whose codes are finished, and whose have not been touched. A coupon that is one shared code has no block and nobody holding it, so it appears as a single row."
-                    icon="tag"
-                    class="mb-0" />
-
-                <a href="{{ route('admin.sponsorship.export', array_merge($tabParams, ['set' => 'blocks', 'sort' => $sort])) }}"
-                   class="{{ $exportButton }}">
-                    <x-admin.icon name="download" class="w-4 h-4" />
-                    Blocks CSV
-                </a>
-            </div>
+            <x-admin.section-intro
+                title="Your Blocks"
+                description="Whose codes are finished, and whose have not been touched. A coupon that is one shared code has no block and nobody holding it, so it appears as a single row."
+                icon="tag" />
 
             <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <form action="{{ route('admin.sponsorship.index') }}" method="GET"
-                      class="flex flex-wrap items-center gap-2 px-5 py-3 border-b border-gray-200 bg-gray-50">
+                <x-admin.filter-bar :action="route('admin.sponsorship.index')">
                     <input type="hidden" name="tab" value="blocks">
 
                     @if ($isStaffView)
                         <input type="hidden" name="sponsor" value="{{ $sponsor->id }}">
                     @endif
 
-                    <label for="sort" class="text-xs font-semibold text-gray-600">Order by</label>
+                    <label for="sort" class="sr-only">Order by</label>
                     <select id="sort" name="sort" class="{{ $select }}">
                         @foreach ($sorts as $slug => $label)
                             <option value="{{ $slug }}" @selected($sort === $slug)>{{ $label }}</option>
                         @endforeach
                     </select>
 
-                    <button type="submit" class="rounded-lg border border-transparent bg-gray-200 px-3.5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-300 transition">
-                        Apply
-                    </button>
-                </form>
+                    <x-slot:actions>
+                        <a href="{{ route('admin.sponsorship.export', array_merge($tabParams, ['set' => 'blocks', 'sort' => $sort])) }}"
+                           class="{{ $exportButton }}">
+                            <x-admin.icon name="download" class="w-4 h-4" />
+                            Blocks CSV
+                        </a>
+                    </x-slot:actions>
+                </x-admin.filter-bar>
 
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
