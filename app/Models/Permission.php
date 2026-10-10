@@ -14,6 +14,13 @@ class Permission extends Model
      * Any action not listed here falls into the trailing "Other" column, so a
      * new kind of permission never disappears from the screen.
      */
+    /**
+     * The load-bearing permission: without it a role cannot sign in to the admin at
+     * all, because User::canAccessAdmin() requires it. It is one unremarkable box in
+     * the matrix, so both Roles screens single it out by this slug.
+     */
+    public const ADMIN_ACCESS = 'admin.access';
+
     public const ACTION_COLUMNS = [
         'create' => 'Create',
         'view' => 'View',

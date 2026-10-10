@@ -9,6 +9,7 @@ use App\Services\AdminLogger;
 use App\Services\Security\LoginBanService;
 use App\Services\Security\SecurityEventRecorder;
 use App\Support\IpAllowlist;
+use App\Support\Security\LoginRefusal;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
@@ -79,12 +80,17 @@ class LoginRequest extends FormRequest
         // been verified. Still null afterwards means the credentials were wrong.
         $verified = null;
 
+        // Why the gate refused a correct password, so the message below can fit the
+        // reason. Null while the password is wrong AND after a successful sign in.
+        $refusal = null;
+
         $signedIn = Auth::attemptWhen(
             $credentials,
-            function (User $user) use (&$verified, $ban, $ip): bool {
+            function (User $user) use (&$verified, &$refusal, $ban, $ip): bool {
                 $verified = $user;
+                $refusal = $this->mayEnter($user, $ban, $ip);
 
-                return $this->mayEnter($user, $ban, $ip);
+                return $refusal === null;
             },
             $this->boolean('remember'),
         );
@@ -138,7 +144,7 @@ class LoginRequest extends FormRequest
             ]);
         }
 
-        if ($verified !== null) {
+        if ($refusal === LoginRefusal::NOT_ALLOWLISTED) {
             // The password was right; the allowlist refused it.
             AdminLogger::activity(
                 'auth.denied',
@@ -165,6 +171,33 @@ class LoginRequest extends FormRequest
             ]);
         }
 
+        if ($refusal === LoginRefusal::CANNOT_ACCESS) {
+            /*
+             | The password was right, but the account cannot reach the admin: an
+             | inactive account, an inactive role, or a role that was built without
+             | the "Access the admin area" permission. This is the trap that wasted
+             | the owner half an hour — the old generic "wrong credentials" sent him
+             | hunting a password that was never wrong. So we name it plainly instead.
+             |
+             | It is NOT a Security Log entry. The Security Log is for refusals about
+             | where a request came from — a blocked or un-allowlisted address — not
+             | for a correctly authenticated person hitting a permissions wall. This
+             | is a misconfiguration, not an attack, so it goes to the ordinary
+             | activity log where an admin can see it happened and fix the role.
+            */
+            AdminLogger::activity(
+                'auth.denied',
+                sprintf('Sign in refused for %s: the account cannot access the admin area (inactive account, inactive role, or a role without admin access).', $verified->logLabel()),
+                $verified->id,
+                $verified->logLabel(),
+                AdminLogger::LEVEL_WARN,
+            );
+
+            throw ValidationException::withMessages([
+                'username' => $this->cannotAccessMessage($verified),
+            ]);
+        }
+
         $bans->recordFailure($ip);
 
         // One generic message for both a wrong username and a wrong
@@ -176,8 +209,14 @@ class LoginRequest extends FormRequest
 
     /**
      * Whether a user whose password checked out may be signed in from this address.
+     *
+     * The single place that decides entry. Returns null when the user is let in, or
+     * the reason they are not, so authenticate() can word the message without having
+     * to re-derive which wall was hit. The entry decision is unchanged — the same
+     * people get in and the same people are turned away — only the reason is now
+     * legible rather than collapsed into one false.
      */
-    private function mayEnter(User $user, ?BannedIp $ban, string $ip): bool
+    private function mayEnter(User $user, ?BannedIp $ban, string $ip): ?LoginRefusal
     {
         $isSuperAdmin = $user->role !== null && $user->role->isSuperAdmin();
 
@@ -185,11 +224,48 @@ class LoginRequest extends FormRequest
         // admin. An inactive super admin gets the same notice as anybody else, so the
         // ban is only lifted by a sign in that is going to succeed.
         if ($ban !== null) {
-            return $isSuperAdmin && $user->canAccessAdmin();
+            return $isSuperAdmin && $user->canAccessAdmin() ? null : LoginRefusal::BANNED;
         }
 
-        // C. The allowlist never applies to a super admin.
-        return $isSuperAdmin || IpAllowlist::permits($ip);
+        // C. The allowlist never applies to a super admin, and checked first so an
+        // address that is not on the list reads as a network refusal exactly as
+        // before, even when the account also lacks admin access.
+        if (! $isSuperAdmin && ! IpAllowlist::permits($ip)) {
+            return LoginRefusal::NOT_ALLOWLISTED;
+        }
+
+        // The permissions wall. A super admin always passes; anybody else needs an
+        // active account, an active role and the admin.access permission. Without it
+        // the account was previously signed in and then bounced by the admin
+        // middleware with a misleading "your session has ended"; now it never signs
+        // in and is told plainly why.
+        if (! $user->canAccessAdmin()) {
+            return LoginRefusal::CANNOT_ACCESS;
+        }
+
+        return null;
+    }
+
+    /**
+     * The message for a correct password whose account cannot reach the admin.
+     *
+     * Three shapes, cheap to tell apart from the user already in hand, because an
+     * operator who switched an account off and one who built a role without admin
+     * access are looking for different things. All three end the same way: contact
+     * an administrator, because none of them is something the person can fix.
+     */
+    private function cannotAccessMessage(User $user): string
+    {
+        if (! $user->is_active) {
+            return 'This account has been deactivated and cannot sign in. Please contact an administrator.';
+        }
+
+        if ($user->role === null || ! $user->role->is_active) {
+            return 'This account\'s role is inactive, so it cannot sign in. Please contact an administrator.';
+        }
+
+        // The exact trap: a role built without "Access the admin area".
+        return 'This account\'s role does not have access to the admin area, so it cannot sign in. Please contact an administrator.';
     }
 
     /**

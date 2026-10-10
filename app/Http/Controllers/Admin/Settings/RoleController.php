@@ -34,6 +34,22 @@ class RoleController extends Controller
             ->orderBy('name')
             ->get();
 
+        // Which roles can actually sign in, resolved in one query rather than one
+        // per row. A super admin always can; any other role needs admin.access on
+        // the pivot. A role that lacks it, and already has users, is the trap the
+        // owner hit — the index flags it so those broken accounts are not invisible.
+        $roleIdsWithAccess = Role::query()
+            ->whereHas('permissions', fn ($query) => $query->where('slug', Permission::ADMIN_ACCESS))
+            ->pluck('id')
+            ->all();
+
+        $roles->each(function (Role $role) use ($roleIdsWithAccess): void {
+            $role->setAttribute(
+                'grants_admin_access',
+                $role->isSuperAdmin() || in_array($role->id, $roleIdsWithAccess, true),
+            );
+        });
+
         return view('admin.settings.roles.index', [
             'roles' => $roles,
             'permissionTotal' => Permission::count(),
@@ -75,7 +91,8 @@ class RoleController extends Controller
 
         return redirect()
             ->route('admin.settings.roles')
-            ->with('status', sprintf('Role %s created.', $role->name));
+            ->with('status', sprintf('Role %s created.', $role->name))
+            ->with($this->adminAccessWarning($role));
     }
 
     /**
@@ -129,7 +146,43 @@ class RoleController extends Controller
 
         return redirect()
             ->route('admin.settings.roles')
-            ->with('status', sprintf('Role %s saved.', $role->name));
+            ->with('status', sprintf('Role %s saved.', $role->name))
+            ->with($this->adminAccessWarning($role));
+    }
+
+    /**
+     * A one-off warning when a role was just saved without admin access.
+     *
+     * Not a hard block: a role parked as a template or deliberately dormant is a
+     * real thing, so the operator may proceed. But admin.access is one box among
+     * 124, and its absence is otherwise invisible — the exact trap that locked the
+     * owner's new user out — so the save is called out plainly. A super admin always
+     * holds it, so there is nothing to warn about there.
+     *
+     * @return array<string, string>
+     */
+    private function adminAccessWarning(Role $role): array
+    {
+        if ($role->grantsAdminAccess()) {
+            return [];
+        }
+
+        $assigned = $role->users()->count();
+
+        $message = sprintf(
+            'Heads up: %s does not have "Access the admin area", so nobody with this role can sign in to the admin.',
+            $role->name,
+        );
+
+        if ($assigned > 0) {
+            $message .= sprintf(
+                ' %d %s already assigned to this role and cannot sign in until you tick that box.',
+                $assigned,
+                $assigned === 1 ? 'user is' : 'users are',
+            );
+        }
+
+        return ['warning' => $message];
     }
 
     public function destroy(Role $role)
@@ -187,6 +240,12 @@ class RoleController extends Controller
             'actionColumns' => Permission::ACTION_COLUMNS,
             'granted' => $role->exists ? $role->permissions()->pluck('permissions.id')->all() : [],
             'permissionTotal' => Permission::count(),
+
+            // The id of the load-bearing admin.access box, so the form can wire the
+            // live "this role cannot sign in" warning to that one checkbox, and the
+            // count of users already stuck behind a role that lacks it.
+            'adminAccessId' => Permission::query()->where('slug', Permission::ADMIN_ACCESS)->value('id'),
+            'assignedUserCount' => $role->exists ? $role->users()->count() : 0,
         ];
     }
 }

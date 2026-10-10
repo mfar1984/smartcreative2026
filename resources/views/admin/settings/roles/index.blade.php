@@ -78,8 +78,26 @@
                                     @if ($role->is_protected)
                                         <x-admin.badge tone="purple">system</x-admin.badge>
                                     @endif
+                                    @unless ($role->grants_admin_access)
+                                        <span title="Without &quot;Access the admin area&quot; nobody with this role can sign in."
+                                              class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                            </svg>
+                                            No admin access
+                                        </span>
+                                    @endunless
                                 </div>
                                 <code class="text-xs text-gray-400">{{ $role->slug }}</code>
+                                @unless ($role->grants_admin_access)
+                                    @if ($role->users_count > 0)
+                                        <p class="mt-1 text-xs font-semibold text-red-600">
+                                            {{ $role->users_count }} {{ Str::plural('user', $role->users_count) }} cannot sign in — this role has no admin access.
+                                        </p>
+                                    @else
+                                        <p class="mt-1 text-xs text-amber-600">Cannot sign in to the admin.</p>
+                                    @endif
+                                @endunless
                             </td>
 
                             <td class="px-6 py-3 text-gray-600">{{ $role->description ?: '—' }}</td>

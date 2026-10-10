@@ -85,6 +85,39 @@
                 </div>
             @endif
 
+            @unless ($role->isSuperAdmin())
+                {{-- The load-bearing checkbox. admin.access is one box among 124, and
+                     a role saved without it cannot sign in at all — the trap that
+                     locked a brand new user out. Call it out before the matrix, and
+                     once more live, below, next to Save. --}}
+                <div role="note" class="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-4 mb-5">
+                    <svg class="w-5 h-5 shrink-0 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-sm text-blue-800">
+                        Under <span class="font-semibold">Dashboard &rarr; Admin Area</span>, the
+                        <span class="font-semibold">&ldquo;Access the admin area&rdquo;</span> permission is required to sign in.
+                        Without it, nobody with this role can log in, no matter what else is ticked.
+                    </p>
+                </div>
+
+                {{-- An existing role that already carries users AND lacks admin.access
+                     is the exact live trap: those accounts are broken right now and
+                     nobody has been told. Said firmly, and only when it is true. --}}
+                @if (! $isCreate && $assignedUserCount > 0)
+                    <div role="alert" data-no-access-assigned class="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-4 mb-5 {{ in_array($adminAccessId, old('permissions', $granted), true) ? 'hidden' : '' }}">
+                        <svg class="w-5 h-5 shrink-0 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        <p class="text-sm text-red-800">
+                            <span class="font-semibold">{{ $assignedUserCount }} {{ Str::plural('user', $assignedUserCount) }}</span>
+                            {{ $assignedUserCount === 1 ? 'is' : 'are' }} assigned to this role and
+                            <span class="font-semibold">cannot sign in</span> until &ldquo;Access the admin area&rdquo; is ticked below.
+                        </p>
+                    </div>
+                @endif
+            @endunless
+
             {{-- Role details --}}
             <x-admin.panel title="Role Details" icon="shield">
                 <x-admin.field-row label="Role Name" help="Shown wherever the role is listed." for="name" :required="true" error="name">
@@ -199,6 +232,7 @@
                                                            value="{{ $permission->id }}"
                                                            data-matrix-box
                                                            data-section="{{ $sectionKey }}"
+                                                           @if ($permission->id === $adminAccessId) data-admin-access @endif
                                                            @checked(in_array($permission->id, old('permissions', $granted), true) || $role->isSuperAdmin())
                                                            @disabled($readonly)
                                                            class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
@@ -223,6 +257,7 @@
                                                                    value="{{ $permission->id }}"
                                                                    data-matrix-box
                                                                    data-section="{{ $sectionKey }}"
+                                                                   @if ($permission->id === $adminAccessId) data-admin-access @endif
                                                                    @checked(in_array($permission->id, old('permissions', $granted), true) || $role->isSuperAdmin())
                                                                    @disabled($readonly)
                                                                    class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50">
@@ -241,6 +276,22 @@
             </x-admin.panel>
 
             @unless ($readonly)
+                {{-- Live mirror of the admin.access box, right where the operator is
+                     about to click Save. Shown whenever that box is unticked, hidden
+                     the moment it is ticked. Starts in the correct state from the
+                     server so it is right before any JavaScript runs. --}}
+                <div role="alert" data-no-access-warning
+                     class="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4 mt-5 {{ in_array($adminAccessId, old('permissions', $granted), true) ? 'hidden' : '' }}">
+                    <svg class="w-5 h-5 shrink-0 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    <p class="text-sm text-amber-800">
+                        This role does not have <span class="font-semibold">&ldquo;Access the admin area&rdquo;</span> ticked,
+                        so <span class="font-semibold">nobody with this role will be able to sign in</span>. You can still save it
+                        if that is on purpose.
+                    </p>
+                </div>
+
                 <div class="flex items-center justify-between gap-4 bg-white rounded-lg border border-gray-200 px-5 py-4 mt-5">
                     <p class="text-xs text-gray-500">Users assigned to this role pick up the change on their next request.</p>
                     <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm shrink-0">
@@ -262,6 +313,20 @@
 
         const boxes = Array.from(form.querySelectorAll('[data-matrix-box]'));
         const counter = form.querySelector('[data-matrix-counter]');
+        const adminAccessBox = form.querySelector('[data-admin-access]');
+        const noAccessWarning = form.querySelector('[data-no-access-warning]');
+        const noAccessAssigned = form.querySelector('[data-no-access-assigned]');
+
+        // Show the "cannot sign in" warnings exactly while admin.access is unticked.
+        function refreshAccessWarning() {
+            const granted = adminAccessBox ? adminAccessBox.checked : false;
+            if (noAccessWarning) {
+                noAccessWarning.classList.toggle('hidden', granted);
+            }
+            if (noAccessAssigned) {
+                noAccessAssigned.classList.toggle('hidden', granted);
+            }
+        }
 
         function refreshCounts() {
             if (counter) {
@@ -274,6 +339,8 @@
                 const checked = inSection.filter(function (box) { return box.checked; }).length;
                 label.textContent = '(' + checked + '/' + inSection.length + ')';
             });
+
+            refreshAccessWarning();
         }
 
         function setAll(value) {

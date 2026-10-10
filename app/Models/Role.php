@@ -57,4 +57,23 @@ class Role extends Model
     {
         return $this->slug === self::SUPER_ADMIN;
     }
+
+    /**
+     * Whether this role can sign in to the admin at all.
+     *
+     * The super admin implicitly holds every permission, so it always can. Any other
+     * role must carry admin.access on the pivot; without it, every user on the role
+     * is turned away at the login screen. The Roles screens use this to warn before
+     * a role is saved — or a user is assigned — into exactly that trap.
+     */
+    public function grantsAdminAccess(): bool
+    {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        return $this->permissions()
+            ->where('slug', Permission::ADMIN_ACCESS)
+            ->exists();
+    }
 }
