@@ -9,21 +9,24 @@ use Illuminate\Support\Facades\Schema;
  *
  * WHY THIS ARRIVES SO LATE, which is the part worth knowing
  *
- * It was never written. The model, the form request, the controller, the mailable,
- * the staff alert and the Analytic Reporting card were all built against this table
- * and none of them could work: ContactController::store() calls
- * ContactMessage::create() and AnalyticReportingController counts
- * ContactMessage::count(), so the public contact form has been failing on submit
- * and Analytic Reporting has been answering 500 for every staff account.
+ * The migration was never written, though the table itself exists on the live
+ * database: somebody created it there by hand. So the contact form and the Analytic
+ * Reporting card have been working in production all along, and the fault is not a
+ * broken site — it is that the schema could not be rebuilt from its own migrations.
+ * A clone, a new environment, or a restored backup followed by `migrate` would come
+ * up WITHOUT this table, and then ContactController::store() calling
+ * ContactMessage::create() and AnalyticReportingController calling
+ * ContactMessage::count() would both fail there.
  *
- * It stayed invisible because nothing covered either screen. 1,524 tests passed over
- * it. The 2026_09_26 player_messages migration even reasons about "a row in
- * contact_messages" and about the analytics screen counting them, so the table was
- * assumed by later work rather than noticed as missing. A test on the reporting
- * screen ships beside this migration so the same hole cannot reopen quietly.
+ * It stayed invisible because nothing covered either screen; 1,524 tests passed over
+ * the gap, on a test database that genuinely lacked the table. The 2026_09_26
+ * player_messages migration even reasons about "a row in contact_messages" and about
+ * the analytics screen counting them, so later work assumed the table rather than
+ * noticing no migration made it.
  *
- * Analytic Reporting hid the card from a monitor, who is therefore the only account
- * that could open that screen successfully — which is how the fault finally surfaced.
+ * up() is therefore guarded rather than unconditional — see the note on it. A test
+ * on the reporting screen and on the public form ships beside this, so the same kind
+ * of hole cannot reopen quietly.
  *
  * THE SHAPE
  *
@@ -41,6 +44,25 @@ return new class extends Migration
 {
     public function up(): void
     {
+        /*
+         | Guarded, because the live database ALREADY HAS this table and a fresh
+         | install does not.
+         |
+         | It was created there by hand at some point, which is why the contact form
+         | works in production while no migration accounts for the table. So the
+         | hole this migration closes is not a broken live site; it is that the
+         | schema could never be rebuilt from scratch. A clone, a new environment or
+         | a restored backup followed by `migrate` would come up without it, and the
+         | contact form and Analytic Reporting would fail there.
+         |
+         | Without this guard the migration fails on the very database that most
+         | needs the rest of the batch to apply, and `migrate` stops partway with
+         | everything after it unrun.
+         */
+        if (Schema::hasTable('contact_messages')) {
+            return;
+        }
+
         Schema::create('contact_messages', function (Blueprint $table) {
             $table->id();
 
