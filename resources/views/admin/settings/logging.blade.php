@@ -16,9 +16,10 @@
     @php
         $filterInput = 'rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition';
 
-        // Level and event chips use a fixed tone map, written out so Tailwind
-        // finds the classes when scanning.
+        // Level, event and severity chips use a fixed tone map, written out so
+        // Tailwind finds the classes when scanning.
         $levelTones = ['info' => 'blue', 'warn' => 'amber', 'error' => 'red', 'debug' => 'gray'];
+        $severityTones = ['info' => 'gray', 'warning' => 'amber', 'critical' => 'red'];
 
         $eventTone = function (string $event): string {
             return match (true) {
@@ -41,7 +42,7 @@
 
     <x-admin.settings-shell
         title="Logging"
-        description="Monitor system activity, user actions and the security audit trail."
+        description="Monitor system activity, user actions, the audit trail and every refused request."
         :tabs="$tabs"
         :active-tab="$activeTab"
         route="admin.settings.logging">
@@ -335,6 +336,184 @@
                     @else
                         <p class="text-xs text-gray-500">
                             Showing {{ $auditEntries->total() }} {{ Str::plural('entry', $auditEntries->total()) }}
+                        </p>
+                    @endif
+                </div>
+            </div>
+        @endif
+
+        {{-- ==================== Security Log ==================== --}}
+        @if ($activeTab === 'security')
+            <x-admin.section-intro
+                title="Security Log"
+                description="Every request the system refused, and every probe it noticed."
+                icon="shield"
+                accent="red" />
+
+            <div role="note" class="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <span class="shrink-0 text-blue-600 mt-0.5" aria-hidden="true">
+                    <x-admin.icon name="shield" class="w-5 h-5" />
+                </span>
+                <div class="text-sm text-blue-800 space-y-1.5">
+                    <p>
+                        Fed by the refusals the system already makes: a permission it would not grant, a
+                        stale CSRF token, a tampered or expired signed link, a rate limit, a sign in from
+                        a blocked or unlisted network, a file name it would not resolve. Credentials are
+                        stored as <code class="font-mono text-xs">[redacted]</code>, and this log is never
+                        silenced by the Activity and Audit switches on the Security tab.
+                    </p>
+                    <p>
+                        A <x-admin.badge tone="gray">INFO</x-admin.badge> row marked
+                        <span class="font-semibold">observed</span> was NOT refused. Those are patterns
+                        noticed in what somebody typed; the request was served exactly as normal, and they
+                        never count towards a ban.
+                    </p>
+                    <p>
+                        Repeats of the same refusal from one address on one path, inside
+                        {{ $collapseMinutes }} minutes, are collapsed into a single row with a hit count,
+                        so one scripted sweep cannot bury the rest.
+                    </p>
+                    @if ($securityBanArmed)
+                        <p class="font-semibold">
+                            Banning is armed: {{ $securityBanAfter }} refusals from one address within
+                            {{ $securityBanWindow }} minutes blocks it. Super admins and allowlisted
+                            addresses are never blocked by this.
+                        </p>
+                    @else
+                        <p>
+                            Banning is <span class="font-semibold">off</span>, which is the shipped
+                            default: refusals are counted and shown here, and no address is blocked by
+                            them. Turn it on from General Config, Security once this log reads the way you
+                            expect.
+                        </p>
+                    @endif
+                </div>
+            </div>
+
+            {{-- Severity chips --}}
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+                <a href="{{ $chipUrl(['severity' => null]) }}"
+                   @class([
+                       'inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition',
+                       'border-blue-600 bg-blue-50 text-blue-700' => $filters['severity'] === null,
+                       'border-gray-300 text-gray-600 hover:bg-gray-50' => $filters['severity'] !== null,
+                   ])>
+                    All Severities
+                    <span class="text-gray-400">{{ array_sum($severityCounts) }}</span>
+                </a>
+
+                @foreach ($severities as $severityKey => $severityLabel)
+                    <a href="{{ $chipUrl(['severity' => $severityKey]) }}"
+                       @class([
+                           'inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold uppercase tracking-wide transition',
+                           'border-blue-600 bg-blue-50 text-blue-700' => $filters['severity'] === $severityKey,
+                           'border-gray-300 text-gray-600 hover:bg-gray-50' => $filters['severity'] !== $severityKey,
+                       ])>
+                        <x-admin.badge :tone="$severityTones[$severityKey] ?? 'gray'" :dot="true">{{ $severityLabel }}</x-admin.badge>
+                        <span class="text-gray-400">{{ $severityCounts[$severityKey] ?? 0 }}</span>
+                    </a>
+                @endforeach
+            </div>
+
+            <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <x-admin.filter-bar
+                    :action="route('admin.settings.logging')"
+                    :reset="$isFiltered ? route('admin.settings.logging', ['tab' => 'security']) : null">
+
+                    <input type="hidden" name="tab" value="security">
+                    @if ($filters['severity'])
+                        <input type="hidden" name="severity" value="{{ $filters['severity'] }}">
+                    @endif
+
+                    <div class="relative flex-1 min-w-56">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true">
+                            <x-admin.icon name="search" class="w-4 h-4" />
+                        </span>
+                        <label for="q" class="sr-only">Search security log</label>
+                        <input type="search" id="q" name="q" value="{{ $filters['q'] }}"
+                               placeholder="Search what was refused, the path or the user..."
+                               class="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
+                    </div>
+
+                    <label for="ip" class="sr-only">IP address</label>
+                    <input type="text" id="ip" name="ip" value="{{ $filters['ip'] }}"
+                           placeholder="IP address"
+                           spellcheck="false"
+                           class="{{ $filterInput }} font-mono w-44">
+
+                    <label for="from" class="sr-only">From date</label>
+                    <input type="date" id="from" name="from" value="{{ $filters['from'] }}" class="{{ $filterInput }}">
+
+                    <label for="to" class="sr-only">To date</label>
+                    <input type="date" id="to" name="to" value="{{ $filters['to'] }}" class="{{ $filterInput }}">
+                </x-admin.filter-bar>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-left">
+                            <tr>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Last Seen</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Severity</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">What Was Refused</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">Request</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">User</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500">IP</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Hits</th>
+                                <th scope="col" class="px-5 py-3 text-xs font-bold uppercase tracking-wide text-gray-500 text-right">Seen From IP</th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-gray-100">
+                            @forelse ($securityEntries as $entry)
+                                <tr class="hover:bg-blue-50/40 align-top">
+                                    <td class="px-5 py-3 text-xs text-gray-600 whitespace-nowrap">
+                                        {{ \App\Support\LocalTime::date($entry->last_seen_at, '') }}
+                                        <span class="block text-gray-400">{{ \App\Support\LocalTime::format($entry->last_seen_at, 'g:i:s a', '') }}</span>
+                                    </td>
+                                    <td class="px-5 py-3 whitespace-nowrap">
+                                        <x-admin.badge :tone="$severityTones[$entry->severity] ?? 'gray'">{{ strtoupper($entry->severity) }}</x-admin.badge>
+                                    </td>
+                                    <td class="px-5 py-3 text-gray-900">
+                                        {{ $entry->description }}
+                                        <code class="block text-xs text-gray-400">{{ $entry->typeLabel() }}</code>
+                                    </td>
+                                    <td class="px-5 py-3 text-xs text-gray-600">
+                                        <span class="font-mono font-semibold text-gray-700">{{ $entry->method ?: '—' }}</span>
+                                        <span class="block font-mono break-all text-gray-500">{{ $entry->path ?: '—' }}</span>
+                                    </td>
+                                    <td class="px-5 py-3 text-xs text-gray-600">{{ $entry->actor_label ?? 'Guest' }}</td>
+                                    <td class="px-5 py-3 text-xs font-mono text-gray-500 whitespace-nowrap">{{ $entry->ip_address ?: '—' }}</td>
+                                    <td class="px-5 py-3 text-xs text-gray-700 text-right tabular-nums">{{ $entry->hits }}</td>
+                                    <td class="px-5 py-3 text-xs text-right tabular-nums">
+                                        @php $seen = $ipTotals[$entry->ip_address] ?? $entry->hits; @endphp
+                                        <span @class([
+                                            'font-semibold' => $seen >= 20,
+                                            'text-red-700' => $seen >= 20,
+                                            'text-gray-600' => $seen < 20,
+                                        ])>{{ $seen }}</span>
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="8" class="px-5 py-12 text-center text-sm text-gray-500">
+                                        @if ($isFiltered)
+                                            No security events match the current filters.
+                                        @else
+                                            Nothing has been refused yet.
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="px-5 py-3.5 border-t border-gray-200">
+                    @if ($securityEntries->hasPages())
+                        {{ $securityEntries->links() }}
+                    @else
+                        <p class="text-xs text-gray-500">
+                            Showing {{ $securityEntries->total() }} {{ Str::plural('entry', $securityEntries->total()) }}
                         </p>
                     @endif
                 </div>

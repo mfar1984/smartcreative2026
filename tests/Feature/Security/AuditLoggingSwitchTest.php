@@ -246,12 +246,16 @@ class AuditLoggingSwitchTest extends SecurityTestCase
 
     public function test_the_exemption_list_is_the_one_documented(): void
     {
-        $this->assertSame(['auth.', 'settings.security.'], AdminLogger::ALWAYS_RECORDED);
+        // `security.` joined the list with the Security Log: the one activity line
+        // saying the system started blocking an address has to survive the switches
+        // for the same reason the sign-in trail does.
+        $this->assertSame(['auth.', 'settings.security.', 'security.'], AdminLogger::ALWAYS_RECORDED);
 
         $this->assertTrue(AdminLogger::isAlwaysRecorded('auth.login'));
         $this->assertTrue(AdminLogger::isAlwaysRecorded('auth.new_location'));
         $this->assertTrue(AdminLogger::isAlwaysRecorded('settings.security.update'));
         $this->assertTrue(AdminLogger::isAlwaysRecorded('settings.security.updated'));
+        $this->assertTrue(AdminLogger::isAlwaysRecorded('security.banned'));
 
         // Everything else obeys the switches, which is the point of having them.
         $this->assertFalse(AdminLogger::isAlwaysRecorded('settings.general.update'));

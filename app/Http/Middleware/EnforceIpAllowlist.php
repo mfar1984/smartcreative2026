@@ -2,7 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\SecurityEvent;
 use App\Services\AdminLogger;
+use App\Services\Security\SecurityEventRecorder;
 use App\Support\IpAllowlist;
 use App\Support\SessionGuard;
 use Closure;
@@ -45,6 +47,16 @@ class EnforceIpAllowlist
             null,
             null,
             AdminLogger::LEVEL_WARN,
+        );
+
+        // Third of the three refusals recorded by hand rather than through the
+        // exception hook: this one answers with a redirect, so no exception is ever
+        // raised for the hook in bootstrap/app.php to see.
+        SecurityEventRecorder::record(
+            SecurityEvent::TYPE_SESSION_NOT_ALLOWLISTED,
+            SecurityEvent::SEVERITY_WARNING,
+            sprintf('Session ended for %s: %s is not on the admin IP allowlist.', $user->logLabel(), $ip),
+            $request,
         );
 
         // Logs out AND deletes the sessions row, like every other sign-out.

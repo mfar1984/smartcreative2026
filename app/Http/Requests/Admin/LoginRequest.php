@@ -3,9 +3,11 @@
 namespace App\Http\Requests\Admin;
 
 use App\Models\BannedIp;
+use App\Models\SecurityEvent;
 use App\Models\User;
 use App\Services\AdminLogger;
 use App\Services\Security\LoginBanService;
+use App\Services\Security\SecurityEventRecorder;
 use App\Support\IpAllowlist;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Foundation\Http\FormRequest;
@@ -111,6 +113,23 @@ class LoginRequest extends FormRequest
         RateLimiter::hit($this->throttleKey(), self::DECAY_SECONDS);
 
         if ($ban !== null) {
+            /*
+             | One of the three refusals that cannot reach the Security Log through
+             | the exception hook in bootstrap/app.php, because it answers with a
+             | validation error rather than an HTTP status. Recorded here by hand.
+             |
+             | An ORDINARY wrong password is deliberately NOT a security event: that
+             | is somebody mistyping, it already goes to the activity log, and the
+             | sign-in ban already counts it. Somebody still knocking after the
+             | address has been barred is a different thing.
+             */
+            SecurityEventRecorder::record(
+                SecurityEvent::TYPE_LOGIN_BANNED,
+                SecurityEvent::SEVERITY_CRITICAL,
+                sprintf('Sign in attempted from %s while that address is blocked.', $ip),
+                $this,
+            );
+
             // The same notice for a wrong password and for a right one that is not
             // a super admin's, so it reveals nothing. Nothing more is counted
             // against an address that is already barred.
@@ -127,6 +146,15 @@ class LoginRequest extends FormRequest
                 $verified->id,
                 $verified->logLabel(),
                 AdminLogger::LEVEL_WARN,
+            );
+
+            // Second of the three hand-recorded refusals. A correct password from an
+            // address that is not on the list is the one worth reading twice.
+            SecurityEventRecorder::record(
+                SecurityEvent::TYPE_LOGIN_NOT_ALLOWLISTED,
+                SecurityEvent::SEVERITY_CRITICAL,
+                sprintf('Sign in refused for %s: %s is not on the admin IP allowlist.', $verified->logLabel(), $ip),
+                $this,
             );
 
             throw ValidationException::withMessages([

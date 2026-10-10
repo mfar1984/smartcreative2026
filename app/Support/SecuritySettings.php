@@ -30,6 +30,10 @@ use App\Models\Setting;
  * request limit, no allowlist); the ban itself is new by design, with generous
  * defaults of ten failures inside fifteen minutes.
  *
+ * Part 4 adds the Security Log's repetition ban: a threshold, a window, and a
+ * switch that SHIPS OFF. Counting starts the day it deploys and nothing is barred
+ * until somebody arms it, so first deploy changes nothing here either.
+ *
  * Part 3 adds the two logging switches and the new sign-in location warning.
  * Both logging switches default ON, because writing both logs is exactly what
  * the system does today. The location warning also defaults ON: its first
@@ -81,6 +85,23 @@ final class SecuritySettings
 
         // Empty means no restriction, which is today's behaviour.
         'ip_allowlist' => '',
+
+        /*
+         | Part 4: the Security Log's repetition ban. SHIPS DISARMED.
+         |
+         | 'security_ban_enabled' => '0' is the whole point. The counting runs from
+         | the first request after this deploys, so the owner can read a week of the
+         | Security Log and see what the thresholds would have caught before any
+         | address is ever barred by it — which is the rule this tab was built on:
+         | first deploy changes nothing.
+         |
+         | The duration is NOT a fourth setting: a ban created this way lasts
+         | ban_duration_minutes, the same as a ban from repeated failed sign ins,
+         | because they are the same ban in the same list.
+         */
+        'security_ban_enabled' => '0',
+        'security_ban_after_events' => '20',
+        'security_ban_window_minutes' => '10',
 
         /*
          | Logging. Both ON, because writing both logs is what the system does
@@ -149,6 +170,20 @@ final class SecuritySettings
 
     /** Longest allowlist the form accepts, in characters. */
     public const MAX_IP_ALLOWLIST_LENGTH = 5000;
+
+    /*
+     | Bounds on the Security Log ban. The floor on the count is higher than the
+     | sign-in ban's for a reason: one person fumbling a permission trips a handful
+     | of 403s in a session, and five would catch them. Ten is the floor, so the
+     | threshold cannot be set somewhere a confused colleague would reach.
+     */
+    public const MIN_SECURITY_BAN_AFTER_EVENTS = 10;
+
+    public const MAX_SECURITY_BAN_AFTER_EVENTS = 1000;
+
+    public const MIN_SECURITY_BAN_WINDOW_MINUTES = 1;
+
+    public const MAX_SECURITY_BAN_WINDOW_MINUTES = 1440; // one day
 
     /**
      * The whole group, read once per request.
@@ -323,6 +358,43 @@ final class SecuritySettings
     }
 
     /* ---------------------------------------------------------------------
+     | Typed accessors — the Security Log's repetition ban
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Whether repeated refusals may ban an address. OFF unless somebody turns it on.
+     *
+     * Off is not a cautious default somebody can tidy up later; it is the shape the
+     * owner agreed to. The Security Log counts from the day it ships, and the
+     * banning is armed once the log has been read and the numbers are known to fit
+     * the way the office actually works.
+     */
+    public static function securityBanEnabled(): bool
+    {
+        return self::bool('security_ban_enabled');
+    }
+
+    /** Refusals from one IP that trigger a ban, never fewer than ten. */
+    public static function securityBanAfterEvents(): int
+    {
+        return self::clamp(
+            self::int('security_ban_after_events'),
+            self::MIN_SECURITY_BAN_AFTER_EVENTS,
+            self::MAX_SECURITY_BAN_AFTER_EVENTS,
+        );
+    }
+
+    /** The window, in minutes, those refusals are counted in. */
+    public static function securityBanWindowMinutes(): int
+    {
+        return self::clamp(
+            self::int('security_ban_window_minutes'),
+            self::MIN_SECURITY_BAN_WINDOW_MINUTES,
+            self::MAX_SECURITY_BAN_WINDOW_MINUTES,
+        );
+    }
+
+    /* ---------------------------------------------------------------------
      | Typed accessors — IP allowlist
      * ------------------------------------------------------------------ */
 
@@ -411,6 +483,9 @@ final class SecuritySettings
             'login_attempts_per_minute' => (string) self::loginAttemptsPerMinute(),
             'admin_requests_per_minute' => (string) self::adminRequestsPerMinute(),
             'ip_allowlist' => implode("\n", self::ipAllowlist()),
+            'security_ban_enabled' => self::securityBanEnabled() ? '1' : '0',
+            'security_ban_after_events' => (string) self::securityBanAfterEvents(),
+            'security_ban_window_minutes' => (string) self::securityBanWindowMinutes(),
             'activity_log_enabled' => self::activityLogEnabled() ? '1' : '0',
             'audit_log_enabled' => self::auditLogEnabled() ? '1' : '0',
             'new_location_warning' => self::newLocationWarningEnabled() ? '1' : '0',

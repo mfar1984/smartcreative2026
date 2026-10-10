@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\EventRegistration;
+use App\Models\SecurityEvent;
 use App\Services\Registration\ParticipantSizeWriter;
+use App\Services\Security\SecurityEventRecorder;
 use App\Support\ParticipantSizes;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\URL;
@@ -128,9 +130,21 @@ class ParticipantSizeController extends Controller
      *
      * 403 with a page on it. Nothing about the registration is named, because at this
      * point we have no evidence the person holding the link is entitled to it.
+     *
+     * Recorded in the Security Log by hand, because this refusal is a RESPONSE rather
+     * than an exception — see the class docblock for why — so the hook in
+     * bootstrap/app.php that catches every other refused signature never sees it.
+     * The response below is returned unchanged either way; the recorder swallows its
+     * own failures.
      */
     private function expired()
     {
+        SecurityEventRecorder::record(
+            SecurityEvent::TYPE_INVALID_SIGNATURE,
+            SecurityEvent::SEVERITY_WARNING,
+            'A size confirmation link was refused: the signature did not check out, or it had expired.',
+        );
+
         return response()->view('pages.registration-sizes-expired', [
             'pageTitle' => 'Link Expired',
             'pageSubtitle' => 'This size confirmation link is no longer valid',

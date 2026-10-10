@@ -61,6 +61,14 @@ class AdminLogger
      *                      nothing left to show that any of it happened. So the
      *                      Security save is recorded REGARDLESS of these switches.
      *
+     *   security.          The Security Log's own actions, which today is the one
+     *                      line saying the system started blocking an address. The
+     *                      Security Log itself does not come through here at all —
+     *                      it has its own table, which neither switch is wired to,
+     *                      so there is no switch to find — but the activity line
+     *                      that accompanies a ban does, and a log somebody can
+     *                      silence is worth nothing on the day it matters.
+     *
      * Deliberately short. Everything else — users, roles, payments, registrations,
      * backups, the other settings tabs — obeys the switches, which is the point of
      * having them.
@@ -68,6 +76,25 @@ class AdminLogger
     public const ALWAYS_RECORDED = [
         'auth.',
         'settings.security.',
+        'security.',
+    ];
+
+    /**
+     * Key fragments whose value is never written to a log.
+     *
+     * A named constant rather than a local array because the Security Log redacts
+     * against this same list plus its own additions, and two lists that are meant to
+     * agree are two lists that will not. Matched as a substring of the lowercased
+     * key, so 'password_confirmation' and 'api_key' are both caught by one entry.
+     *
+     * @var array<int, string>
+     */
+    public const SENSITIVE_KEYS = [
+        'password',
+        'remember_token',
+        'secret',
+        'token',
+        'api_key',
     ];
 
     /**
@@ -185,10 +212,8 @@ class AdminLogger
             return null;
         }
 
-        $sensitive = ['password', 'password_confirmation', 'remember_token', 'secret', 'token', 'api_key'];
-
         foreach ($values as $key => $value) {
-            foreach ($sensitive as $needle) {
+            foreach (self::SENSITIVE_KEYS as $needle) {
                 if (str_contains(strtolower((string) $key), $needle)) {
                     $values[$key] = '[redacted]';
                     break;

@@ -27,6 +27,14 @@ use Illuminate\Support\Facades\RateLimiter;
  *
  * Every check answers "not banned" when bans are switched off, and for an address
  * on the IP allowlist, which is trusted: its failures are never counted.
+ *
+ * banForSecurityEvents() adds a second REASON an address can end up in this table —
+ * too many refused requests, counted by the Security Log — but not a second ban. It
+ * writes the same row, which bars the door on the same terms through activeBan(),
+ * appears in the same Banned IPs list and is lifted by the same two buttons. Note
+ * what that means: ban_enabled governs whether ANY row here bars sign in, because
+ * that switch means "do not bar the door"; security_ban_enabled governs only whether
+ * the Security Log may create a row.
  */
 final class LoginBanService
 {
@@ -158,6 +166,59 @@ final class LoginBanService
             'Sign in from this network is temporarily blocked after too many failed attempts. Try again after %s.',
             LocalTime::format($ban->expires_at),
         );
+    }
+
+    /**
+     * Ban an address for repeated REFUSED REQUESTS, not for failed sign ins.
+     *
+     * The same ban, in the same banned_ips table, shown in the same Banned IPs list
+     * on the Security tab, lifted by the same Remove and Clear all buttons and by
+     * `php artisan security:unban`. A second ban mechanism with its own list and its
+     * own unban would be a second place to look on the day somebody is locked out,
+     * so there is only this one.
+     *
+     * Called only by SecurityEventRecorder::considerBan, which has already decided
+     * the threshold was reached and has already exempted a super admin's session.
+     * What is checked HERE is what must be true wherever the call comes from:
+     *
+     *   - security_ban_enabled, which SHIPS OFF. Counting runs regardless; barring
+     *     an address does not happen until the owner arms it.
+     *   - the IP allowlist, which is trusted by definition, exactly as the
+     *     sign-in ban trusts it.
+     *   - no ban already in force, so a flood of refusals renews nothing and writes
+     *     one row rather than one per request.
+     *
+     * The duration is ban_duration_minutes, shared with the sign-in ban: one ban,
+     * one length, one thing to explain. Returns the ban it created, or null.
+     */
+    public function banForSecurityEvents(string $ip, int $refusals): ?BannedIp
+    {
+        if ($ip === '' || ! SecuritySettings::securityBanEnabled() || IpAllowlist::contains($ip)) {
+            return null;
+        }
+
+        if (BannedIp::query()->active()->where('ip_address', $ip)->exists()) {
+            return null;
+        }
+
+        $minutes = SecuritySettings::banDurationMinutes();
+        $now = now();
+
+        // One row per address, like the sign-in ban: any earlier row has expired, so
+        // it is replaced rather than left to pile up.
+        BannedIp::query()->where('ip_address', $ip)->delete();
+
+        return BannedIp::create([
+            'ip_address' => $ip,
+            'failed_attempts' => $refusals,
+            'reason' => sprintf(
+                '%d refused requests within %d minutes (Security Log)',
+                $refusals,
+                SecuritySettings::securityBanWindowMinutes(),
+            ),
+            'banned_at' => $now,
+            'expires_at' => $now->copy()->addMinutes($minutes),
+        ]);
     }
 
     /** Whether bans can touch this address at all. */

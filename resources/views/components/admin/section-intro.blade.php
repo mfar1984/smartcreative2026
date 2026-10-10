@@ -5,7 +5,7 @@
     @param string      $title
     @param string|null $description
     @param string      $icon
-    @param string      $accent  blue | green | amber | purple
+    @param string      $accent  blue | green | amber | purple | red
 --}}
 @props([
     'title',
@@ -21,6 +21,7 @@
         'green' => 'bg-green-600',
         'amber' => 'bg-amber-500',
         'purple' => 'bg-purple-600',
+        'red' => 'bg-red-600',
     ];
     $tile = $accentClasses[$accent] ?? $accentClasses['blue'];
 @endphp

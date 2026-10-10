@@ -98,6 +98,18 @@ class UpdateSecurityConfigRequest extends FormRequest
                 },
             ],
 
+            'security_ban_enabled' => ['sometimes', 'required', 'boolean'],
+            'security_ban_after_events' => [
+                'sometimes', 'required', 'integer',
+                'min:' . SecuritySettings::MIN_SECURITY_BAN_AFTER_EVENTS,
+                'max:' . SecuritySettings::MAX_SECURITY_BAN_AFTER_EVENTS,
+            ],
+            'security_ban_window_minutes' => [
+                'sometimes', 'required', 'integer',
+                'min:' . SecuritySettings::MIN_SECURITY_BAN_WINDOW_MINUTES,
+                'max:' . SecuritySettings::MAX_SECURITY_BAN_WINDOW_MINUTES,
+            ],
+
             'activity_log_enabled' => ['sometimes', 'required', 'boolean'],
             'audit_log_enabled' => ['sometimes', 'required', 'boolean'],
             'new_location_warning' => ['sometimes', 'required', 'boolean'],
@@ -140,7 +152,7 @@ class UpdateSecurityConfigRequest extends FormRequest
 
         // Only when posted: the form always sends these, behind a hidden 0, and a
         // post without one must not switch it off by accident.
-        foreach (['ban_enabled', 'activity_log_enabled', 'audit_log_enabled', 'new_location_warning'] as $toggle) {
+        foreach (['ban_enabled', 'security_ban_enabled', 'activity_log_enabled', 'audit_log_enabled', 'new_location_warning'] as $toggle) {
             if ($this->has($toggle)) {
                 $this->merge([$toggle => $this->boolean($toggle) ? '1' : '0']);
             }
@@ -177,6 +189,8 @@ class UpdateSecurityConfigRequest extends FormRequest
                 . SecuritySettings::MIN_PASSWORD_MIN . '.',
             'ban_after_failures.min' => 'At least ' . SecuritySettings::MIN_BAN_AFTER_FAILURES
                 . ' failed attempts must be allowed before a ban, so one mistyped password cannot lock anybody out.',
+            'security_ban_after_events.min' => 'At least ' . SecuritySettings::MIN_SECURITY_BAN_AFTER_EVENTS
+                . ' refusals must be allowed before a ban, so one colleague fumbling a permission cannot be blocked.',
             'login_attempts_per_minute.min' => 'At least ' . SecuritySettings::MIN_LOGIN_ATTEMPTS_PER_MINUTE
                 . ' sign in attempts per minute must be allowed.',
         ];
@@ -190,6 +204,8 @@ class UpdateSecurityConfigRequest extends FormRequest
         return [
             'ban_after_failures' => 'failures before ban',
             'ban_window_minutes' => 'counting window',
+            'security_ban_after_events' => 'refusals before ban',
+            'security_ban_window_minutes' => 'refusal counting window',
             'ban_duration_minutes' => 'ban duration',
             'login_attempts_per_minute' => 'sign in attempts per minute',
             'admin_requests_per_minute' => 'admin requests per minute',

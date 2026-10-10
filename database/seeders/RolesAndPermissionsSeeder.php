@@ -451,6 +451,16 @@ class RolesAndPermissionsSeeder extends Seeder
             'Audit Log' => [
                 'view' => ['logs.audit.view', 'View audit log'],
             ],
+
+            /*
+            | The third Logging tab, behind its own slug for the same reason the
+            | audit tab is: who was refused and from which address is a different
+            | matter from reading the activity list. The screen's route still asks
+            | for logs.activity.view, so this grants the tab rather than the screen.
+            */
+            'Security Log' => [
+                'view' => ['logs.security.view', 'View security log'],
+            ],
         ],
 
         /*
@@ -595,6 +605,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'users.update',
                 'logs.activity.view',
                 'logs.audit.view',
+                'logs.security.view',
                 'sidebar.balance.view',
             ],
         ],
@@ -750,7 +761,7 @@ class RolesAndPermissionsSeeder extends Seeder
      * @var array<string, array<int, string>>
      */
     private const BACKFILL = [
-        'administrator' => ['shop.orders.notify'],
+        'administrator' => ['shop.orders.notify', 'logs.security.view'],
     ];
 
     /**

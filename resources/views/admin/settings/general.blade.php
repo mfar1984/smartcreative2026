@@ -427,6 +427,56 @@
                     </x-admin.field-row>
                 </x-admin.panel>
 
+                {{-- Part 4. The Security Log's repetition ban. Ships OFF: the log
+                     counts refusals from the day it deploys, and nothing is blocked
+                     by them until somebody reads the log and arms this. --}}
+                <x-admin.panel title="Security Log Bans" icon="shield">
+                    <x-admin.field-row label="Block Repeat Offenders" help="Block an IP address after too many refused requests. Off by default: refusals are recorded on the Logging screen either way." for="security_ban_enabled" error="security_ban_enabled">
+                        <div class="md:pt-2">
+                            <label for="security_ban_enabled" class="inline-flex items-center gap-2.5 cursor-pointer">
+                                <input type="hidden" name="security_ban_enabled" value="0">
+                                <input type="checkbox" id="security_ban_enabled" name="security_ban_enabled" value="1"
+                                       @checked(old('security_ban_enabled', $security['security_ban_enabled']) === '1')
+                                       @disabled(! $canUpdateSecurity)
+                                       class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                <span class="text-sm text-gray-700">Block an address after repeated refusals</span>
+                            </label>
+                        </div>
+
+                        <p class="text-xs text-gray-500 mt-1.5">
+                            A refusal is a request the system turned away: a permission it would not grant,
+                            a stale form token, a tampered signed link, a rate limit, a file name it would
+                            not resolve. Read Logging, Security Log for a week before switching this on —
+                            a prober trips dozens in a minute, a real person trips none.
+                        </p>
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Refusals Before Block" help="Refused requests from one IP address that trigger a block. At least {{ \App\Support\SecuritySettings::MIN_SECURITY_BAN_AFTER_EVENTS }}." for="security_ban_after_events" :required="true" error="security_ban_after_events">
+                        <input type="number" id="security_ban_after_events" name="security_ban_after_events" required
+                               min="{{ \App\Support\SecuritySettings::MIN_SECURITY_BAN_AFTER_EVENTS }}"
+                               max="{{ \App\Support\SecuritySettings::MAX_SECURITY_BAN_AFTER_EVENTS }}"
+                               value="{{ old('security_ban_after_events', $security['security_ban_after_events']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+                    </x-admin.field-row>
+
+                    <x-admin.field-row label="Refusal Window (minutes)" help="Only refusals within this many minutes of each other count towards a block." for="security_ban_window_minutes" :required="true" error="security_ban_window_minutes">
+                        <input type="number" id="security_ban_window_minutes" name="security_ban_window_minutes" required
+                               min="{{ \App\Support\SecuritySettings::MIN_SECURITY_BAN_WINDOW_MINUTES }}"
+                               max="{{ \App\Support\SecuritySettings::MAX_SECURITY_BAN_WINDOW_MINUTES }}"
+                               value="{{ old('security_ban_window_minutes', $security['security_ban_window_minutes']) }}"
+                               @disabled(! $canUpdateSecurity)
+                               class="{{ $input }}">
+
+                        <p class="text-xs text-amber-700 mt-3">
+                            A block from here is the same block as the one above, in the Banned IPs list
+                            below, lasting the same Block Duration and lifted by the same buttons. A super
+                            admin is never blocked by it, and neither is any address on the IP allowlist.
+                            Patterns noticed in what somebody typed are recorded but never counted here.
+                        </p>
+                    </x-admin.field-row>
+                </x-admin.panel>
+
                 {{-- Part 3. Two switches that stop log rows being written, and the
                      warning that goes out when an account signs in from an address
                      it has not been used from before. --}}

@@ -2,10 +2,13 @@
 
 namespace App\Services\Backup;
 
+use App\Models\SecurityEvent;
 use App\Services\AdminLogger;
+use App\Services\Security\SecurityEventRecorder;
 use App\Support\LocalTime;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Throwable;
 use ZipArchive;
 
@@ -17,7 +20,9 @@ use ZipArchive;
  * and carry on; it compares the basename against the folder listing and returns
  * null for anything that is not an archive sitting there. "../../.env", an
  * absolute path and a real file that is not a backup all come back null, and the
- * controllers turn null into a 404.
+ * controllers turn null into a 404. Each of those refusals now writes a row to the
+ * Security Log as well, because a name that could not have come from this screen
+ * was typed into the URL by somebody who went looking for it.
  *
  * The folder is on the private disk (storage/app/private), which is outside
  * public/ and has no route serving it, so an archive is never fetchable over
@@ -136,17 +141,48 @@ class BackupStore
      */
     public function resolve(string $name): ?string
     {
-        if ($name === '' || preg_match('#[/\\\\]#', $name) === 1) {
+        if ($name === '') {
+            return null;
+        }
+
+        if (preg_match('#[/\\\\]#', $name) === 1) {
+            $this->refuse($name, 'carries a path separator');
+
             return null;
         }
 
         if (preg_match(self::PATTERN, $name) !== 1) {
+            $this->refuse($name, 'is not a backup archive name');
+
             return null;
         }
 
         $path = $this->directory() . DIRECTORY_SEPARATOR . $name;
 
+        /*
+         | A name that is shaped right but is not there. Deliberately NOT recorded:
+         | that is a bookmarked link to an archive retention has since removed, which
+         | happens every week and would bury the two cases above.
+         */
         return is_file($path) ? $path : null;
+    }
+
+    /**
+     * Note a refused file name in the Security Log.
+     *
+     * Both refused shapes are worth a row, because neither can come from the screen:
+     * every legitimate name is drawn from the folder listing above, so "../../.env"
+     * and ".env" alike were typed into the URL by somebody who went looking. The
+     * recorder swallows its own failures, so this cannot turn the 404 the controller
+     * is about to send into a 500.
+     */
+    private function refuse(string $name, string $why): void
+    {
+        SecurityEventRecorder::record(
+            SecurityEvent::TYPE_PATH_REFUSED,
+            SecurityEvent::SEVERITY_CRITICAL,
+            sprintf('Backup file name refused: "%s" %s.', Str::limit($name, 80), $why),
+        );
     }
 
     public function delete(string $name): bool
