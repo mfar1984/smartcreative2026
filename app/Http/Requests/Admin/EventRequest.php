@@ -330,6 +330,15 @@ class EventRequest extends FormRequest
             return null;
         }
 
+        // strip_tags keeps what is INSIDE a tag it removes, so a pasted script
+        // would survive as its own source text. Drop these wholesale first.
+        $html = preg_replace('#<(script|style)\b[^>]*>.*?</\1>#is', '', $html) ?? $html;
+
+        // Before any attribute is dropped, settle what each list actually is.
+        // Quill 2 marks bullets on the item, not the list, so this has to read
+        // data-list while it is still there.
+        $html = $this->normalisedEditorLists($html);
+
         $html = strip_tags($html, self::DESCRIPTION_TAGS);
 
         // Drop every attribute on every tag...
@@ -353,6 +362,122 @@ class EventRequest extends FormRequest
         $html = trim((string) $html);
 
         return $html === '' ? null : $html;
+    }
+
+    /**
+     * Rewrite the editor's lists into plain <ul> and <ol>.
+     *
+     * Quill 2 emits EVERY list as <ol> and says which kind it is on each item,
+     * as data-list="bullet" or data-list="ordered"; the bullets a visitor sees in
+     * the editor are drawn by Quill's own stylesheet off that attribute. Stored
+     * as-is the attribute is dropped by the attribute scrub below and every
+     * bullet list comes back numbered, so the kind is resolved here instead.
+     *
+     * Items are grouped into runs, because one Quill list can hold both kinds and
+     * a single wrapper could only be one of them. A run of bullet items becomes a
+     * <ul>, a run of ordered items an <ol>, which is also what a screen reader
+     * needs to announce the list correctly.
+     */
+    private function normalisedEditorLists(string $html): string
+    {
+        if (stripos($html, '<li') === false) {
+            return $html;
+        }
+
+        $doc = new \DOMDocument();
+
+        // The editor posts a fragment, not a document. The meta tag fixes the
+        // encoding guess; libxml is left to wrap the fragment in html/body of its
+        // own accord, because LIBXML_HTML_NOIMPLIED discards the lot when handed
+        // two root elements, and the marked div is found by XPath either way.
+        $previous = libxml_use_internal_errors(true);
+
+        $loaded = $doc->loadHTML(
+            '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">'
+            . '<div data-sc-root>' . $html . '</div>',
+            LIBXML_HTML_NODEFDTD,
+        );
+
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        if (! $loaded) {
+            return $html;
+        }
+
+        $xpath = new \DOMXPath($doc);
+        $root = $xpath->query('//div[@data-sc-root]')->item(0);
+
+        if (! $root instanceof \DOMElement) {
+            return $html;
+        }
+
+        // Deepest lists first, so rebuilding an outer list cannot discard an
+        // inner one that has not been looked at yet.
+        $lists = iterator_to_array($xpath->query('//ol | //ul'), false);
+
+        foreach (array_reverse($lists) as $list) {
+            if (! $list instanceof \DOMElement || $list->parentNode === null) {
+                continue;
+            }
+
+            $items = [];
+
+            foreach ($list->childNodes as $child) {
+                if ($child instanceof \DOMElement && strtolower($child->nodeName) === 'li') {
+                    $items[] = $child;
+                }
+            }
+
+            if ($items === []) {
+                continue;
+            }
+
+            // An item with no data-list keeps whatever the list already was, so
+            // hand-written HTML and saved values survive a round trip unchanged.
+            $fallback = strtolower($list->nodeName);
+            $runs = [];
+
+            foreach ($items as $item) {
+                $kind = $item->getAttribute('data-list');
+                $wanted = match ($kind) {
+                    'bullet' => 'ul',
+                    'ordered' => 'ol',
+                    default => $fallback,
+                };
+
+                if ($runs === [] || end($runs)['kind'] !== $wanted) {
+                    $runs[] = ['kind' => $wanted, 'items' => []];
+                }
+
+                $runs[array_key_last($runs)]['items'][] = $item;
+            }
+
+            // Nothing to split and the wrapper is already right: leave it alone.
+            if (count($runs) === 1 && $runs[0]['kind'] === $fallback) {
+                continue;
+            }
+
+            foreach ($runs as $run) {
+                $replacement = $doc->createElement($run['kind']);
+
+                foreach ($run['items'] as $item) {
+                    $replacement->appendChild($item);
+                }
+
+                $list->parentNode->insertBefore($replacement, $list);
+            }
+
+            $list->parentNode->removeChild($list);
+        }
+
+        $out = '';
+
+        foreach ($root->childNodes as $child) {
+            $out .= $doc->saveHTML($child);
+        }
+
+        return $out;
     }
 
     /**
