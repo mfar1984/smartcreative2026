@@ -8,6 +8,7 @@ use App\Models\ShopOrder;
 use App\Services\Coupon\CouponAvailability;
 use App\Services\Coupon\ShopOrderCouponWriter;
 use App\Services\Payment\CheckoutUrls;
+use App\Services\Payment\OpenCheckout;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\ShopCheckoutStarter;
@@ -166,6 +167,18 @@ class ShopOrderPaymentController extends Controller
             return redirect()
                 ->to(self::urlFor($order))
                 ->withErrors(['payment' => $e->publicMessage()]);
+        }
+
+        /*
+         | An attempt is already in flight at a bank, so no second purchase was opened
+         | and the old URL — which CHIP has closed to new attempts — is not handed
+         | back either. The buyer is told what is happening on their own page instead.
+         | Not an error: nothing failed, and nothing is owed twice.
+         */
+        if ($away === null) {
+            return redirect()
+                ->to(self::urlFor($order))
+                ->with('payment_in_progress', OpenCheckout::holdingMessage($order->reference));
         }
 
         return redirect()->away($away);

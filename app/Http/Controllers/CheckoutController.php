@@ -9,6 +9,7 @@ use App\Services\Coupon\CouponAvailability;
 use App\Services\Coupon\CouponOutcome;
 use App\Services\Coupon\CouponRedeemer;
 use App\Services\Coupon\ShopOrderCouponWriter;
+use App\Services\Payment\OpenCheckout;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\ShopCheckoutStarter;
@@ -195,6 +196,7 @@ class CheckoutController extends Controller
             $lines,
             (string) ($validated['voucher_code'] ?? ''),
             round((float) $lines->sum('line_total'), 2),
+            (string) $validated['customer_name'],
         );
 
         $order = $writer->place(
@@ -244,9 +246,21 @@ class CheckoutController extends Controller
          */
         if ($order->payment_method === ShopOrder::METHOD_GATEWAY && $order->awaitsGatewayPayment()) {
             try {
-                return redirect()->away(
-                    $starter->start($order, ShopOrderPaymentController::returnUrls($order))
-                );
+                $away = $starter->start($order, ShopOrderPaymentController::returnUrls($order));
+
+                if ($away !== null) {
+                    return redirect()->away($away);
+                }
+
+                /*
+                 | An attempt is already in flight at a bank for this order, so no
+                 | second purchase was opened. Only reachable where this order already
+                 | had a checkout, such as a re-posted form, but it is handled rather
+                 | than redirected to nowhere.
+                 */
+                return redirect()
+                    ->to(URL::signedRoute('shop.order', ['reference' => $order->reference]))
+                    ->with('payment_in_progress', OpenCheckout::holdingMessage($order->reference));
             } catch (PaymentGatewayException $e) {
                 /*
                  | The order is placed and correct; only the hand-off failed. The buyer
@@ -431,6 +445,7 @@ class CheckoutController extends Controller
         Collection $lines,
         string $typed,
         float $goods,
+        string $buyerName,
     ): ?CouponOutcome {
         $typed = trim($typed);
 
@@ -450,7 +465,21 @@ class CheckoutController extends Controller
             return CouponOutcome::failed($lookup->status);
         }
 
-        return $redeemer->claimByCode($typed, Coupon::KIND_SHOP, $goods);
+        /*
+         | The buyer's NAME goes onto the ledger row with the use.
+         |
+         | There is no order to read it off yet — the discount is part of the total the
+         | order row is created with, so the claim comes first — and that is also why
+         | it is stored rather than joined later: the sponsor's screen shows who used a
+         | code, and an order carries an address, a phone number and a total that are
+         | none of a sponsor's business.
+         */
+        return $redeemer->claimByCode(
+            typed: $typed,
+            kind: Coupon::KIND_SHOP,
+            charge: $goods,
+            buyerName: $buyerName,
+        );
     }
 
     /**

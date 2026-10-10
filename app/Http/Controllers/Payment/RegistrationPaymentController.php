@@ -8,6 +8,7 @@ use App\Models\EventRegistration;
 use App\Services\Coupon\CouponAvailability;
 use App\Services\Coupon\RegistrationCouponWriter;
 use App\Services\Payment\CheckoutUrls;
+use App\Services\Payment\OpenCheckout;
 use App\Services\Payment\PaymentGatewayException;
 use App\Services\Payment\PaymentGatewayManager;
 use App\Services\Payment\RegistrationBalanceCharge;
@@ -16,6 +17,7 @@ use App\Support\PaymentSettings;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
+use Throwable;
 
 /**
  * The invoice a registrant lands on after submitting, and the hand off to the
@@ -162,6 +164,8 @@ class RegistrationPaymentController extends Controller
             return redirect()->to(self::urlFor($registration));
         }
 
+        $open = $this->openCheckout($registration);
+
         /*
          | Send an impatient payer back to the checkout they already have, rather than
          | opening a second one.
@@ -172,13 +176,43 @@ class RegistrationPaymentController extends Controller
          | unmatched. Reusing the live attempt means there is only ever one purchase to
          | settle.
          |
-         | Only while the attempt is still open. A failed or expired one is not
-         | reusable, and a payer who abandoned a QR code deserves a fresh page.
+         | Only while nobody has committed to a bank. See OpenCheckout.
          */
-        if ($reusable = $this->reusableCheckout($registration)) {
-            return redirect()->away($reusable);
+        if ($open->mayReuse()) {
+            return redirect()->away($open->checkoutUrl);
         }
 
+        /*
+         | An attempt is in flight at a bank.
+         |
+         | No second purchase, because that is the RM 250 fault above. And not the old
+         | URL either, because CHIP has closed that purchase to new attempts and all
+         | it shows is "Payment is being processed" — which is what left a registrant
+         | pressing Pay over and over with no idea whether he was supposed to wait.
+         |
+         | So he is told, on his own page, in words: finish it at the bank, or come
+         | back shortly and a fresh page will be opened.
+         */
+        if ($open->isInProgress()) {
+            return redirect()
+                ->to(self::urlFor($registration))
+                ->with('payment_in_progress', OpenCheckout::holdingMessage($registration->reference));
+        }
+
+        /*
+         | Nothing usable at the gateway, so a new purchase is opened — and any
+         | abandoned one is left exactly where it is.
+         |
+         | ChipGateway can create a purchase, read one back, refund one and report the
+         | balance. It has no cancel or release call, and inventing one against a live
+         | payments API is not something to guess at, so an abandoned purchase cannot
+         | be closed from here and could in principle still settle later.
+         |
+         | That is survivable by design rather than by luck: markPending() adds a row
+         | to the checkout history instead of replacing one, the webhook matches on
+         | the purchase id it was sent, and the receipt is keyed on that same id. A
+         | late payment lands on the right entry whichever purchase took it.
+         */
         try {
             $gateway = $this->gateways->active();
 
@@ -214,55 +248,59 @@ class RegistrationPaymentController extends Controller
                 ->withErrors(['payment' => $e->publicMessage()]);
         }
 
-        // Recorded before the redirect, so the webhook can find this
-        // registration by the gateway's id whatever happens next.
-        $this->updater->markPending(
-            $registration,
-            $session->reference,
-            $gateway->label(),
-            $session->checkoutUrl,
-        );
+        /*
+         | Recorded before the redirect, so the webhook can find this registration by
+         | the gateway's id whatever happens next.
+         |
+         | AND NEVER AT THE COST OF THE PAYMENT. The purchase exists at CHIP by the
+         | time this line runs; everything in markPending() is bookkeeping — the
+         | attempt row, the reference on the entry, an activity line. All of it
+         | matters, none of it is worth a payment. Unwrapped, one failed insert in
+         | there took the whole response with it and the payer got a server error
+         | instead of the gateway, while a perfectly good checkout sat waiting. That
+         | is the shape of what the office kept rescuing by hand: a blank page, and a
+         | gate.chip-in.asia link that worked fine when sent on afterwards.
+         |
+         | Logged as an error because it genuinely needs looking at, and the purchase
+         | id is in the line so it can be reconciled. Nothing is lost even then: CHIP
+         | echoes our own reference back on the webhook, which is the third way
+         | ChipWebhookController matches a payment.
+         */
+        try {
+            $this->updater->markPending(
+                $registration,
+                $session->reference,
+                $gateway->label(),
+                $session->checkoutUrl,
+            );
+        } catch (Throwable $e) {
+            Log::error('A checkout was opened but could not be recorded. The payer was sent to it anyway.', [
+                'reference' => $registration->reference,
+                'purchase_id' => $session->reference,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return redirect()->away($session->checkoutUrl);
     }
 
     /**
-     * The checkout URL of an attempt that is still open, or null.
+     * What may be done with the attempt this entry already has at the gateway.
      *
-     * Asks the gateway rather than trusting the stored status, because the stored one
-     * is only as fresh as the last webhook that got through. A purchase the gateway
-     * reports as still awaiting execution is one the payer can go back to.
-     *
-     * Any problem reaching the gateway returns null, so the worst case is the old
-     * behaviour of opening a new checkout rather than a payer stuck at an error.
+     * The rules are in OpenCheckout, shared with the shop so the two cannot drift
+     * apart on which gateway states mean "go back to it" and which mean "an attempt
+     * is at a bank".
      */
-    private function reusableCheckout(EventRegistration $registration): ?string
+    private function openCheckout(EventRegistration $registration): OpenCheckout
     {
         $latest = $registration->checkouts()->first();
 
-        if ($latest === null || blank($latest->checkout_url)) {
-            return null;
-        }
-
-        try {
-            $payment = $this->gateways->active()->fetchPayment($latest->purchase_id);
-        } catch (PaymentGatewayException) {
-            return null;
-        }
-
-        if ($payment === null) {
-            return null;
-        }
-
-        $status = $payment['status'] ?? null;
-
-        // The states where the payer has somewhere to go back to. Anything settled,
-        // failed or expired is finished with.
-        $open = ['created', 'viewed', 'pending_execute', 'pending_charge'];
-
-        return is_string($status) && in_array($status, $open, true)
-            ? $latest->checkout_url
-            : null;
+        return OpenCheckout::at(
+            $this->gateways,
+            $latest?->purchase_id,
+            $latest?->checkout_url,
+            $latest?->opened_at,
+        );
     }
 
     /**

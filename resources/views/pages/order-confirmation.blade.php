@@ -38,6 +38,16 @@
                     </p>
                 @endif
 
+                {{-- An attempt is already in flight at a bank, so Pay did not open a
+                     second one. Amber rather than the red payment error below:
+                     nothing failed, nothing is owed twice, and there is something for
+                     the buyer to do. --}}
+                @if (session('payment_in_progress'))
+                    <p role="status" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-900 mb-6">
+                        {{ session('payment_in_progress') }}
+                    </p>
+                @endif
+
                 {{-- What became of a voucher code, whether it was typed at checkout or
                      on this page. Its own banner for the same reason the error below has
                      one: the order going through and the coupon being accepted are two

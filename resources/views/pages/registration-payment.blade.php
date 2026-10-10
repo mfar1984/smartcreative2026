@@ -142,6 +142,22 @@
                     </div>
                 @endif
 
+                {{-- An attempt is already in flight at a bank, so Pay did not open a
+                     second one. Amber and its own banner rather than the red box
+                     below: nothing failed, nothing is owed twice, and there is
+                     something for the payer to do. --}}
+                @if (session('payment_in_progress'))
+                    <div role="status" class="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-5 mb-8">
+                        <svg class="w-6 h-6 shrink-0 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <div>
+                            <p class="text-base font-bold text-amber-900 mb-1">A payment is already in progress</p>
+                            <p class="text-sm text-amber-800">{{ session('payment_in_progress') }}</p>
+                        </div>
+                    </div>
+                @endif
+
                 @if ($errors->any())
                     <div role="alert" class="bg-red-50 border border-red-200 rounded-lg p-5 mb-8">
                         <p class="text-base font-bold text-red-900 mb-1">
