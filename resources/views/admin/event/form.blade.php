@@ -1304,6 +1304,17 @@
         const form = document.getElementById('event-form');
 
         if (!holder || !field || !form || typeof window.Quill === 'undefined') {
+            // Quill unavailable (e.g. a stale cached bundle). Fall back to the
+            // plain textarea so the field is never invisible, and drop the empty
+            // editor holder so it leaves no gap.
+            if (field) {
+                field.classList.remove('hidden');
+                field.setAttribute('rows', '4');
+                field.classList.add(...'{{ $input }}'.split(' ').filter(Boolean), 'resize-y');
+            }
+            if (holder) {
+                holder.remove();
+            }
             return;
         }
 
