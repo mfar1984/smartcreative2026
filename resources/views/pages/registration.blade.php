@@ -461,12 +461,12 @@
                                     <div class="flex-1 min-w-48">
                                         <input type="file" id="logo_{{ $event->slug }}" name="logo"
                                                @required($event->requiresLogo())
-                                               accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                                               accept="image/jpeg,image/png,image/webp"
                                                data-logo-input="{{ $event->slug }}"
                                                class="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700 file:cursor-pointer">
 
                                         <p class="text-xs text-gray-500 mt-1.5">
-                                            JPG, PNG, WebP or SVG up to 2 MB.
+                                            JPG, PNG or WebP up to 2 MB.
                                             {{-- About the logo being one per entry, not about the group
                                                  name, so it follows the mode rather than that setting. --}}
                                             @if ($event->allowsMultipleParticipants())

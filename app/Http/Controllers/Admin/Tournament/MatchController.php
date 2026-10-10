@@ -466,7 +466,20 @@ class MatchController extends Controller
             ]);
         }
 
-        $request->validate(['proof' => ['nullable', 'image', 'max:5120']]);
+        /*
+         | A screenshot of the result.
+         |
+         | mimes narrows what `image` alone would take. The bare rule accepts the
+         | whole raster set, GIF and BMP included, and GIF is the one that matters:
+         | its magic header is six bytes, so "GIF89a" followed by anything at all
+         | reads as image/gif to the type sniffer. Naming the four formats every
+         | other upload here names refuses that, and nobody screenshots a fixture
+         | into a GIF.
+         |
+         | Both rules read the file's own bytes rather than its extension, so a
+         | script called result.png does not get through either way.
+         */
+        $request->validate(['proof' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120']]);
 
         /*
          | When the tournament demands evidence, a fixture cannot be closed without it.
@@ -507,7 +520,9 @@ class MatchController extends Controller
 
             $match->proofs()->create([
                 'path' => $file->store('tournament-proofs', 'public'),
-                'original_name' => $file->getClientOriginalName(),
+                // Display only, and trimmed to the column width: store() gives the
+                // file on disk a hashed name, so this never reaches a path.
+                'original_name' => $this->displayFileName($file->getClientOriginalName()),
                 'uploaded_by' => $request->user()->id,
             ]);
         }
@@ -1971,6 +1986,24 @@ class MatchController extends Controller
             'completed' => TournamentMatch::STATUS_COMPLETED,
             default => TournamentMatch::STATUS_SCHEDULED,
         };
+    }
+
+    /**
+     * Reduce an uploaded filename to something safe to store and show.
+     *
+     * The same helper the registration and payment-proof uploads use. The name is
+     * display only and never reaches the filesystem, because store() gives the file
+     * on disk a hashed name. It strips directory parts anyway in case a later change
+     * does build a path from it, drops control characters, and trims to the column
+     * width so a long name cannot fail the insert.
+     */
+    private function displayFileName(?string $name): string
+    {
+        $name = basename(str_replace('\\', '/', (string) $name));
+        $name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name) ?? '';
+        $name = trim($name);
+
+        return $name === '' ? 'screenshot' : str($name)->limit(190, '')->toString();
     }
 
     /**

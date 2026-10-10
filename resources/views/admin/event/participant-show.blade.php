@@ -275,11 +275,11 @@
 
                                         <div class="grow min-w-0">
                                             <input type="file" id="logo" name="logo"
-                                                   accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                                                   accept="image/jpeg,image/png,image/webp"
                                                    class="w-full text-sm text-gray-700 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100">
 
                                             <p class="text-xs text-gray-400 mt-1">
-                                                JPG, PNG, WebP or SVG, up to 2 MB.
+                                                JPG, PNG or WebP, up to 2 MB.
                                                 @if ($registration->hasLogo())
                                                     Leave this empty to keep the current image.
                                                 @endif

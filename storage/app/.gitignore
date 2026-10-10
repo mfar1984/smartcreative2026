@@ -3,9 +3,17 @@
 !public/
 !.gitignore
 
-# The two .gitkeep files have to be re-included here rather than in the root
-# .gitignore. Git gives the deepest matching ignore file the last word, so the
-# `*` above beats a negation written higher up, and without these lines a fresh
-# clone has no storage/app/public directory for uploads to land in.
-!private/.gitkeep
-!public/.gitkeep
+# The upload directory's own web server rules, which have to be deployed or they
+# protect nothing.
+#
+# `!public/` above re-includes the DIRECTORY, not what is in it, and a negation
+# written in public/.gitignore does not override the `*` on the first line of this
+# file. Without the line below, `git add` refuses storage/app/public/.htaccess
+# outright — so the deny that stops an upload being executed would sit in the
+# working copy, pass every local check, and never reach the server. Checked with
+# `git add --dry-run` rather than assumed, because this is the kind of protection
+# whose absence is invisible until the day it is needed.
+#
+# storage/app/private needs no equivalent: nothing symlinks it into the document
+# root and no route serves it, which is asserted by a test rather than hoped for.
+!public/.htaccess

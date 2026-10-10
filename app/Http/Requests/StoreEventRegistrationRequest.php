@@ -46,14 +46,25 @@ class StoreEventRegistrationRequest extends FormRequest
              */
             'voucher_code' => ['nullable', 'string', 'max:64'],
 
-            // One image for the whole entry. Required from the event's setting
-            // rather than a posted flag, so a tampered form cannot skip it.
-            // SVG is allowed through mimetypes because it is not a raster image
-            // and would fail the 'image' rule.
+            /*
+             | One image for the whole entry. Required from the event's setting
+             | rather than a posted flag, so a tampered form cannot skip it.
+             |
+             | mimetypes reads the file's own bytes rather than its extension, so a
+             | script called crest.png is refused here.
+             |
+             | Raster only, and SVG is refused on purpose. An SVG is a document, not a
+             | picture: it may carry <script>, and the stored file sits on the public
+             | disk under a URL on this domain. The admin screen links it with
+             | target="_blank" so an operator can see the full size image, and opening
+             | one as a top level document is all it would take to run the uploader's
+             | script with the operator's session. This form is open to anybody on the
+             | internet, so that is not a risk worth a vector crest.
+             */
             'logo' => [
                 $event->requiresLogo() ? 'required' : 'nullable',
                 'file',
-                'mimetypes:image/jpeg,image/png,image/webp,image/svg+xml',
+                'mimetypes:image/jpeg,image/png,image/webp',
                 'max:2048',
             ],
 
@@ -244,7 +255,10 @@ class StoreEventRegistrationRequest extends FormRequest
             'participants.required' => 'Add at least one person to the registration.',
             'participants.*.ic_number.regex' => 'The identity card number may only contain letters, numbers and hyphens.',
             'logo.required' => 'This event needs a logo with the registration.',
-            'logo.mimetypes' => 'The logo must be a JPG, PNG, WebP or SVG image.',
+            // Says what the rule above now accepts. It used to offer SVG, which is
+            // refused now and for good reason, and a message offering the one format
+            // the form will not take is how somebody tries the same file three times.
+            'logo.mimetypes' => 'The logo must be a JPG, PNG or WebP image.',
             'logo.max' => 'The logo must be no larger than 2 MB.',
             'participants.*.phone.regex' => 'The telephone number may only contain digits, spaces and the characters + - ( ).',
             'participants.*.date_of_birth.before' => 'The date of birth must be in the past.',
@@ -290,7 +304,7 @@ class StoreEventRegistrationRequest extends FormRequest
         ];
 
         foreach (range(0, 199) as $index) {
-            $person = 'person ' . ($index + 1) . ' ';
+            $person = 'person '.($index + 1).' ';
 
             foreach ([
                 'role', 'full_name', 'ic_number',
@@ -300,7 +314,7 @@ class StoreEventRegistrationRequest extends FormRequest
                 'email', 'gender', 'race', 'emergency_contact_name', 'emergency_contact_phone',
             ] as $field) {
                 $labels["participants.{$index}.{$field}"] = $person
-                    . ($spelled[$field] ?? str_replace('_', ' ', $field));
+                    .($spelled[$field] ?? str_replace('_', ' ', $field));
             }
         }
 

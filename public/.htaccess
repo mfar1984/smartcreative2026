@@ -5,6 +5,25 @@
 
     RewriteEngine On
 
+    # Nothing under /storage is a program.
+    #
+    # /storage is a symlink to storage/app/public, which is where every upload in the
+    # application lands: logos, posters, receipts, coupon artwork, product pictures.
+    # Those files arrive from the public registration form and the shop checkout, so
+    # the directory is writable by strangers and inside the document root at once.
+    #
+    # Validation already stops a script getting in. Every upload rule checks the
+    # file's own bytes rather than its extension, and store() renames the file to a
+    # random hash plus an extension derived from those bytes, which for PHP source is
+    # no extension at all. This rule is the second line, for the day somebody adds an
+    # upload that uses storeAs() with the name the browser sent.
+    #
+    # Refused before any handler sees the request, so it does not matter whether the
+    # host has a PHP handler mapped for the extension. The optional public/ prefix is
+    # for the deployment where the clone sits in the web root and the .htaccess above
+    # has already rewritten the path.
+    RewriteRule ^(?:public/)?storage/.+\.(php|php[0-9]*|phtml|phps|phar|pht|cgi|pl|py|rb|sh|shtml|asp|aspx|jsp|htaccess|htpasswd)$ - [F,L,NC]
+
     # Send www to the bare domain. The target uses $1, not %{REQUEST_URI}: when the
     # app is cloned into the web root, the .htaccess above has already rewritten the
     # path to public/..., and %{REQUEST_URI} would redirect to /public/.

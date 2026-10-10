@@ -7,6 +7,7 @@ use App\Models\EventParticipant;
 use App\Services\AdminLogger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use League\Flysystem\PathTraversalDetected;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -57,11 +58,21 @@ class IdentityCardController extends Controller
          |
          | The column holds a relative path, so a row that somehow carried something like
          | ../../.env could otherwise be used to read a file outside the directory. Asking
-         | the disk for it keeps the read inside the disk's own root.
+         | the disk for it keeps the read inside the disk's own root: Flysystem refuses a
+         | path that climbs out rather than resolving it.
+         |
+         | It refuses by throwing, though, and an unhandled throw is a 500 with a stack
+         | trace rather than an answer. Nothing writes a path like that — store() writes a
+         | hashed relative one — so this is the shape of a tampered or corrupted row, and
+         | the right reply to it is the same 404 every other miss gets.
          */
         $disk = Storage::disk('local');
 
-        if (! $disk->exists($path)) {
+        try {
+            if (! $disk->exists($path)) {
+                throw new NotFoundHttpException();
+            }
+        } catch (PathTraversalDetected) {
             throw new NotFoundHttpException();
         }
 

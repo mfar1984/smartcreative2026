@@ -638,7 +638,7 @@
                     <p class="text-xs text-gray-500 mt-2">
                         A squad uploads one crest, not one per player, so in Manager mode this is the
                         manager's job. An individual entry uploads one image for themselves.
-                        JPG, PNG, WebP or SVG up to 2 MB.
+                        JPG, PNG or WebP up to 2 MB.
                     </p>
                 </x-admin.field-row>
 

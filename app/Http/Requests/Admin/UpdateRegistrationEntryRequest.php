@@ -70,14 +70,17 @@ class UpdateRegistrationEntryRequest extends FormRequest
 
             /*
              | Optional even on an event that demands one, as long as there already
-             | is one: leaving the field empty means "keep what is there". SVG goes
-             | through mimetypes because it is not a raster image and would fail
-             | the image rule.
+             | is one: leaving the field empty means "keep what is there".
+             |
+             | The same raster-only set as the public form, and for the same reason.
+             | Both write into registration-logos and both are linked from the admin
+             | screen for an operator to open full size, so accepting an SVG here
+             | would leave that door open to anybody holding registrations.update.
              */
             'logo' => [
                 'nullable',
                 'file',
-                'mimetypes:image/jpeg,image/png,image/webp,image/svg+xml',
+                'mimetypes:image/jpeg,image/png,image/webp',
                 'max:2048',
             ],
 
@@ -139,7 +142,8 @@ class UpdateRegistrationEntryRequest extends FormRequest
     {
         return [
             'team_name.required' => 'Enter the team, group or organisation name.',
-            'logo.mimetypes' => 'The image must be a JPG, PNG, WebP or SVG.',
+            // Matches the rule, which no longer takes an SVG. See the note on it.
+            'logo.mimetypes' => 'The image must be a JPG, PNG or WebP.',
             'logo.max' => 'The image must be no larger than 2 MB.',
         ];
     }
@@ -161,6 +165,6 @@ class UpdateRegistrationEntryRequest extends FormRequest
      */
     protected function getRedirectUrl(): string
     {
-        return route('admin.event.participants.show', $this->registration()) . '#entry';
+        return route('admin.event.participants.show', $this->registration()).'#entry';
     }
 }

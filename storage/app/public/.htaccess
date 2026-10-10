@@ -1,0 +1,46 @@
+# The upload directory, as the web server sees it.
+#
+# public/storage is a symlink to this directory, so everything in here is fetchable
+# over HTTP. That is the point for a logo or a poster. It is not the point for the
+# payment receipts and transfer slips that also live here, and it is certainly not
+# the point for anything the server might agree to run.
+#
+# Apache reads this file when it walks the symlinked path, so the rules below apply
+# to every request under /storage. public/.htaccess carries an equivalent deny as a
+# mod_rewrite rule, because that file is certain to be deployed; this one is the
+# conventional place to look and covers the case where the document root is pointed
+# straight at public/ with a different front .htaccess.
+
+# Not served at all, whatever the host has a handler for. Deny rather than merely
+# unmapping, so a misconfigured handler cannot turn an upload into a program.
+<FilesMatch "\.(php|php3|php4|php5|php6|php7|php8|phtml|phps|phar|pht|cgi|pl|py|rb|sh|shtml|asp|aspx|jsp|htaccess|htpasswd)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_mime.c>
+    # Belt and braces for the same thing: hand back any handler or type mapping that
+    # would make these executable, in case the deny above is reached with
+    # AllowOverride set too narrowly for Require.
+    RemoveHandler .php .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .pht .cgi .pl .py .rb .sh .shtml
+    RemoveType .php .php3 .php4 .php5 .php6 .php7 .php8 .phtml .phps .phar .pht
+</IfModule>
+
+<IfModule mod_headers.c>
+    # An SVG is a document, not a picture: it can carry <script>, and opening one
+    # directly runs that script on this domain. Only the three branding uploads
+    # accept SVG now and only a super admin can post them, but the file still sits
+    # under a URL on the live site, so it is served sandboxed. The same header set
+    # Laravel puts on its own served files.
+    <FilesMatch "\.svgz?$">
+        Header set Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+        Header set X-Content-Type-Options "nosniff"
+    </FilesMatch>
+
+    # Nothing in here should be sniffed into a type it did not declare.
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>
+
+# No listings. The receipts and transfer slips in here are protected by nothing but
+# a forty character random name, which is worth exactly nothing if the directory can
+# be read out.
+Options -Indexes

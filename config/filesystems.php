@@ -30,10 +30,25 @@ return [
 
     'disks' => [
 
+        /*
+        | The private disk. Identity card photographs and database backups.
+        |
+        | serve is off, which is a change from Laravel's default and deliberate.
+        | Leaving it on registers two routes on this disk: GET /storage/{path},
+        | which streams any file in here, and PUT /storage/{path}, which writes
+        | one. Both are gated by a signature made with APP_KEY, so neither is open
+        | — but nothing in this application asks for either, and an unused route
+        | that reads out somebody's identity card on a correct signature is a route
+        | worth not having. Reading one goes through Admin\Event\IdentityCardController,
+        | which checks the permission and logs the view.
+        |
+        | Storage::disk('local')->exists(), ->response() and the backup reads are
+        | driver methods and work the same either way.
+        */
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],
