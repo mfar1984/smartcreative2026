@@ -5,7 +5,6 @@ use App\Http\Controllers\Campaign\TrackingController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LegalController;
-use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\Messaging\InfobipDeliveryController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CheckoutController;
@@ -25,8 +24,14 @@ use App\Http\Controllers\WifiProvisionController;
 // Home route
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
-// Services routes
-Route::get('/services', [MaintenanceController::class, 'services'])->name('services');
+/*
+| The services landing page. A directory: it summarises each service in the words
+| of that service's own page and links to it.
+|
+| The three pages themselves are declared further down, beside the rest of the
+| public pages.
+*/
+Route::get('/services', [ServiceController::class, 'index'])->name('services');
 
 /*
 | Tournament results.

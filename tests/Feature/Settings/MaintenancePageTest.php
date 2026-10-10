@@ -327,16 +327,18 @@ class MaintenancePageTest extends TestCase
      | Regression guard
      * ------------------------------------------------------------------ */
 
-    public function test_the_under_development_placeholder_is_a_different_page_and_untouched(): void
+    public function test_the_services_page_has_nothing_to_do_with_maintenance_mode(): void
     {
         /*
-         | pages/maintenance.blade.php is rendered by MaintenanceController for the
-         | Services section, which is simply not built yet. It is a 200 inside the
-         | normal site layout and has nothing to do with maintenance mode.
+         | /services used to render pages/maintenance.blade.php, a placeholder for a
+         | section that was not built. That page and its controller are gone and the
+         | route now serves the real landing page, but the names were one word apart:
+         | this asserts the holding page's copy has not leaked into a page that is
+         | simply a 200 inside the normal site layout.
          */
         $this->get(route('services'))
             ->assertOk()
-            ->assertSee('Under Development')
-            ->assertDontSee(self::HEADING);
+            ->assertDontSee(self::HEADING)
+            ->assertDontSee('Under Development');
     }
 }
