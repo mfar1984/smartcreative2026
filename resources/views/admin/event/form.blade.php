@@ -1338,7 +1338,7 @@
             });
         }
 
-        // app.js is loaded as a deferred ES module by @vite, so window.Quill may
+        // app.js is loaded as a deferred ES module by Vite, so window.Quill may
         // not exist yet when this inline script runs. Wait for it rather than
         // falling back immediately; only give up once the page has fully loaded.
         if (typeof window.Quill !== 'undefined') {
