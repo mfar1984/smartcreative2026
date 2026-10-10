@@ -173,8 +173,13 @@
 
                 <x-admin.field-row label="Description" help="A short paragraph shown on the card." for="description" error="description">
                     {{-- Basic rich-text editor (Quill). The textarea stays as the real
-                         form field; on submit the editor copies its HTML into it. --}}
-                    <div id="description-editor" data-description-editor></div>
+                         form field; on submit the editor copies its HTML into it.
+                         The wrapper is what the CSS styles: Quill puts its toolbar
+                         in here as a sibling of the editor, and the two are drawn
+                         as one bordered box matching the other inputs. --}}
+                    <div class="description-editor">
+                        <div id="description-editor" data-description-editor></div>
+                    </div>
                     <textarea id="description" name="description" maxlength="20000"
                               class="hidden">{{ old('description', $event->description) }}</textarea>
                 </x-admin.field-row>
@@ -1313,7 +1318,8 @@
             field.classList.remove('hidden');
             field.setAttribute('rows', '4');
             field.classList.add(...'{{ $input }}'.split(' ').filter(Boolean), 'resize-y');
-            holder.remove();
+            // Drop the wrapper too, or it leaves an empty bordered box behind.
+            (holder.closest('.description-editor') || holder).remove();
         }
 
         function boot() {

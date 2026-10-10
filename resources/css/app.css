@@ -35,6 +35,53 @@
 }
 
 /* ==========================================================================
+   Description editor (Quill) pada borang event
+   Quill membawa border segi empat tepatnya sendiri, jadi toolbar dan ruang
+   menaip dilukis semula di sini sebagai satu kotak yang sama rupa dengan
+   input lain pada borang: border gray-300, rounded-lg, teks text-sm.
+   Berskop pada .description-editor supaya tiada elemen lain tersentuh.
+   ========================================================================== */
+.description-editor .ql-toolbar.ql-snow {
+    border: 1px solid #d1d5db; /* gray-300 */
+    border-bottom: 0;
+    border-radius: 0.5rem 0.5rem 0 0; /* rounded-lg atas sahaja */
+    background-color: #f9fafb; /* gray-50 */
+    padding: 0.5rem;
+}
+
+.description-editor .ql-container.ql-snow {
+    border: 1px solid #d1d5db;
+    border-radius: 0 0 0.5rem 0.5rem;
+    font-family: inherit;
+    font-size: 0.875rem; /* text-sm */
+    line-height: 1.25rem;
+    color: #111827; /* gray-900 */
+}
+
+.description-editor .ql-editor {
+    min-height: 7rem;
+    padding: 0.625rem 0.875rem; /* sejajar dengan px-3.5 py-2.5 input lain */
+}
+
+.description-editor .ql-editor.ql-blank::before {
+    font-style: normal;
+    color: #9ca3af; /* gray-400, sama seperti placeholder input */
+    left: 0.875rem;
+    right: 0.875rem;
+}
+
+/* Cincin fokus yang sama seperti input lain, dilukis pada keseluruhan kotak. */
+.description-editor:focus-within .ql-toolbar.ql-snow,
+.description-editor:focus-within .ql-container.ql-snow {
+    border-color: #3b82f6; /* blue-500 */
+}
+
+.description-editor:focus-within {
+    border-radius: 0.5rem;
+    box-shadow: 0 0 0 2px rgb(59 130 246 / 0.4); /* ring-2 ring-blue-500/40 */
+}
+
+/* ==========================================================================
    Event Description (rich text)
    Deskripsi event kini disimpan sebagai HTML asas. Tailwind menanggalkan
    bullet/number lalai, jadi senarai dalam blok .event-description sahaja
