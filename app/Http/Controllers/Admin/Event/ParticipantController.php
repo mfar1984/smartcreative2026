@@ -15,6 +15,7 @@ use App\Models\EventParticipantChange;
 use App\Models\EventRegistration;
 use App\Models\EventRegistrationPayment;
 use App\Services\AdminLogger;
+use App\Services\Coupon\CouponReleaser;
 use App\Services\EventNotifier;
 use App\Services\Payment\GatewayReceiptAudit;
 use App\Services\Payment\PaymentGatewayException;
@@ -919,16 +920,43 @@ class ParticipantController extends Controller
     }
 
     /**
-     * Delete one registration, giving back the capacity it was holding.
+     * Delete one registration, giving back everything it was holding.
      *
-     * Child rows go with it through cascading foreign keys. The two things the
-     * database cannot work out on its own are the counters: seats on the event
-     * and stock on each add-on size. Nothing else in the system decrements
-     * either, so if this did not do it the event would quietly lose capacity
-     * every time an entry was removed, and an add-on size could never be edited
-     * again because stock_taken would stay above the real figure.
+     * Child rows go with it through cascading foreign keys. The THREE things the
+     * database cannot work out on its own are the counters: seats on the event,
+     * stock on each add-on size, and the uses of any coupon the entry spent.
+     * Nothing else in the system gives any of them back, so if this did not do it
+     * the event would quietly lose capacity every time an entry was removed, an
+     * add-on size could never be edited again because stock_taken would stay above
+     * the real figure, and a coupon would read as spent on an entry that no longer
+     * exists.
+     *
+     * WHY THE COUPON RELEASE IS HERE RATHER THAN ON A MODEL EVENT
+     *
+     * It was tempting to hang it off EventRegistration's `deleting` event, which
+     * would catch every deletion including ones not yet written. It is in the delete
+     * path instead, for two reasons and the first is the one that decides it:
+     *
+     *   THE RELEASE IS ONLY SAFE BESIDE THE MONEY GUARD. Handing a use back is
+     *   correct precisely because hasMoneyReceived() below refuses to delete an
+     *   entry that took money — so nobody ever benefited from the discount. A model
+     *   event fires for ANY delete() anywhere, including some future path that has
+     *   not checked that guard, and would then release a use that really did buy
+     *   somebody a cheaper place. Keeping the two in one method keeps the reasoning
+     *   true by construction rather than by remembering.
+     *
+     *   IT IS NOT THE GUARANTEE IT LOOKS LIKE. Eloquent model events do not fire for
+     *   a mass delete or for a database-level cascade, so a hook would catch exactly
+     *   the $model->delete() calls an explicit call already covers — and this is the
+     *   only place in the application that deletes a registration at all.
+     *
+     * A shop order is the other thing a coupon can be spent on, and it has NO delete
+     * path: there is no route, no controller action and no admin screen that removes
+     * one, because an order is a financial record. If one is ever added it has to
+     * call the releaser the same way, which is why CouponReleaser is a service rather
+     * than a private method here.
      */
-    public function destroy(EventRegistration $registration)
+    public function destroy(EventRegistration $registration, CouponReleaser $releaser)
     {
         // A settled payment is a financial record, and the money still sits with
         // the gateway. Refunding and cancelling is the honest path; deleting
@@ -992,7 +1020,7 @@ class ParticipantController extends Controller
          */
         $seatsHeld = $registration->event?->seatsForEntry($headCount) ?? 0;
 
-        DB::transaction(function () use ($registration, $seatsHeld) {
+        $released = DB::transaction(function () use ($registration, $seatsHeld, $releaser) {
             // Locked and clamped the same way the public form takes them, so two
             // administrators deleting at once cannot push the count negative.
             if ($registration->event_id !== null && $seatsHeld > 0) {
@@ -1024,7 +1052,24 @@ class ParticipantController extends Controller
                 }
             }
 
+            /*
+             | The coupon uses, given back before the row goes.
+             |
+             | Before, because the ledger rows are found by registration id and the
+             | foreign key is nullOnDelete — after the delete there would be nothing
+             | left to say which rows belonged to this entry. Inside this
+             | transaction, so the release and the deletion commit or roll back
+             | together: a rolled-back delete must not leave a batch holding uses
+             | back for an entry that is still standing.
+             |
+             | Safe to do unconditionally because of the guard at the top of this
+             | method. See the class note above.
+             */
+            $given = $releaser->releaseForRegistration($registration);
+
             $registration->delete();
+
+            return $given;
         });
 
         // After the commit: a file cannot be brought back if the transaction
@@ -1051,16 +1096,47 @@ class ParticipantController extends Controller
             ),
         );
 
+        // Its own line per batch, after the commit. A use reappearing in a cap is as
+        // confusing as one disappearing, so the trail says which coupon got what back.
+        $releaser->log($released, $reference);
+
         return redirect()
             ->route('admin.event.participants')
             ->with('status', sprintf(
-                'Registration %s deleted. %d %s released back to the event.',
+                'Registration %s deleted. %d %s released back to the event.%s',
                 $reference,
                 $seatsHeld,
                 $seatsHeld === 1
                     ? $registration->event?->seatUnit() ?? 'place'
                     : $registration->event?->seatUnitPlural() ?? 'places',
+                $this->couponReleaseNote($released),
             ));
+    }
+
+    /**
+     * What to add to the delete message about coupon uses handed back, if any.
+     *
+     * Said on screen rather than only in the log because the operator is looking at
+     * the batch's remaining count on the next screen along: a number that moved with
+     * no explanation is what sent the owner looking for a bug in the first place.
+     *
+     * @param  array<int, array{coupon: string, uses: int, codes: int, discount: float}>  $released
+     */
+    private function couponReleaseNote(array $released): string
+    {
+        if ($released === []) {
+            return '';
+        }
+
+        return ' '.collect($released)
+            ->map(fn (array $entry) => sprintf(
+                '%d %s of coupon %s %s given back.',
+                $entry['uses'],
+                $entry['uses'] === 1 ? 'use' : 'uses',
+                $entry['coupon'],
+                $entry['uses'] === 1 ? 'was' : 'were',
+            ))
+            ->implode(' ');
     }
 
     /**

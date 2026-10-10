@@ -339,21 +339,33 @@ class RegistrationController extends Controller
             $this->recordAnswers($locked, $saved, $answers);
 
             /*
+             | The roster and the event, handed to the entry rather than left to be
+             | re-read.
+             |
+             | Set HERE, once, immediately after the people are written — not inside
+             | the Wi-Fi branch where it used to live and not by each consumer. Every
+             | step below needs these people, and the alternative is each of them
+             | asking the relation for rows it already has in memory: an extra query
+             | at best, and at worst the wrong answer. loadMissing() does not refresh
+             | a relation that is already loaded, so anything that touched
+             | $registration->participants before this line would have cached an EMPTY
+             | collection and left the coupon claim below counting zero heads — which
+             | would cost every one of these people their name on the redemption
+             | ledger. Nothing touches it today; this is what keeps that from being a
+             | thing a future edit has to know.
+             */
+            $registration->setRelation('participants', $saved);
+            $registration->setRelation('event', $locked);
+
+            /*
              | Wi-Fi logins, when the event offers them.
              |
              | Inside the transaction and immediately after the roster is written, so a
              | credential cannot exist without its participant nor a participant be left
              | without one. Issuing on registration rather than on payment because an
              | event may be free, and then there is no payment to wait for.
-             |
-             | The relation is set by hand first. It was loaded before these rows
-             | existed, so asking for it here would either come back empty or cost
-             | another query for people already in memory.
              */
             if ($locked->offersWifi()) {
-                $registration->setRelation('participants', $saved);
-                $registration->setRelation('event', $locked);
-
                 WifiCredentials::issueFor($registration);
             }
 
