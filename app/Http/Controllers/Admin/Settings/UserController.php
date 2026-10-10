@@ -223,9 +223,23 @@ class UserController extends Controller
         $batches = [];
 
         foreach ($sponsors as $sponsor) {
+            /*
+             | toBase() is load bearing, and this 500'd in production without it.
+             |
+             | get() hands back an Eloquent collection, and Eloquent's map() only
+             | downgrades itself to a plain one when the mapped result CONTAINS
+             | something that is not a model. On an EMPTY result that test is false,
+             | so it stays an Eloquent collection — and then concat() pours strings
+             | into it and unique() calls getKey() on each of them.
+             |
+             | Which meant this blew up for exactly one shape: a sponsorship holding
+             | a shared-code batch and no blocks at all. That is the ordinary case
+             | for a shared coupon, and it is the one the fixtures did not have.
+             */
             $batches[$sponsor->id] = $sponsor->sponsoredBlocks()
                 ->with('coupon:id,name')
                 ->get()
+                ->toBase()
                 ->map(fn ($block) => (string) ($block->coupon?->name ?? ''))
                 ->concat($sponsor->sponsoredSharedBatches()->pluck('name'))
                 ->filter()
