@@ -9,6 +9,8 @@
     @param array  $tabs      slug => ['label' => string, 'icon' => string]
     @param string $activeTab
     @param string $route     route name the tabs link to
+    @param slot   $summary   optional, drawn full width between the heading and the
+                             tab bar, for figures that describe the whole screen
 --}}
 @props([
     'title',
@@ -35,6 +37,18 @@
             <p class="text-sm text-gray-500 mt-1">{{ $description }}</p>
         @endif
     </div>
+
+    {{-- Anything that describes the screen as a whole rather than one tab, drawn
+         above the tab bar and full width.
+
+         Optional, so every existing screen is unchanged. The sponsorship area is
+         what needed it: its four figures are the sponsorship, not any one tab, and
+         repeating them inside each tab is how two of them come to disagree. --}}
+    @isset($summary)
+        <div class="mt-5">
+            {{ $summary }}
+        </div>
+    @endisset
 
     {{-- Tab bar --}}
     @if (count($tabs) > 0)

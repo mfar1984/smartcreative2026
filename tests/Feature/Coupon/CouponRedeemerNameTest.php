@@ -180,7 +180,8 @@ class CouponRedeemerNameTest extends CouponTestCase
             ])],
         ])->assertSessionHasNoErrors();
 
-        $response = $this->actingAs($maju)->get(route('admin.sponsorship.index'));
+        // The Event tab, which is where who used a code is listed.
+        $response = $this->actingAs($maju)->get(route('admin.sponsorship.index', ['tab' => 'event']));
 
         $response->assertOk();
 

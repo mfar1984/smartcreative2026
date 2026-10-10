@@ -45,6 +45,15 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * can reach is what that view can leak. The representative who handed the code out is
  * a different person entirely and lives on CouponHolder, with contact details, because
  * the office does need to trace them.
+ *
+ * `buyer_name` IS THE SAME THING FOR THE SHOP SIDE, under the same rule.
+ *
+ * A shop redemption has no participant: the person who used the code is whoever placed
+ * the order. Their name is copied here for exactly the reason the participant's is —
+ * so the sponsor's screen never has to query shop_orders, which also holds a delivery
+ * address, a phone number, an email and what the order came to. A NAME ONLY. What was
+ * bought is read from the order's items, because a product name is catalogue
+ * information and carries none of that risk.
  */
 class CouponCode extends Model
 {
@@ -57,6 +66,7 @@ class CouponCode extends Model
         'event_participant_id',
         'participant_name',
         'shop_order_id',
+        'buyer_name',
     ];
 
     protected function casts(): array
@@ -124,6 +134,20 @@ class CouponCode extends Model
     public function redeemedAtLabel(): string
     {
         return $this->redeemed_at === null ? '—' : LocalTime::format($this->redeemed_at);
+    }
+
+    /**
+     * Who used this, by name, on whichever side of the system it was used.
+     *
+     * One method rather than two columns read in two places, because "who used it" is
+     * one question and the answer is one name: the participant on an event, the buyer
+     * on a shop order. Null when neither is known — a row written before the columns
+     * existed, or a group use that covers no one head in particular — so the caller
+     * decides how that reads on its own screen.
+     */
+    public function redeemerName(): ?string
+    {
+        return $this->participant_name ?? $this->buyer_name;
     }
 
     /**

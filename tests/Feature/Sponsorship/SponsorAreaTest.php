@@ -333,7 +333,7 @@ class SponsorAreaTest extends CouponTestCase
         [$maju, , , , $theirs] = $this->scenario();
 
         $response = $this->actingAs($maju)
-            ->get(route('admin.sponsorship.index', ['block' => $theirs->id]));
+            ->get(route('admin.sponsorship.index', ['tab' => 'event', 'block' => $theirs->id]));
 
         // Not a 404 on purpose: the id is simply not one of theirs, so the screen
         // falls back to everything this sponsor funded rather than reaching across.
@@ -348,7 +348,7 @@ class SponsorAreaTest extends CouponTestCase
         [$maju, , $siti] = $this->scenario();
 
         $response = $this->actingAs($maju)
-            ->get(route('admin.sponsorship.index', ['block' => $siti->id]));
+            ->get(route('admin.sponsorship.index', ['tab' => 'event', 'block' => $siti->id]));
 
         $response->assertOk();
         $response->assertSee('Aminah Binti Yusof');
@@ -363,7 +363,7 @@ class SponsorAreaTest extends CouponTestCase
     {
         [$maju] = $this->scenario();
 
-        $response = $this->actingAs($maju)->get(route('admin.sponsorship.index'));
+        $response = $this->actingAs($maju)->get(route('admin.sponsorship.index', ['tab' => 'event']));
 
         $response->assertOk();
 
@@ -386,7 +386,7 @@ class SponsorAreaTest extends CouponTestCase
     {
         [$maju, , $siti] = $this->scenario();
 
-        $response = $this->actingAs($maju)->get(route('admin.sponsorship.index'));
+        $response = $this->actingAs($maju)->get(route('admin.sponsorship.index', ['tab' => 'event']));
 
         $response->assertOk();
 
@@ -407,7 +407,7 @@ class SponsorAreaTest extends CouponTestCase
         try {
             [$maju] = $this->scenario();
 
-            $response = $this->actingAs($maju)->get(route('admin.sponsorship.index'));
+            $response = $this->actingAs($maju)->get(route('admin.sponsorship.index', ['tab' => 'event']));
 
             $response->assertOk();
             $response->assertSee('11 Mar 2026');
@@ -452,7 +452,7 @@ class SponsorAreaTest extends CouponTestCase
         [$maju] = $this->scenario();
 
         $response = $this->actingAs($maju)
-            ->get(route('admin.sponsorship.export', ['set' => 'uses']));
+            ->get(route('admin.sponsorship.export', ['set' => 'event']));
 
         $response->assertOk();
 
@@ -521,28 +521,159 @@ class SponsorAreaTest extends CouponTestCase
 
     public function test_a_staff_account_without_the_area_permission_is_refused_it(): void
     {
-        // Everything a coupon administrator holds, and not the sponsor's own area.
+        // Everything a coupon administrator holds, and neither the sponsor's own
+        // area nor the office's reading of one.
         $this->actingAs($this->couponAdmin())
             ->get(route('admin.sponsorship.index'))
             ->assertForbidden();
     }
 
+    /* ---------------------------------------------------------------------
+     | The ?sponsor= id, and who may pass one
+     * ------------------------------------------------------------------ */
+
     /**
-     * A super admin holds every permission, so the menu item is there for them too.
+     * REFUSED, not quietly narrowed to their own.
      *
-     * It shows their own sponsorship, which is nothing, and that is the honest
-     * answer rather than an error page: the staff view of every sponsor is the
-     * Sponsorship tab on User Management.
+     * Silently ignoring the id would hide the attempt, and the screen would read as
+     * though the id had been honoured. A 403 is the honest answer: naming a
+     * sponsorship is a staff act and a sponsorship account is never staff.
      */
-    public function test_the_area_opens_empty_for_a_super_admin_rather_than_breaking(): void
+    public function test_a_sponsor_passing_another_sponsorships_id_is_refused(): void
+    {
+        [$maju, $other] = $this->scenario();
+
+        $this->actingAs($maju)
+            ->get(route('admin.sponsorship.index', ['sponsor' => $other->id]))
+            ->assertForbidden();
+
+        // The export is the same screen as a file, so it is the same gate.
+        $this->actingAs($maju)
+            ->get(route('admin.sponsorship.export', ['set' => 'event', 'sponsor' => $other->id]))
+            ->assertForbidden();
+    }
+
+    /** Even their OWN id, because passing one at all is the thing being refused. */
+    public function test_a_sponsor_passing_their_own_id_is_refused_as_well(): void
+    {
+        [$maju] = $this->scenario();
+
+        $this->actingAs($maju)
+            ->get(route('admin.sponsorship.index', ['sponsor' => $maju->id]))
+            ->assertForbidden();
+
+        // And with no id they still see their own, exactly as before.
+        $this->actingAs($maju)
+            ->get(route('admin.sponsorship.index'))
+            ->assertOk()
+            ->assertSee('Siti Representative');
+    }
+
+    public function test_a_super_admin_can_open_any_sponsorship_by_id(): void
+    {
+        [$maju, $other] = $this->scenario();
+
+        $response = $this->actingAs($this->admin())
+            ->get(route('admin.sponsorship.index', ['sponsor' => $maju->id]));
+
+        $response->assertOk();
+        $response->assertSee($maju->name);
+        $response->assertSee('Siti Representative');
+        $response->assertSee('RM 500.00');
+
+        // One sponsorship at a time: opening Maju does not show the other's rows.
+        $response->assertDontSee('Rosli Of The Other NGO');
+
+        $theirs = $this->actingAs($this->admin())
+            ->get(route('admin.sponsorship.index', ['sponsor' => $other->id]));
+
+        $theirs->assertOk();
+        $theirs->assertSee('Rosli Of The Other NGO');
+        $theirs->assertDontSee('Siti Representative');
+    }
+
+    /**
+     * The office's own permission, reused rather than reinvented.
+     *
+     * sponsors.view is what the Sponsorship tab on User Management is already behind,
+     * so there is one answer to "who may read somebody else's sponsorship".
+     */
+    public function test_a_staff_account_holding_the_sponsorship_view_permission_can_open_one(): void
+    {
+        [$maju] = $this->scenario();
+
+        $operator = $this->userWith(['sponsors.view']);
+
+        $response = $this->actingAs($operator)
+            ->get(route('admin.sponsorship.index', ['sponsor' => $maju->id]));
+
+        $response->assertOk();
+        $response->assertSee('Siti Representative');
+
+        // With nobody named they get the list, which is somewhere useful.
+        $this->actingAs($operator)
+            ->get(route('admin.sponsorship.index'))
+            ->assertOk()
+            ->assertSee($maju->name);
+    }
+
+    public function test_a_staff_account_without_that_permission_cannot_open_one_by_url(): void
+    {
+        [$maju] = $this->scenario();
+
+        // Every coupon permission there is, and not sponsors.view.
+        $this->actingAs($this->couponAdmin())
+            ->get(route('admin.sponsorship.index', ['sponsor' => $maju->id]))
+            ->assertForbidden();
+
+        $this->actingAs($this->couponAdmin())
+            ->get(route('admin.sponsorship.export', ['set' => 'blocks', 'sponsor' => $maju->id]))
+            ->assertForbidden();
+    }
+
+    public function test_an_id_that_is_not_a_sponsorship_account_is_a_404(): void
     {
         $this->scenario();
+
+        $admin = $this->admin();
+
+        // An administrator account, which funds nothing and is not a sponsorship.
+        $this->actingAs($admin)
+            ->get(route('admin.sponsorship.index', ['sponsor' => $admin->id]))
+            ->assertNotFound();
+
+        $this->actingAs($admin)
+            ->get(route('admin.sponsorship.index', ['sponsor' => 99999]))
+            ->assertNotFound();
+    }
+
+    /**
+     * A super admin naming nobody gets the LIST, not their own empty figures.
+     *
+     * This used to open on their own sponsorship, which is nothing, and the owner's
+     * complaint was exactly that: "sepatutnya super admin akan nampak semua". A
+     * staff account funds nothing, so four zeroes above an empty table is an honest
+     * answer to a question nobody asked. The list is the useful one.
+     */
+    public function test_a_super_admin_naming_nobody_lands_on_the_list_of_sponsorships(): void
+    {
+        [$maju, $other] = $this->scenario();
 
         $response = $this->actingAs($this->admin())->get(route('admin.sponsorship.index'));
 
         $response->assertOk();
-        $response->assertSee('No coupon blocks have been tagged to this sponsorship yet');
-        $response->assertDontSee('Siti Representative');
+
+        // Every sponsorship there is, with what each one really gave away.
+        $response->assertSee($maju->name);
+        $response->assertSee($other->name);
+        $response->assertSee('RM 500.00');
+        $response->assertSee('RM 900.00');
+
+        // And a way into each one.
+        $response->assertSee(route('admin.sponsorship.index', ['sponsor' => $maju->id]), false);
+
+        // Not their own empty area, which is what it used to show.
+        $response->assertDontSee('No coupon blocks have been tagged to this sponsorship yet');
     }
 
     /* ---------------------------------------------------------------------

@@ -238,18 +238,31 @@ Route::prefix('admin')->name('admin.')->group(function () {
 
         /*
         |----------------------------------------------------------------------
-        | Sponsorship — the sponsor's OWN area
+        | Sponsorship — one sponsorship, read only
         |----------------------------------------------------------------------
         |
-        | Two read-only routes, on their own permission, which the sponsor role holds
-        | and no staff role is given. A sponsor lands here after signing in and the
-        | sidebar shows them this and nothing else.
+        | Two read-only routes, open to either of two audiences and to nobody else:
         |
-        | THERE IS NO SPONSOR ID IN EITHER PATH, and that is the guard rather than a
-        | convenience: both read $request->user()->sponsoredBlocks() and
-        | ->sponsoredSharedBatches(), so another sponsor's figures are not addressable
-        | from here — there is no number to change. The one id the screen does take,
-        | the block filter, is resolved against the signed-in sponsor's own blocks.
+        |   sponsorship.portal.view  the sponsorship account's own area. The sponsor
+        |                            role holds it and no staff role is given it. A
+        |                            sponsor lands here after signing in and the
+        |                            sidebar shows them this and nothing else.
+        |   sponsors.view            the office, reading a sponsorship on the account
+        |                            holder's behalf. Deliberately the SAME permission
+        |                            the Sponsorship tab on User Management is behind,
+        |                            reused rather than reinvented, so there is one
+        |                            answer to "who may read somebody else's".
+        |
+        | NO ID IN THE PATH MEANS "MY OWN", which is the only thing a sponsorship
+        | account can ever be given: every query starts from the resolved account's
+        | sponsoredBlocks() and sponsoredSharedBatches().
+        |
+        | The ?sponsor= id is accepted from STAFF ONLY and is refused outright for a
+        | sponsorship account — see SponsorAreaController::sponsorship(), which is the
+        | whole of that gate in one place. Staff who name nobody get the list of
+        | sponsorships rather than their own empty figures. The other id either
+        | audience may pass, the block filter, is resolved against the sponsorship
+        | being read.
         |
         | Separate from the staff Coupon screens on purpose. Scoping those would mean
         | auditing every query in Coupon, Event and Shop, where one missed query is a
@@ -258,13 +271,13 @@ Route::prefix('admin')->name('admin.')->group(function () {
         */
         Route::prefix('sponsorship')->name('sponsorship.')->group(function () {
             Route::get('/', [SponsorAreaController::class, 'index'])
-                ->middleware('permission:sponsorship.portal.view')
+                ->middleware('permission:sponsorship.portal.view|sponsors.view')
                 ->name('index');
 
             // The same rows as a file, so the same permission — and an activity line,
             // because a list of names is a disclosure even when it is only names.
             Route::get('export', [SponsorAreaController::class, 'exportCsv'])
-                ->middleware('permission:sponsorship.portal.view')
+                ->middleware('permission:sponsorship.portal.view|sponsors.view')
                 ->name('export');
         });
 

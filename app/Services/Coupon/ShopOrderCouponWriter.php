@@ -58,6 +58,10 @@ class ShopOrderCouponWriter
             kind: Coupon::KIND_SHOP,
             charge: (float) $order->items_total,
             order: $order,
+
+            // Copied onto the ledger row, so the sponsor's screen can say who used
+            // the code without ever querying this order again. A name only.
+            buyerName: (string) $order->customer_name,
         );
 
         if ($outcome->succeeded()) {

@@ -271,9 +271,12 @@ class CouponBatchSponsorshipTest extends CouponTestCase
         $response->assertSee('One shared code — no block');
         $response->assertDontSee('Not assigned');
 
-        // And the people who used it are on the screen, by name only.
-        $response->assertSee('Aminah Binti Yusof');
-        $response->assertSee('Hassan Bin Omar');
+        // And the people who used it are on the Event tab, by name only.
+        $uses = $this->actingAs($maju)->get(route('admin.sponsorship.index', ['tab' => 'event']));
+
+        $uses->assertOk();
+        $uses->assertSee('Aminah Binti Yusof');
+        $uses->assertSee('Hassan Bin Omar');
 
         // The figures agree with the screen.
         $figures = CouponSponsorship::forSponsor($maju->fresh());

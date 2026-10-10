@@ -301,13 +301,14 @@ class CouponReleaseOnDeleteTest extends CouponTestCase
 
         $this->writer()->applyCode($registration->fresh(['participants']), $this->codeFrom($block));
 
-        $this->actingAs($maju)->get(route('admin.sponsorship.index'))
+        // The Event tab, which is where who used a code is listed now.
+        $this->actingAs($maju)->get(route('admin.sponsorship.index', ['tab' => 'event']))
             ->assertOk()
             ->assertSee('Aminah Binti Yusof');
 
         $this->deleteEntry($registration);
 
-        $this->actingAs($maju)->get(route('admin.sponsorship.index'))
+        $this->actingAs($maju)->get(route('admin.sponsorship.index', ['tab' => 'event']))
             ->assertOk()
             ->assertDontSee('Aminah Binti Yusof');
     }

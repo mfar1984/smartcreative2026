@@ -40,6 +40,7 @@ class SponsorBlockRow
         public readonly ?int $blockId,
         public readonly int $couponId,
         public readonly string $couponName,
+        public readonly string $couponKind,
         public readonly string $discountLabel,
         public readonly ?string $holder,
         public readonly ?Carbon $issuedAt,
@@ -64,6 +65,11 @@ class SponsorBlockRow
             blockId: (int) $block->id,
             couponId: (int) $block->coupon_id,
             couponName: (string) ($block->coupon?->name ?? ''),
+
+            // Event or shop, which is what says WHICH usage tab this block's uses are
+            // listed on. A batch is one or the other, never both.
+            couponKind: (string) ($block->coupon?->kind ?? Coupon::KIND_EVENT),
+
             discountLabel: (string) $block->coupon?->discountLabel(),
             holder: $block->holderLabel(),
             issuedAt: $block->issued_at,
@@ -93,6 +99,7 @@ class SponsorBlockRow
             blockId: null,
             couponId: (int) $coupon->id,
             couponName: (string) $coupon->name,
+            couponKind: (string) $coupon->kind,
             discountLabel: $coupon->discountLabel(),
             holder: null,
             issuedAt: $coupon->created_at,
@@ -118,6 +125,12 @@ class SponsorBlockRow
     public function hasHolder(): bool
     {
         return $this->holder !== null && $this->holder !== CouponHolderIdentity::UNASSIGNED;
+    }
+
+    /** Which usage tab this row's uses are listed on: shop, or else event. */
+    public function usageTab(): string
+    {
+        return $this->couponKind === Coupon::KIND_SHOP ? 'shop' : 'event';
     }
 
     /** Where the row stands, in one word, for a badge. */

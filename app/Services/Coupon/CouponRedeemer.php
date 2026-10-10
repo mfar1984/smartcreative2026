@@ -75,6 +75,12 @@ class CouponRedeemer
      * @param  CouponIssuedCode|null  $issued  in unique mode, the individual code that
      *                                         was typed. It says which allocation the
      *                                         uses come out of.
+     * @param  string|null  $buyerName  who placed the shop order, by NAME, recorded on
+     *                                  the ledger row for the same reason the
+     *                                  participant's name is. Passed in rather than
+     *                                  read off the order because at checkout there is
+     *                                  no order yet: the discount is part of the total
+     *                                  the row is created with.
      */
     public function claim(
         Coupon $coupon,
@@ -83,6 +89,7 @@ class CouponRedeemer
         ?EventRegistration $registration = null,
         ?ShopOrder $order = null,
         ?CouponIssuedCode $issued = null,
+        ?string $buyerName = null,
     ): CouponOutcome {
         if (round($charge, 2) <= 0) {
             return CouponOutcome::failed(CouponOutcome::NOTHING_TO_DISCOUNT);
@@ -97,7 +104,9 @@ class CouponRedeemer
         $uses = max(1, $times);
         $people = $this->peopleCovered($registration, $uses);
 
-        $outcome = DB::transaction(function () use ($coupon, $discount, $uses, $people, $registration, $order, $issued) {
+        $buyerName = trim((string) $buyerName) === '' ? null : trim((string) $buyerName);
+
+        $outcome = DB::transaction(function () use ($coupon, $discount, $uses, $people, $registration, $order, $issued, $buyerName) {
             /*
              | The batch itself, re-read under a lock.
              |
@@ -198,7 +207,7 @@ class CouponRedeemer
                 ? ($spending->first()?->code ?? $issued?->code ?? $locked->name)
                 : $locked->name;
 
-            $rows = $this->writeLedger($locked, $typedLabel, $discount, $uses, $people, $registration, $order);
+            $rows = $this->writeLedger($locked, $typedLabel, $discount, $uses, $people, $registration, $order, $buyerName);
 
             /*
              | The stock, marked spent in the same transaction and paired one to one
@@ -237,6 +246,7 @@ class CouponRedeemer
         int $times = 1,
         ?EventRegistration $registration = null,
         ?ShopOrder $order = null,
+        ?string $buyerName = null,
     ): CouponOutcome {
         $typed = Str::upper(trim($typed));
 
@@ -254,7 +264,7 @@ class CouponRedeemer
             return CouponOutcome::failed(CouponOutcome::WRONG_KIND);
         }
 
-        return $this->claim($batch, $charge, $times, $registration, $order, $issued);
+        return $this->claim($batch, $charge, $times, $registration, $order, $issued, $buyerName);
     }
 
     /**
@@ -364,6 +374,7 @@ class CouponRedeemer
         Collection $people,
         ?EventRegistration $registration,
         ?ShopOrder $order,
+        ?string $buyerName = null,
     ): array {
         $shares = $this->split($discount, $uses);
         $now = now();
@@ -385,6 +396,12 @@ class CouponRedeemer
                 'participant_name' => $person?->full_name,
 
                 'shop_order_id' => $order?->id,
+
+                // The BUYER, by name only, for the same reason and under the same
+                // rule: a sponsor-facing view reads these rows, and an order also
+                // carries an address, a phone and a total that are none of its
+                // business.
+                'buyer_name' => $buyerName,
             ]);
         }
 
