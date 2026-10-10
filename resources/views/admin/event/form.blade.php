@@ -1303,39 +1303,75 @@
         const field = document.getElementById('description');
         const form = document.getElementById('event-form');
 
-        if (!holder || !field || !form || typeof window.Quill === 'undefined') {
-            // Quill unavailable (e.g. a stale cached bundle). Fall back to the
-            // plain textarea so the field is never invisible, and drop the empty
-            // editor holder so it leaves no gap.
-            if (field) {
-                field.classList.remove('hidden');
-                field.setAttribute('rows', '4');
-                field.classList.add(...'{{ $input }}'.split(' ').filter(Boolean), 'resize-y');
-            }
-            if (holder) {
-                holder.remove();
-            }
+        if (!holder || !field || !form) {
             return;
         }
 
-        const quill = new window.Quill(holder, {
-            theme: 'snow',
-            modules: {
-                toolbar: [
-                    ['bold', 'italic', 'underline'],
-                    [{ list: 'ordered' }, { list: 'bullet' }],
-                    ['link'],
-                    ['clean'],
-                ],
-            },
-        });
+        // Show the plain textarea and drop the editor holder. Used only if Quill
+        // never arrives, so the field is never invisible.
+        function fallbackToTextarea() {
+            field.classList.remove('hidden');
+            field.setAttribute('rows', '4');
+            field.classList.add(...'{{ $input }}'.split(' ').filter(Boolean), 'resize-y');
+            holder.remove();
+        }
 
-        // Seed from the real field (old() on redraw, or the saved value on edit).
-        quill.clipboard.dangerouslyPasteHTML(field.value);
+        function boot() {
+            const quill = new window.Quill(holder, {
+                theme: 'snow',
+                modules: {
+                    toolbar: [
+                        ['bold', 'italic', 'underline'],
+                        [{ list: 'ordered' }, { list: 'bullet' }],
+                        ['link'],
+                        ['clean'],
+                    ],
+                },
+            });
 
-        form.addEventListener('submit', function () {
-            // An empty editor still reports a stray <p><br></p>; store nothing then.
-            field.value = quill.getText().trim() === '' ? '' : quill.root.innerHTML;
+            // Seed from the real field (old() on redraw, or the saved value on edit).
+            quill.clipboard.dangerouslyPasteHTML(field.value);
+
+            form.addEventListener('submit', function () {
+                // An empty editor still reports a stray <p><br></p>; store nothing then.
+                field.value = quill.getText().trim() === '' ? '' : quill.root.innerHTML;
+            });
+        }
+
+        // app.js is loaded as a deferred ES module by @vite, so window.Quill may
+        // not exist yet when this inline script runs. Wait for it rather than
+        // falling back immediately; only give up once the page has fully loaded.
+        if (typeof window.Quill !== 'undefined') {
+            boot();
+            return;
+        }
+
+        let settled = false;
+        const timer = setInterval(function () {
+            if (settled) {
+                return;
+            }
+            if (typeof window.Quill !== 'undefined') {
+                settled = true;
+                clearInterval(timer);
+                boot();
+            }
+        }, 50);
+
+        window.addEventListener('load', function () {
+            // One last check after everything, including modules, has loaded.
+            setTimeout(function () {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                clearInterval(timer);
+                if (typeof window.Quill !== 'undefined') {
+                    boot();
+                } else {
+                    fallbackToTextarea();
+                }
+            }, 100);
         });
     })();
 </script>
