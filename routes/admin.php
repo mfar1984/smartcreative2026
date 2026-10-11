@@ -901,6 +901,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('matches.score.read-awards');
 
             /*
+            | And the game's own per-player result screen, which is the one that fills
+            | in the most: a block per squad carrying its rank and its players, so one
+            | image gives the placement, the kills, every player's eliminations and the
+            | chicken dinner. Same permission, same throttle, same promise.
+            */
+            Route::post('matches/{match}/score/read-players', [ScoreSheetController::class, 'readPlayers'])
+                ->middleware(['permission:tournaments.matches.score', 'throttle:20,1'])
+                ->name('matches.score.read-players');
+
+            /*
             | The map a fixture is on and when it starts. Behind the draw permission
             | rather than the scoring one: this decides what the fixture is, not what
             | its result was, which is the same question generating a draw answers.

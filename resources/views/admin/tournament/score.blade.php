@@ -42,6 +42,23 @@
         $readsAwardSheet = $canScore && $hasAwards && $readsAwards;
 
         /*
+         | The three screenshot readers, and what each of them needs on this screen.
+         |
+         | The results table reader needs a table of positions and counts to fill in,
+         | which is what $sheetFields answers.
+         |
+         | The per-player reader needs both halves: the same table, because a block's
+         | rank is a placement and its eliminations added up are a kill count, and the
+         | per-squad player panels, because that is where each player's own figure
+         | goes. Slot mode has no panels, so $tracksPlayers is the right question.
+         */
+        $readsSheet = $canScore && $sheetFields !== null;
+        $readsPlayerSheet = $readsSheet && $tracksPlayers;
+
+        // One set of review-panel helpers is shipped for whichever readers are on.
+        $readsAnything = $readsSheet || $readsAwardSheet || $readsPlayerSheet;
+
+        /*
          | Marks only one competitor in the fixture may hold, and who currently holds
          | each of them.
          |
@@ -116,71 +133,47 @@
                  picked here is posted with the result, and above, so the rows it fills
                  in are the ones directly below. Only drawn where the profile has a
                  table of positions to fill, which is what $sheetFields answers. --}}
-            @if ($canScore && $sheetFields !== null)
-                {{-- The picker, kept out of the form so no image chosen here is ever
-                     posted with the result. Hidden because the control the operator
-                     presses is Detect Image AI in the Result panel's own header, beside
-                     the table it fills in; this is only what that button opens. --}}
-                <div data-sheet class="hidden"
-                     data-sheet-url="{{ route('admin.tournaments.matches.score.read', $match) }}">
-                    <label for="sheet-images" class="sr-only">Results table screenshots</label>
-                    <input type="file" id="sheet-images" accept="image/jpeg,image/png,image/webp" multiple>
-                </div>
+            @if ($readsSheet)
+                <x-admin.score-review
+                    prefix="sheet"
+                    id="sheet-dialog"
+                    :url="route('admin.tournaments.matches.score.read', $match)"
+                    picker="sheet-images"
+                    pick="Results table screenshots"
+                    :about="$match->label() . ' · check every row against the image, then Apply. Untick anything you would rather type yourself.'"
+                    :note="'Apply only types these figures into the form. Nothing is saved until you press ' . ($match->isSettled() ? 'Correct Result' : 'Save Result') . '.'">
 
-                {{-- The review step, and the reason this feature is allowed to exist.
-                     Every row is shown with what is on the form now beside what was
-                     read, and a row the matcher was not sure of arrives unticked. --}}
-                <div id="sheet-dialog"
-                     class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/60 p-4"
-                     role="dialog" aria-modal="true" aria-labelledby="sheet-dialog-title">
+                    <div data-sheet-rows class="space-y-2"></div>
+                    <div data-sheet-clashes class="hidden mt-5"></div>
+                    <div data-sheet-unmatched class="hidden mt-5"></div>
+                    <div data-sheet-uncovered class="hidden mt-5"></div>
+                </x-admin.score-review>
+            @endif
 
-                    <div class="w-full max-w-3xl rounded-xl bg-white shadow-xl overflow-hidden max-h-full flex flex-col">
-                        <div class="flex items-start justify-between gap-4 px-5 py-4 border-b border-gray-200">
-                            <div>
-                                <h2 id="sheet-dialog-title" class="text-base font-bold text-gray-900">
-                                    What the screenshot says
-                                </h2>
-                                <p class="text-sm text-gray-500 mt-0.5">
-                                    {{ $match->label() }} &middot; check every row against the image, then
-                                    Apply. Untick anything you would rather type yourself.
-                                </p>
-                            </div>
+            {{-- ===== Read the per-player result screen =====
+                 The game's own result list: a block per squad with a rank number and
+                 its players, each with an elimination count. One image gives the
+                 placement, the kill count, every player's own figure and the chicken
+                 dinner, which is the whole of this form for three squads at a time.
 
-                            <button type="button" data-sheet-close
-                                    class="shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
-                                    aria-label="Close">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
+                 Above the form and outside it, for the same two reasons as the reader
+                 above: outside, so no file picked here is posted with the result, and
+                 above, so the rows it fills in are the ones directly below. --}}
+            @if ($readsPlayerSheet)
+                <x-admin.score-review
+                    prefix="player-sheet"
+                    id="player-sheet-dialog"
+                    :url="route('admin.tournaments.matches.score.read-players', $match)"
+                    picker="player-sheet-images"
+                    pick="Per-player result screenshots"
+                    :about="$match->label() . ' · check every squad and every player against the image, then Apply. Untick anything you would rather type yourself.'"
+                    :note="'Apply only types these figures into the form, and never changes who played. Nothing is saved until you press ' . ($match->isSettled() ? 'Correct Result' : 'Save Result') . '.'">
 
-                        <div class="overflow-y-auto px-5 py-4">
-                            <div data-sheet-rows class="space-y-2"></div>
-                            <div data-sheet-clashes class="hidden mt-5"></div>
-                            <div data-sheet-unmatched class="hidden mt-5"></div>
-                            <div data-sheet-uncovered class="hidden mt-5"></div>
-                        </div>
-
-                        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-t border-gray-200 bg-gray-50">
-                            <p class="text-xs text-gray-500 max-w-sm">
-                                Apply only types these figures into the form. Nothing is saved until you
-                                press {{ $match->isSettled() ? 'Correct Result' : 'Save Result' }}.
-                            </p>
-
-                            <div class="flex flex-wrap gap-2.5">
-                                <button type="button" data-sheet-close
-                                        class="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
-                                    Cancel
-                                </button>
-                                <button type="button" data-sheet-apply
-                                        class="rounded-lg border border-blue-600 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
-                                    Apply
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    <div data-player-sheet-rows class="space-y-2"></div>
+                    <div data-player-sheet-clashes class="hidden mt-5"></div>
+                    <div data-player-sheet-unmatched class="hidden mt-5"></div>
+                    <div data-player-sheet-uncovered class="hidden mt-5"></div>
+                </x-admin.score-review>
             @endif
 
             {{-- The form is built from the profile's declared inputs. There is no branch
@@ -206,7 +199,7 @@
                          fills in starts. A plain button, never a submit: it opens the
                          picker outside this form and the result is still saved by the
                          button at the bottom. --}}
-                    @if ($canScore && $sheetFields !== null)
+                    @if ($readsSheet)
                         <x-slot:actions>
                             <span data-sheet-status role="status" aria-live="polite"
                                   class="hidden text-xs mr-2"></span>
@@ -217,6 +210,22 @@
                                 <x-admin.icon name="clipboard" class="w-3.5 h-3.5" />
                                 Detect Image AI
                             </button>
+
+                            {{-- The second reader, beside the first because it fills in
+                                 the same table — and more of it. Named for the screen it
+                                 reads rather than for what it does, because the operator
+                                 is choosing between two screenshots in front of them. --}}
+                            @if ($readsPlayerSheet)
+                                <span data-player-sheet-status role="status" aria-live="polite"
+                                      class="hidden text-xs mx-2"></span>
+
+                                <button type="button" data-player-sheet-pick
+                                        title="Read the game's per-player result screen: each squad's rank and every player's eliminations"
+                                        class="ml-1.5 inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <x-admin.icon name="users" class="w-3.5 h-3.5" />
+                                    Detect Image AI (Per Player)
+                                </button>
+                            @endif
                         </x-slot:actions>
                     @endif
 
@@ -423,6 +432,8 @@
                                                                                value="1"
                                                                                @checked($tookPart)
                                                                                data-took-part="{{ $entrantId }}"
+                                                                               data-ledger="{{ $person->id }}"
+                                                                               data-ledger-key="took_part"
                                                                                class="rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
                                                                         <label for="took-{{ $entrantId }}-{{ $person->id }}" class="sr-only">
                                                                             {{ $person->full_name }} took part in this match
@@ -431,7 +442,19 @@
 
                                                                     <td class="px-3 py-2">
                                                                         <span class="text-sm text-gray-900">{{ $person->full_name }}</span>
-                                                                        @if ($person->ign_player_id)
+
+                                                                        {{-- The handle leads, the account id follows in brackets, which is
+                                                                             the shape the pick-a-player dropdown already uses. The id is on
+                                                                             no game screen: an operator checking what the reader matched, or
+                                                                             typing a figure off a result list, has only the nickname to go
+                                                                             by. An entry with no handle on it falls back to the id alone. --}}
+                                                                        @php $handle = trim((string) $person->ign_name); @endphp
+
+                                                                        @if ($handle !== '')
+                                                                            <span class="block text-xs text-gray-400">
+                                                                                {{ $handle }}@if ($person->ign_player_id) ({{ $person->ign_player_id }})@endif
+                                                                            </span>
+                                                                        @elseif ($person->ign_player_id)
                                                                             <span class="block text-xs text-gray-400">IGN {{ $person->ign_player_id }}</span>
                                                                         @endif
                                                                     </td>
@@ -453,7 +476,9 @@
                                                                                    value="{{ old($base . '.' . $pkey, $existing?->input($pkey)) }}"
                                                                                    class="w-20 rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition"
                                                                                    data-score-input
-                                                                                   data-player-sum="{{ $entrantId }}-{{ $pkey }}">
+                                                                                   data-player-sum="{{ $entrantId }}-{{ $pkey }}"
+                                                                                   data-ledger="{{ $person->id }}"
+                                                                                   data-ledger-key="{{ $pkey }}">
                                                                             @error($base . '.' . $pkey)
                                                                                 <span class="block text-xs text-red-600 mt-1">{{ $message }}</span>
                                                                             @enderror
@@ -879,6 +904,21 @@
                     </div>
                 @endif
 
+                {{-- ===== The player ledger, as one field =====
+                     Seventeen squads of five with nine figures each is over a
+                     thousand inputs, and a thousand is where PHP stops reading a
+                     request and DROPS THE REST WITHOUT SAYING SO. The script below
+                     folds the whole ledger into this one field at the moment of
+                     sending and stops the individual inputs from posting, so a full
+                     lobby costs one input variable instead of hundreds.
+
+                     Empty until then, and that is the point: a browser that never
+                     runs the script posts the individual fields and the server reads
+                     them exactly as it always has. --}}
+                @if ($tracksPlayers)
+                    <input type="hidden" name="players_json" id="players-json" value="">
+                @endif
+
                 <input type="hidden" name="_form_complete" value="1">
             </form>
 
@@ -895,62 +935,19 @@
                  level wins. Moving this block above the form would put the panel
                  behind the dialog. --}}
             @if ($readsAwardSheet)
-                <div data-award-sheet class="hidden"
-                     data-award-sheet-url="{{ route('admin.tournaments.matches.score.read-awards', $match) }}">
-                    <label for="award-sheet-images" class="sr-only">Star of the Match screenshots</label>
-                    <input type="file" id="award-sheet-images" accept="image/jpeg,image/png,image/webp" multiple>
-                </div>
+                <x-admin.score-review
+                    prefix="award-sheet"
+                    id="award-sheet-dialog"
+                    :url="route('admin.tournaments.matches.score.read-awards', $match)"
+                    picker="award-sheet-images"
+                    pick="Star of the Match screenshots"
+                    :about="$match->label() . ' · check every card against the image, then Apply. Untick anything you would rather type yourself.'"
+                    :note="'Apply only types these figures into the award cards. Nothing is saved until you press ' . ($match->isSettled() ? 'Correct Result' : 'Save Result') . '.'">
 
-                <div id="award-sheet-dialog"
-                     class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/60 p-4"
-                     role="dialog" aria-modal="true" aria-labelledby="award-sheet-dialog-title">
-
-                    <div class="w-full max-w-3xl rounded-xl bg-white shadow-xl overflow-hidden max-h-full flex flex-col">
-                        <div class="flex items-start justify-between gap-4 px-5 py-4 border-b border-gray-200">
-                            <div>
-                                <h2 id="award-sheet-dialog-title" class="text-base font-bold text-gray-900">
-                                    What the screenshot says
-                                </h2>
-                                <p class="text-sm text-gray-500 mt-0.5">
-                                    {{ $match->label() }} &middot; check every card against the image, then
-                                    Apply. Untick anything you would rather type yourself.
-                                </p>
-                            </div>
-
-                            <button type="button" data-award-sheet-close
-                                    class="shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
-                                    aria-label="Close">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-
-                        <div class="overflow-y-auto px-5 py-4">
-                            <div data-award-sheet-rows class="space-y-2"></div>
-                            <div data-award-sheet-unknown class="hidden mt-5"></div>
-                            <div data-award-sheet-uncovered class="hidden mt-5"></div>
-                        </div>
-
-                        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-t border-gray-200 bg-gray-50">
-                            <p class="text-xs text-gray-500 max-w-sm">
-                                Apply only types these figures into the award cards. Nothing is saved until
-                                you press {{ $match->isSettled() ? 'Correct Result' : 'Save Result' }}.
-                            </p>
-
-                            <div class="flex flex-wrap gap-2.5">
-                                <button type="button" data-award-sheet-close
-                                        class="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
-                                    Cancel
-                                </button>
-                                <button type="button" data-award-sheet-apply
-                                        class="rounded-lg border border-blue-600 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
-                                    Apply
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    <div data-award-sheet-rows class="space-y-2"></div>
+                    <div data-award-sheet-unknown class="hidden mt-5"></div>
+                    <div data-award-sheet-uncovered class="hidden mt-5"></div>
+                </x-admin.score-review>
             @endif
 
             {{-- ============ A squad out of a lobby ============
@@ -1249,25 +1246,65 @@
         });
 
         /*
-         | Leave out the player panels nobody opened.
+         | The player ledger, folded into one field at the moment of sending.
          |
-         | A panel that stayed closed cannot have been changed, and the server keeps
-         | whatever is on file for a player it is not sent. Without this the form grew
-         | past PHP's limit on fields per request and the last squad was cut off.
-         | Done at the moment of sending, so everything above can still read them.
+         | THE CEILING THIS IS ABOUT. Seventeen squads of five with nine figures each,
+         | plus a played box per person, is well over a thousand inputs. A thousand is
+         | PHP's default max_input_vars, and past it the request is TRUNCATED WITHOUT
+         | A WORD: the last squads simply never arrived, and the result saved looked
+         | complete. Closing the panels nobody touched used to keep the form under it,
+         | which worked while panels were opened one at a time — and stopped working
+         | the day the screenshot reader began filling every one of them in.
+         |
+         | So the whole ledger goes as a single JSON field and the individual inputs
+         | are stopped from posting. A full lobby now costs one input variable. It is
+         | not a server setting, because the server is not ours to set.
+         |
+         | THREE THINGS THIS KEEPS. The values stay in the panels, visible and
+         | editable: only the wire format changes. A panel nobody opened is still left
+         | out, exactly as before, so the server keeps what is on file for a player it
+         | was not told about. And the field is serialised BEFORE anything is disabled,
+         | so if this ever threw half way the individual fields would still post and be
+         | read the old way rather than nothing arriving at all.
          */
         const scoreForm = document.getElementById('score-form');
+        const ledger = document.getElementById('players-json');
 
-        if (scoreForm && scoreForm.hasAttribute('data-skip-unopened')) {
+        if (scoreForm && ledger) {
+            const skipUnopened = scoreForm.hasAttribute('data-skip-unopened');
+
             scoreForm.addEventListener('submit', function () {
+                const payload = {};
+
                 scoreForm.querySelectorAll('[data-player-block]').forEach(function (block) {
-                    if (block.dataset.opened === '1') {
+                    if (skipUnopened && block.dataset.opened !== '1') {
                         return;
                     }
 
-                    block.querySelectorAll('input, select, textarea').forEach(function (field) {
-                        field.disabled = true;
+                    const entrant = block.dataset.playerBlock;
+
+                    block.querySelectorAll('[data-ledger]').forEach(function (field) {
+                        const person = field.dataset.ledger;
+
+                        payload[entrant] = payload[entrant] || {};
+                        payload[entrant][person] = payload[entrant][person] || {};
+
+                        // The played box is a decision, so it travels as one either
+                        // way. The hidden 0 that pairs with it on the form exists to
+                        // make an unticked box send something; here there is nothing
+                        // to pair, because the box's own state is what is written.
+                        payload[entrant][person][field.dataset.ledgerKey] = field.type === 'checkbox'
+                            ? (field.checked ? 1 : 0)
+                            : field.value;
                     });
+                });
+
+                ledger.value = JSON.stringify(payload);
+
+                // And now the hundreds of fields it replaces, including the hidden 0
+                // in front of every played box.
+                scoreForm.querySelectorAll('[data-player-block] [name^="players["]').forEach(function (field) {
+                    field.disabled = true;
                 });
             });
         }
@@ -1455,72 +1492,25 @@
 </script>
 @endpush
 
-{{-- Only shipped where the control exists, which is the same gate the button
-     carries: a battle royale lobby, and an operator who may score it. --}}
-@if ($canScore && $sheetFields !== null)
+{{-- ===== What the three readers share =====
+     Shipped once where any of them is on. Three screens, three questions, one
+     promise and one set of furniture: a status line, a panel that shows what was
+     read against what is on the form, a way out of it, and the upload itself.
+
+     Written here rather than in the bundle on purpose: these helpers are about this
+     screen and nothing else, and a page whose dialogs depend on a built asset is a
+     page that breaks differently. Kept to what all three genuinely do the same way —
+     what each one renders and what Apply means is its own business. --}}
+@if ($readsAnything)
 @push('scripts')
 <script>
-    (function () {
+    window.scoreReview = (function () {
         /*
-         | Detect Image AI: read the results table off a photograph.
+         | Every line of every one of these panels is built with textContent.
          |
-         | Three rules this script exists to keep.
-         |
-         | It never saves. The endpoint it calls writes nothing, and Apply types into
-         | the inputs above and stops there. The result still goes through the same
-         | Save button, the same validation and the same transaction as a figure
-         | typed by hand, because a score that arrived on its own is a score nobody
-         | checked.
-         |
-         | It never chooses. A row the server was unsure of, and a row two images
-         | disagreed on, arrive unticked and marked. Rows that matched nothing and
-         | competitors no row covered are listed in full, so what the reader missed
-         | is on the screen rather than merely absent from it.
-         |
-         | And it builds every line of the dialog with textContent. Those names came
-         | out of a model reading somebody's photograph; they are data, and they are
-         | not ours to hand to a browser as markup.
-         |
-         | The player panels are left alone on purpose. Opening every one of them to
-         | fill it in is what pushed this form past PHP's limit on fields per request
-         | once already — see the note on data-skip-unopened above.
+         | Those names and figures came out of a model reading somebody's photograph.
+         | They are data, and they are not ours to hand to a browser as markup.
          */
-        const sheet = document.querySelector('[data-sheet]');
-        const dialog = document.getElementById('sheet-dialog');
-        const trigger = document.querySelector('[data-sheet-pick]');
-
-        if (!sheet || !dialog || !trigger) {
-            return;
-        }
-
-        const picker = document.getElementById('sheet-images');
-        const status = document.querySelector('[data-sheet-status]');
-        const rowsBox = dialog.querySelector('[data-sheet-rows]');
-        const clashBox = dialog.querySelector('[data-sheet-clashes]');
-        const unmatchedBox = dialog.querySelector('[data-sheet-unmatched]');
-        const uncoveredBox = dialog.querySelector('[data-sheet-uncovered]');
-        const tokenField = document.querySelector('#score-form input[name="_token"]');
-
-        let reading = null;
-        let busy = false;
-
-        function say(message, tone) {
-            if (!status) {
-                return;
-            }
-
-            if (!message) {
-                status.className = 'hidden text-xs mr-2';
-                status.textContent = '';
-
-                return;
-            }
-
-            status.textContent = message;
-            status.className = 'text-xs mr-2 font-semibold '
-                + (tone === 'bad' ? 'text-red-600' : 'text-gray-500');
-        }
-
         function el(tag, className, text) {
             const node = document.createElement(tag);
 
@@ -1533,33 +1523,7 @@
             return node;
         }
 
-        function field(entrantId, key) {
-            return document.querySelector('[name="lines[' + entrantId + '][' + key + ']"]');
-        }
-
-        function winnerRadio(entrantId, key) {
-            return document.querySelector('input[name="single[' + key + ']"][value="' + entrantId + '"]');
-        }
-
-        /*
-         | What the form says now, read off the form rather than off the answer.
-         |
-         | The server sends what is recorded, but the operator may have typed since
-         | the page loaded, and the figure Apply would overwrite is the one in the
-         | box in front of them.
-         */
-        function onForm(entrantId, key, recorded) {
-            const input = field(entrantId, key);
-
-            if (input && input.value !== '') {
-                return input.value;
-            }
-
-            return (recorded === null || recorded === undefined || recorded === '')
-                ? 'blank'
-                : String(recorded);
-        }
-
+        // "Kills 4 -> 11": what is on the form now, and what Apply would put there.
         function change(label, from, to) {
             const line = el('span', 'block text-xs text-gray-600 mt-0.5');
 
@@ -1571,6 +1535,8 @@
             return line;
         }
 
+        // A list of things the reader could not place, or hid nothing from. An empty
+        // one hides itself: a heading with nothing under it reads as a fault.
         function block(boxNode, title, tone, lines) {
             boxNode.textContent = '';
 
@@ -1601,6 +1567,244 @@
             });
 
             boxNode.appendChild(list);
+        }
+
+        // The status line beside a Detect Image AI button.
+        function status(node) {
+            return function say(message, tone) {
+                if (!node) {
+                    return;
+                }
+
+                if (!message) {
+                    node.className = 'hidden text-xs mr-2';
+                    node.textContent = '';
+
+                    return;
+                }
+
+                node.textContent = message;
+                node.className = 'text-xs mr-2 font-semibold '
+                    + (tone === 'bad' ? 'text-red-600' : 'text-gray-500');
+            };
+        }
+
+        /**
+         * One review panel: open it, close it, and every way out of it.
+         *
+         * Escape is handled on the CAPTURE phase and stopped there, because a review
+         * panel can be sitting over the dialog it is filling in — the award cards are
+         * exactly that — and closing the panel must not also close what is underneath.
+         * With the panel shut the handler does nothing and Escape belongs to whatever
+         * is under it again.
+         */
+        function panel(options) {
+            const dialog = options.dialog;
+            const prefix = options.prefix;
+
+            function open() {
+                dialog.classList.remove('hidden');
+                dialog.classList.add('flex');
+                dialog.querySelector('[data-' + prefix + '-apply]')?.focus();
+            }
+
+            function close() {
+                dialog.classList.add('hidden');
+                dialog.classList.remove('flex');
+                options.trigger?.focus();
+            }
+
+            dialog.querySelectorAll('[data-' + prefix + '-close]').forEach(function (button) {
+                button.addEventListener('click', close);
+            });
+
+            dialog.addEventListener('click', function (event) {
+                if (event.target === dialog) {
+                    close();
+                }
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' && !dialog.classList.contains('hidden')) {
+                    event.stopImmediatePropagation();
+                    close();
+                }
+            }, true);
+
+            return { open: open, close: close };
+        }
+
+        /**
+         * The button, the file picker and the POST.
+         *
+         * The endpoint it calls writes nothing. It answers with what it read, and what
+         * happens to that answer is the caller's business.
+         */
+        function reader(options) {
+            const trigger = options.trigger;
+            const picker = options.picker;
+            const say = options.say;
+            let busy = false;
+
+            trigger.addEventListener('click', function () {
+                if (!busy) {
+                    picker.click();
+                }
+            });
+
+            picker.addEventListener('change', function () {
+                if (busy || picker.files.length === 0) {
+                    return;
+                }
+
+                const body = new FormData();
+
+                body.append('_token', options.token || '');
+
+                Array.prototype.forEach.call(picker.files, function (file) {
+                    body.append('images[]', file);
+                });
+
+                busy = true;
+                trigger.disabled = true;
+                say(picker.files.length === 1
+                    ? 'Reading the image...'
+                    : 'Reading ' + picker.files.length + ' images...');
+
+                fetch(options.url, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: body,
+                })
+                    .then(function (response) {
+                        return response.json()
+                            .then(function (data) { return { ok: response.ok, data: data }; })
+                            .catch(function () { return { ok: false, data: {} }; });
+                    })
+                    .then(function (result) {
+                        if (result.ok && result.data.ok) {
+                            say('');
+                            options.onRead(result.data);
+
+                            return;
+                        }
+
+                        // A refusal from the reader carries a message; a refusal from
+                        // validation carries errors instead.
+                        const errors = result.data.errors
+                            ? Object.values(result.data.errors).flat().join(' ')
+                            : null;
+
+                        say(result.data.message || errors || 'The screenshot could not be read.', 'bad');
+                    })
+                    .catch(function () {
+                        say('The screenshot could not be read. Type the figures in instead.', 'bad');
+                    })
+                    .finally(function () {
+                        busy = false;
+                        trigger.disabled = false;
+
+                        // Cleared so picking the same file again still fires a change.
+                        picker.value = '';
+                    });
+            });
+        }
+
+        function token() {
+            return document.querySelector('#score-form input[name="_token"]')?.value || '';
+        }
+
+        return {
+            el: el,
+            change: change,
+            block: block,
+            status: status,
+            panel: panel,
+            reader: reader,
+            token: token,
+        };
+    })();
+</script>
+@endpush
+@endif
+
+{{-- Only shipped where the control exists, which is the same gate the button
+     carries: a battle royale lobby, and an operator who may score it. --}}
+@if ($readsSheet)
+@push('scripts')
+<script>
+    (function () {
+        /*
+         | Detect Image AI: read the results table off a photograph.
+         |
+         | Three rules this script exists to keep.
+         |
+         | It never saves. The endpoint it calls writes nothing, and Apply types into
+         | the inputs above and stops there. The result still goes through the same
+         | Save button, the same validation and the same transaction as a figure
+         | typed by hand, because a score that arrived on its own is a score nobody
+         | checked.
+         |
+         | It never chooses. A row the server was unsure of, and a row two images
+         | disagreed on, arrive unticked and marked. Rows that matched nothing and
+         | competitors no row covered are listed in full, so what the reader missed
+         | is on the screen rather than merely absent from it.
+         |
+         | And it builds every line of the dialog with textContent, which is what the
+         | shared el() does. Those names came out of a model reading somebody's
+         | photograph; they are data, and they are not ours to hand over as markup.
+         |
+         | The player panels are left alone on purpose. This read is about the squad
+         | rows; the per-player screen is a different image and a different reader.
+         */
+        const review = window.scoreReview;
+        const sheet = document.querySelector('[data-sheet]');
+        const dialog = document.getElementById('sheet-dialog');
+        const trigger = document.querySelector('[data-sheet-pick]');
+
+        if (!review || !sheet || !dialog || !trigger) {
+            return;
+        }
+
+        const rowsBox = dialog.querySelector('[data-sheet-rows]');
+        const clashBox = dialog.querySelector('[data-sheet-clashes]');
+        const unmatchedBox = dialog.querySelector('[data-sheet-unmatched]');
+        const uncoveredBox = dialog.querySelector('[data-sheet-uncovered]');
+
+        const el = review.el;
+        const change = review.change;
+        const block = review.block;
+        const say = review.status(document.querySelector('[data-sheet-status]'));
+        const dialogue = review.panel({ prefix: 'sheet', dialog: dialog, trigger: trigger });
+
+        let reading = null;
+
+        function field(entrantId, key) {
+            return document.querySelector('[name="lines[' + entrantId + '][' + key + ']"]');
+        }
+
+        function winnerRadio(entrantId, key) {
+            return document.querySelector('input[name="single[' + key + ']"][value="' + entrantId + '"]');
+        }
+
+        /*
+         | What the form says now, read off the form rather than off the answer.
+         |
+         | The server sends what is recorded, but the operator may have typed since
+         | the page loaded, and the figure Apply would overwrite is the one in the
+         | box in front of them.
+         */
+        function onForm(entrantId, key, recorded) {
+            const input = field(entrantId, key);
+
+            if (input && input.value !== '') {
+                return input.value;
+            }
+
+            return (recorded === null || recorded === undefined || recorded === '')
+                ? 'blank'
+                : String(recorded);
         }
 
         function render(data) {
@@ -1704,18 +1908,6 @@
             }));
         }
 
-        function open() {
-            dialog.classList.remove('hidden');
-            dialog.classList.add('flex');
-            dialog.querySelector('[data-sheet-apply]')?.focus();
-        }
-
-        function close() {
-            dialog.classList.add('hidden');
-            dialog.classList.remove('flex');
-            trigger.focus();
-        }
-
         function apply() {
             if (reading === null) {
                 return;
@@ -1763,94 +1955,27 @@
                 filled++;
             });
 
-            close();
+            dialogue.close();
 
             say(filled === 0
                 ? 'Nothing was filled in.'
                 : filled + (filled === 1 ? ' row' : ' rows') + ' filled in. Nothing is saved until you press Save.');
         }
 
-        trigger.addEventListener('click', function () {
-            if (!busy) {
-                picker.click();
-            }
-        });
-
-        picker.addEventListener('change', function () {
-            if (busy || picker.files.length === 0) {
-                return;
-            }
-
-            const body = new FormData();
-
-            body.append('_token', tokenField ? tokenField.value : '');
-
-            Array.prototype.forEach.call(picker.files, function (file) {
-                body.append('images[]', file);
-            });
-
-            busy = true;
-            trigger.disabled = true;
-            say(picker.files.length === 1 ? 'Reading the image...' : 'Reading ' + picker.files.length + ' images...');
-
-            fetch(sheet.dataset.sheetUrl, {
-                method: 'POST',
-                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                credentials: 'same-origin',
-                body: body,
-            })
-                .then(function (response) {
-                    return response.json()
-                        .then(function (data) { return { ok: response.ok, data: data }; })
-                        .catch(function () { return { ok: false, data: {} }; });
-                })
-                .then(function (result) {
-                    if (result.ok && result.data.ok) {
-                        reading = result.data;
-                        render(reading);
-                        say('');
-                        open();
-
-                        return;
-                    }
-
-                    // A refusal from the reader carries a message; a refusal from
-                    // validation carries errors instead.
-                    const errors = result.data.errors
-                        ? Object.values(result.data.errors).flat().join(' ')
-                        : null;
-
-                    say(result.data.message || errors || 'The screenshot could not be read.', 'bad');
-                })
-                .catch(function () {
-                    say('The screenshot could not be read. Type the figures in instead.', 'bad');
-                })
-                .finally(function () {
-                    busy = false;
-                    trigger.disabled = false;
-
-                    // Cleared so picking the same file again still fires a change.
-                    picker.value = '';
-                });
+        review.reader({
+            trigger: trigger,
+            picker: document.getElementById('sheet-images'),
+            url: sheet.dataset.sheetUrl,
+            token: review.token(),
+            say: say,
+            onRead: function (data) {
+                reading = data;
+                render(data);
+                dialogue.open();
+            },
         });
 
         dialog.querySelector('[data-sheet-apply]')?.addEventListener('click', apply);
-
-        dialog.querySelectorAll('[data-sheet-close]').forEach(function (button) {
-            button.addEventListener('click', close);
-        });
-
-        dialog.addEventListener('click', function (event) {
-            if (event.target === dialog) {
-                close();
-            }
-        });
-
-        document.addEventListener('keydown', function (event) {
-            if (event.key === 'Escape' && !dialog.classList.contains('hidden')) {
-                close();
-            }
-        });
     })();
 </script>
 @endpush
@@ -1873,98 +1998,29 @@
          | every line of the dialog is built with textContent, because those nicknames
          | came out of a model reading somebody's screenshot.
          */
+        const review = window.scoreReview;
         const sheet = document.querySelector('[data-award-sheet]');
         const dialog = document.getElementById('award-sheet-dialog');
         const trigger = document.querySelector('[data-award-sheet-pick]');
 
-        if (!sheet || !dialog || !trigger) {
+        if (!review || !sheet || !dialog || !trigger) {
             return;
         }
 
-        const picker = document.getElementById('award-sheet-images');
-        const status = document.querySelector('[data-award-sheet-status]');
         const rowsBox = dialog.querySelector('[data-award-sheet-rows]');
         const unknownBox = dialog.querySelector('[data-award-sheet-unknown]');
         const uncoveredBox = dialog.querySelector('[data-award-sheet-uncovered]');
-        const tokenField = document.querySelector('#score-form input[name="_token"]');
+
+        const el = review.el;
+        const change = review.change;
+        const block = review.block;
+        const say = review.status(document.querySelector('[data-award-sheet-status]'));
+        const dialogue = review.panel({ prefix: 'award-sheet', dialog: dialog, trigger: trigger });
 
         let reading = null;
-        let busy = false;
-
-        function say(message, tone) {
-            if (!status) {
-                return;
-            }
-
-            if (!message) {
-                status.className = 'hidden text-xs mr-2';
-                status.textContent = '';
-
-                return;
-            }
-
-            status.textContent = message;
-            status.className = 'text-xs mr-2 font-semibold '
-                + (tone === 'bad' ? 'text-red-600' : 'text-gray-500');
-        }
-
-        function el(tag, className, text) {
-            const node = document.createElement(tag);
-
-            node.className = className || '';
-
-            if (text !== undefined && text !== null) {
-                node.textContent = String(text);
-            }
-
-            return node;
-        }
 
         function awardField(awardKey, fieldKey) {
             return document.querySelector('[name="awards[' + awardKey + '][' + fieldKey + ']"]');
-        }
-
-        function change(label, from, to) {
-            const line = el('span', 'block text-xs text-gray-600 mt-0.5');
-
-            line.appendChild(el('span', 'font-semibold text-gray-500', label + ' '));
-            line.appendChild(el('span', 'text-gray-500', from));
-            line.appendChild(el('span', 'mx-1 text-gray-400', '\u2192'));
-            line.appendChild(el('span', 'font-bold text-gray-900 tabular-nums', to));
-
-            return line;
-        }
-
-        function block(boxNode, title, tone, lines) {
-            boxNode.textContent = '';
-
-            if (lines.length === 0) {
-                boxNode.className = 'hidden mt-5';
-
-                return;
-            }
-
-            boxNode.className = 'mt-5 rounded-lg border p-3 '
-                + (tone === 'amber' ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-gray-50');
-
-            boxNode.appendChild(el(
-                'p',
-                'text-xs font-bold uppercase tracking-wide mb-1.5 '
-                    + (tone === 'amber' ? 'text-amber-800' : 'text-gray-600'),
-                title,
-            ));
-
-            const list = el('ul', 'space-y-1');
-
-            lines.forEach(function (text) {
-                list.appendChild(el(
-                    'li',
-                    'text-xs ' + (tone === 'amber' ? 'text-amber-800' : 'text-gray-600'),
-                    text,
-                ));
-            });
-
-            boxNode.appendChild(list);
         }
 
         function render(data) {
@@ -2069,18 +2125,6 @@
             }));
         }
 
-        function open() {
-            dialog.classList.remove('hidden');
-            dialog.classList.add('flex');
-            dialog.querySelector('[data-award-sheet-apply]')?.focus();
-        }
-
-        function close() {
-            dialog.classList.add('hidden');
-            dialog.classList.remove('flex');
-            trigger.focus();
-        }
-
         function apply() {
             if (reading === null) {
                 return;
@@ -2146,102 +2190,440 @@
                 });
             });
 
-            close();
+            dialogue.close();
 
             say(filled === 0
                 ? 'Nothing was filled in.'
                 : filled + (filled === 1 ? ' figure' : ' figures') + ' filled in. Nothing is saved until you press Save.');
         }
 
-        trigger.addEventListener('click', function () {
-            if (!busy) {
-                picker.click();
-            }
-        });
-
-        picker.addEventListener('change', function () {
-            if (busy || picker.files.length === 0) {
-                return;
-            }
-
-            const body = new FormData();
-
-            body.append('_token', tokenField ? tokenField.value : '');
-
-            Array.prototype.forEach.call(picker.files, function (file) {
-                body.append('images[]', file);
-            });
-
-            busy = true;
-            trigger.disabled = true;
-            say(picker.files.length === 1 ? 'Reading the image...' : 'Reading ' + picker.files.length + ' images...');
-
-            fetch(sheet.dataset.awardSheetUrl, {
-                method: 'POST',
-                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                credentials: 'same-origin',
-                body: body,
-            })
-                .then(function (response) {
-                    return response.json()
-                        .then(function (data) { return { ok: response.ok, data: data }; })
-                        .catch(function () { return { ok: false, data: {} }; });
-                })
-                .then(function (result) {
-                    if (result.ok && result.data.ok) {
-                        reading = result.data;
-                        render(reading);
-                        say('');
-                        open();
-
-                        return;
-                    }
-
-                    const errors = result.data.errors
-                        ? Object.values(result.data.errors).flat().join(' ')
-                        : null;
-
-                    say(result.data.message || errors || 'The screenshot could not be read.', 'bad');
-                })
-                .catch(function () {
-                    say('The screenshot could not be read. Type the figures in instead.', 'bad');
-                })
-                .finally(function () {
-                    busy = false;
-                    trigger.disabled = false;
-
-                    // Cleared so picking the same file again still fires a change.
-                    picker.value = '';
-                });
+        /*
+         | Escape closes this panel and nothing else, which the shared panel() does by
+         | listening on the capture phase and stopping the event there. It matters most
+         | here: this review panel sits OVER the award dialog it is filling in, and
+         | closing the panel must not also close what is underneath.
+         */
+        review.reader({
+            trigger: trigger,
+            picker: document.getElementById('award-sheet-images'),
+            url: sheet.dataset.awardSheetUrl,
+            token: review.token(),
+            say: say,
+            onRead: function (data) {
+                reading = data;
+                render(data);
+                dialogue.open();
+            },
         });
 
         dialog.querySelector('[data-award-sheet-apply]')?.addEventListener('click', apply);
+    })();
+</script>
+@endpush
+@endif
 
-        dialog.querySelectorAll('[data-award-sheet-close]').forEach(function (button) {
-            button.addEventListener('click', close);
-        });
+{{-- Only shipped where that control exists: a battle royale lobby whose profile
+     keeps personal figures, with line-ups on file, and an operator who may score. --}}
+@if ($readsPlayerSheet)
+@push('scripts')
+<script>
+    (function () {
+        /*
+         | Detect Image AI, on the game's per-player result screen.
+         |
+         | THE ONE THAT FILLS IN THE MOST, and so the one with the most to get wrong.
+         | A block's rank is a squad's placement, its players' eliminations added up
+         | are that squad's kills, each line is one player's own figure, and rank 1
+         | takes the chicken dinner. Four answers, one image.
+         |
+         | The same three rules as the two readers above. It never saves: Apply types
+         | into the form and stops. It never chooses: a squad identified through a
+         | handle nobody was sure of, a block two images disagreed on, and a player
+         | line matched to nobody all arrive unticked and marked, and a block that
+         | resolved to no squad at all is listed with what was printed in it rather
+         | than given to the nearest. And every line is built with textContent.
+         |
+         | AND IT NEVER TOUCHES WHO PLAYED. A squad with five on its entry and four on
+         | the screen means somebody did not play — or means the screen was cropped. A
+         | player who turned up and got nothing is not the player who did not turn up,
+         | so the people no block mentioned are listed under their squad and their
+         | played box is left exactly as the operator left it.
+         */
+        const review = window.scoreReview;
+        const sheet = document.querySelector('[data-player-sheet]');
+        const dialog = document.getElementById('player-sheet-dialog');
+        const trigger = document.querySelector('[data-player-sheet-pick]');
 
-        dialog.addEventListener('click', function (event) {
-            if (event.target === dialog) {
-                close();
-            }
-        });
+        if (!review || !sheet || !dialog || !trigger) {
+            return;
+        }
+
+        const rowsBox = dialog.querySelector('[data-player-sheet-rows]');
+        const clashBox = dialog.querySelector('[data-player-sheet-clashes]');
+        const unmatchedBox = dialog.querySelector('[data-player-sheet-unmatched]');
+        const uncoveredBox = dialog.querySelector('[data-player-sheet-uncovered]');
+
+        const el = review.el;
+        const change = review.change;
+        const block = review.block;
+        const say = review.status(document.querySelector('[data-player-sheet-status]'));
+        const dialogue = review.panel({ prefix: 'player-sheet', dialog: dialog, trigger: trigger });
+
+        let reading = null;
+
+        function field(entrantId, key) {
+            return document.querySelector('[name="lines[' + entrantId + '][' + key + ']"]');
+        }
+
+        function winnerRadio(entrantId, key) {
+            return document.querySelector('input[name="single[' + key + ']"][value="' + entrantId + '"]');
+        }
+
+        function playerField(entrantId, personId, key) {
+            return document.querySelector('[name="players[' + entrantId + '][' + personId + '][' + key + ']"]');
+        }
 
         /*
-         | Escape closes this panel and nothing else.
+         | What the form says now, read off the form rather than off the answer.
          |
-         | On the capture phase, which runs before the award dialog's own Escape
-         | handler on the same document, and stopping the event there: closing the
-         | review panel must not also close the dialog it was about to fill in. With
-         | this panel shut the handler does nothing and Escape belongs to the dialog
-         | underneath again.
+         | The server sends what is recorded, but the operator may have typed since the
+         | page loaded, and the figure Apply would overwrite is the one in the box in
+         | front of them.
          */
-        document.addEventListener('keydown', function (event) {
-            if (event.key === 'Escape' && !dialog.classList.contains('hidden')) {
-                event.stopImmediatePropagation();
-                close();
+        function shown(input, recorded) {
+            if (input && input.value !== '') {
+                return input.value;
             }
-        }, true);
+
+            return (recorded === null || recorded === undefined || recorded === '')
+                ? 'blank'
+                : String(recorded);
+        }
+
+        function flag(node, text) {
+            node.appendChild(el(
+                'span',
+                'rounded bg-amber-200 px-1.5 py-0.5 text-xs font-bold text-amber-900',
+                text,
+            ));
+        }
+
+        function tick(attribute, value, checked) {
+            const box = document.createElement('input');
+
+            box.type = 'checkbox';
+            box.className = 'mt-0.5 w-5 h-5 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40';
+            box.checked = checked;
+            box.setAttribute(attribute, value);
+
+            return box;
+        }
+
+        function playerRow(team, teamIndex, player, playerIndex, label) {
+            // Nobody was found for the handle, or found but not plainly. Either way the
+            // operator decides, so it starts unticked.
+            const flagged = player.id === null || player.low_confidence;
+
+            const line = el('label', 'flex items-start gap-2 rounded-lg border px-2.5 py-2 cursor-pointer '
+                + (flagged ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-blue-50/30'));
+
+            // A line matched to nobody has nowhere to go, so there is nothing to tick.
+            if (player.id === null) {
+                line.appendChild(el('span', 'mt-0.5 w-5 shrink-0 text-center text-xs font-bold text-amber-700', '!'));
+            } else {
+                line.appendChild(tick('data-player-sheet-player', teamIndex + '-' + playerIndex, !flagged));
+            }
+
+            const body = el('span', 'min-w-0 flex-1');
+            const head = el('span', 'flex flex-wrap items-center gap-2');
+
+            head.appendChild(el(
+                'span',
+                'text-sm ' + (player.id === null ? 'font-semibold text-amber-900' : 'text-gray-900'),
+                player.id === null ? player.read_as : player.name,
+            ));
+
+            if (player.id !== null && player.ign) {
+                head.appendChild(el('span', 'text-xs text-gray-400', player.ign));
+            }
+
+            if (player.id === null) {
+                flag(head, 'Type this one in');
+            } else if (player.low_confidence) {
+                flag(head, 'Check the name');
+            }
+
+            body.appendChild(head);
+
+            if (player.id === null) {
+                body.appendChild(el('span', 'block text-xs text-amber-800 mt-0.5',
+                    player.reason + '. Its ' + label.toLowerCase() + ' of ' + player.value
+                        + ' is counted in the squad total above.'));
+            } else {
+                // The handle on the screen is spelled differently from the entry list.
+                // Worth seeing: this is the character or two OCR of that font moves.
+                if (player.read_as && player.ign !== player.read_as) {
+                    body.appendChild(el('span', 'block text-xs text-gray-400 mt-0.5',
+                        'Printed as "' + player.read_as + '"'));
+                }
+
+                body.appendChild(change(
+                    label,
+                    shown(playerField(team.entrant_id, player.id, reading.player_field.key), player.current),
+                    player.value,
+                ));
+            }
+
+            line.appendChild(body);
+
+            return line;
+        }
+
+        function render(data) {
+            const placement = data.fields.placement;
+            const kills = data.fields.kills;
+            const winner = data.fields.winner;
+            const label = data.player_field.label;
+
+            rowsBox.textContent = '';
+
+            if (data.teams.length === 0) {
+                // Nothing matched and nothing read either: the reader was told to
+                // return no blocks rather than invent them, so this is the wrong
+                // screenshot rather than a hard one.
+                rowsBox.appendChild(el(
+                    'p',
+                    'rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800',
+                    data.unmatched.length === 0
+                        ? 'This does not look like the game\'s per-player result screen. Nothing was read from it.'
+                        : 'Nothing in the image could be matched to a squad in this fixture.',
+                ));
+            }
+
+            data.teams.forEach(function (team, index) {
+                const flagged = team.low_confidence || team.conflict;
+
+                const box = el('div', 'rounded-lg border p-3 '
+                    + (flagged ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white'));
+
+                const line = el('label', 'flex items-start gap-3 cursor-pointer');
+
+                line.appendChild(tick('data-player-sheet-team', String(index), !flagged));
+
+                const body = el('span', 'min-w-0 flex-1');
+                const head = el('span', 'flex flex-wrap items-center gap-2');
+
+                head.appendChild(el('span', 'text-sm font-semibold text-gray-900', team.name));
+
+                if (winner && team.winner) {
+                    head.appendChild(el(
+                        'span',
+                        'rounded bg-amber-100 px-1.5 py-0.5 text-xs font-bold text-amber-800',
+                        winner.label,
+                    ));
+                }
+
+                if (team.conflict) {
+                    flag(head, 'Images disagree');
+                } else if (flagged) {
+                    flag(head, 'Check the players');
+                }
+
+                body.appendChild(head);
+
+                // No team name is printed on that screen at all: this squad was found
+                // through its players, and the handles are how anybody checks that.
+                body.appendChild(el('span', 'block text-xs text-gray-400 mt-0.5',
+                    'Read as ' + team.read_as));
+
+                body.appendChild(change(
+                    placement.label,
+                    shown(field(team.entrant_id, placement.key), team.current.placement),
+                    team.placement,
+                ));
+
+                body.appendChild(change(
+                    kills.label + ' (' + label.toLowerCase() + ' added up)',
+                    shown(field(team.entrant_id, kills.key), team.current.kills),
+                    team.kills,
+                ));
+
+                line.appendChild(body);
+                box.appendChild(line);
+
+                // Indented under the squad header it belongs to, with a margin the
+                // built stylesheet already carries: a class nobody has used before
+                // would need a fresh asset build to exist at all.
+                const players = el('div', 'mt-2.5 ml-6 space-y-1.5');
+
+                team.players.forEach(function (player, playerIndex) {
+                    players.appendChild(playerRow(team, index, player, playerIndex, label));
+                });
+
+                box.appendChild(players);
+
+                /*
+                 | Registered and not on the screen. Named, never decided: whether
+                 | somebody played is not a question an image answers, and a player who
+                 | turned up and got no kills is not the player who did not turn up.
+                 */
+                if (team.absent.length > 0) {
+                    box.appendChild(el('p', 'mt-2 ml-6 text-xs text-gray-500',
+                        'Not on the screen: '
+                            + team.absent.map(function (person) {
+                                return person.ign || person.name;
+                            }).join(', ')
+                            + '. Their Played boxes are left exactly as they are.'));
+                }
+
+                rowsBox.appendChild(box);
+            });
+
+            block(clashBox, 'Read two different ways', 'amber', data.clashes.map(function (clash) {
+                return clash.name + ': kept ' + placement.label.toLowerCase() + ' ' + clash.kept.placement
+                    + ' with ' + clash.kept.kills + ' ' + kills.label.toLowerCase()
+                    + ', another image gave ' + clash.also_read.placement + ' with '
+                    + clash.also_read.kills + '. Check which is right.';
+            }));
+
+            block(unmatchedBox, 'Blocks no squad could be found for', 'amber', data.unmatched.map(function (row) {
+                return row.read_as + ' — ' + row.reason + '.';
+            }));
+
+            block(uncoveredBox, 'Squads no block covered', 'gray', data.uncovered.map(function (entrant) {
+                return entrant.name;
+            }));
+        }
+
+        /**
+         * Open a squad's player panel, because a closed one is not sent.
+         *
+         * Through the toggle button rather than by hand, so the chevron, the
+         * aria-expanded state and the flag that marks the panel as sent all happen the
+         * way they do when an operator opens it.
+         */
+        function openPanel(entrantId) {
+            const panelBlock = document.querySelector('[data-player-block="' + entrantId + '"]');
+
+            if (!panelBlock || !panelBlock.hasAttribute('hidden')) {
+                return;
+            }
+
+            const toggle = document.querySelector('[data-player-toggle="players-' + entrantId + '"]');
+
+            if (toggle) {
+                toggle.click();
+
+                return;
+            }
+
+            panelBlock.removeAttribute('hidden');
+            panelBlock.dataset.opened = '1';
+        }
+
+        function apply() {
+            if (reading === null) {
+                return;
+            }
+
+            const placementKey = reading.fields.placement.key;
+            const killsKey = reading.fields.kills.key;
+            const winnerKey = reading.fields.winner ? reading.fields.winner.key : null;
+            const personalKey = reading.player_field.key;
+
+            let filled = 0;
+
+            rowsBox.querySelectorAll('[data-player-sheet-team]').forEach(function (box) {
+                if (!box.checked) {
+                    return;
+                }
+
+                const team = reading.teams[Number(box.getAttribute('data-player-sheet-team'))];
+
+                if (!team) {
+                    return;
+                }
+
+                const placementInput = field(team.entrant_id, placementKey);
+                const killsInput = field(team.entrant_id, killsKey);
+
+                if (placementInput) {
+                    placementInput.value = String(team.placement);
+                }
+
+                if (killsInput) {
+                    killsInput.value = String(team.kills);
+                }
+
+                // A radio group, so ticking the winner unticks whoever held it. Never
+                // untick on its own: a block that is not rank 1 says nothing about who
+                // is, and Nobody stays available at the foot of the table.
+                if (winnerKey && team.winner) {
+                    const radio = winnerRadio(team.entrant_id, winnerKey);
+
+                    if (radio) {
+                        radio.checked = true;
+                    }
+                }
+
+                filled++;
+            });
+
+            rowsBox.querySelectorAll('[data-player-sheet-player]').forEach(function (box) {
+                if (!box.checked) {
+                    return;
+                }
+
+                const parts = box.getAttribute('data-player-sheet-player').split('-');
+                const team = reading.teams[Number(parts[0])];
+                const player = team ? team.players[Number(parts[1])] : null;
+
+                if (!player || player.id === null) {
+                    return;
+                }
+
+                // A panel nobody opened is not sent, so it is opened before it is
+                // filled in — otherwise this would type a figure into a field that
+                // never reaches the server.
+                openPanel(team.entrant_id);
+
+                const input = playerField(team.entrant_id, player.id, personalKey);
+
+                if (!input) {
+                    return;
+                }
+
+                input.value = String(player.value);
+
+                // The running totals under the panel listen for this, so the sums an
+                // operator checks against the squad row are right without reloading.
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+
+                filled++;
+            });
+
+            dialogue.close();
+
+            say(filled === 0
+                ? 'Nothing was filled in.'
+                : filled + (filled === 1 ? ' figure' : ' figures')
+                    + ' filled in. Who played was left alone. Nothing is saved until you press Save.');
+        }
+
+        review.reader({
+            trigger: trigger,
+            picker: document.getElementById('player-sheet-images'),
+            url: sheet.dataset.playerSheetUrl,
+            token: review.token(),
+            say: say,
+            onRead: function (data) {
+                reading = data;
+                render(data);
+                dialogue.open();
+            },
+        });
+
+        dialog.querySelector('[data-player-sheet-apply]')?.addEventListener('click', apply);
     })();
 </script>
 @endpush

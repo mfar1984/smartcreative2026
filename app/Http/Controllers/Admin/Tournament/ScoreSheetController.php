@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin\Tournament;
 
 use App\Contracts\MatchAwardReader;
+use App\Contracts\PlayerSheetReader;
 use App\Contracts\ScoreSheetReader;
 use App\Http\Controllers\Controller;
 use App\Models\PointRule;
@@ -13,6 +14,7 @@ use App\Services\Vision\ScoreSheetImage;
 use App\Support\Tournament\MatchAwardMatcher;
 use App\Support\Tournament\MatchAwardSheet;
 use App\Support\Tournament\MatchRoster;
+use App\Support\Tournament\PlayerSheetMatcher;
 use App\Support\Tournament\ScoreSheetFields;
 use App\Support\Tournament\ScoreSheetMatcher;
 use Illuminate\Http\JsonResponse;
@@ -20,12 +22,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Reading a result off a photograph: the results table, and the game's Star of the
- * Match screen.
+ * Reading a result off a photograph: the results table, the game's Star of the
+ * Match screen, and the game's own per-player result screen.
  *
  * Its own controller rather than another method on MatchController, which is
  * already the largest file in the module: nothing here shares a line with saving a
- * score, and that is the point of it being separate. The two reads sit together
+ * score, and that is the point of it being separate. The three reads sit together
  * because they are the same promise with a different screen in front of it.
  *
  * THIS ENDPOINT WRITES NOTHING. It answers with what it read and what it matched
@@ -36,7 +38,13 @@ use Illuminate\Support\Facades\Log;
  */
 class ScoreSheetController extends Controller
 {
-    /** A results table split over more than this is a table that wants retaking. */
+    /**
+     * A results table split over more than this is a table that wants retaking.
+     *
+     * The same cap on the per-player screen, which genuinely needs several: it shows
+     * about three squad blocks at a time, so a lobby of seventeen is six screenshots
+     * before anybody has been careless.
+     */
     private const MAX_IMAGES = 8;
 
     /**
@@ -240,6 +248,148 @@ class ScoreSheetController extends Controller
     }
 
     /**
+     * Reading the game's own per-player result screen into the whole form.
+     *
+     * FOUR ANSWERS OUT OF ONE IMAGE, which is what makes this one worth the reading:
+     * the block's rank is the squad's placement, its players' eliminations added up
+     * are the squad's kills, each line is that player's own figure, and rank 1 took
+     * the chicken dinner. Typed by hand that is a lobby of seventeen squads, five
+     * players each, copied off a phone.
+     *
+     * The same promise as the two reads above it. Nothing is written here. It answers
+     * with what it read and who it matched that to, the dialog shows every figure
+     * against what is on the form now, and the result is still saved by the form's own
+     * Save button.
+     */
+    public function readPlayers(Request $request, TournamentMatch $match, PlayerSheetReader $reader): JsonResponse
+    {
+        $data = $request->validate(
+            ScoreSheetImage::rules(self::MAX_IMAGES),
+            ScoreSheetImage::messages(self::MAX_IMAGES),
+        );
+
+        $match->load([
+            'tournament.pointRule',
+            'entrants.entrant.registration:id,team_name,reference',
+            'entrants.players',
+        ]);
+
+        $rule = $match->tournament->pointRule;
+        $fields = ScoreSheetFields::forRule($rule);
+
+        /*
+         | Three refusals, told apart because they are fixed in three different
+         | places: the wrong sport, a profile that keeps no personal figures, and a
+         | fixture whose entries name nobody. The control is not drawn where any of
+         | them is true, but a POST does not need a button.
+         */
+        if ($fields === null) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Reading a screenshot only works on a battle royale lobby, scored on a table of finishing positions and kills. This fixture is not one.',
+            ], 422);
+        }
+
+        /*
+         | A profile that names a handful of players instead of listing line-ups has
+         | no per-squad panels on screen, so there is nowhere for a block of five
+         | players to go. Its own refusal rather than the one below, because the two
+         | are fixed in different places.
+         */
+        if ($rule->picksPlayers()) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'This scoring profile records a few named players rather than whole line-ups, so there are no per-squad panels for a per-player screen to fill in.',
+            ], 422);
+        }
+
+        $definitions = $this->playerFieldsFor($rule);
+
+        if ($definitions === []) {
+            return response()->json([
+                'ok' => false,
+                'message' => ScoreSheetException::noPlayerFields()->publicMessage,
+            ], 422);
+        }
+
+        $entrants = $this->candidatesFor($match, $fields);
+        $roster = $this->playersFor($match, $rule);
+
+        if ($roster === []) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Nobody in this fixture has a line-up on file, so there is no way to tell which squad a block of players belongs to.',
+            ], 422);
+        }
+
+        /*
+         | What leaves this server: the image, the names of the personal figures off
+         | this tournament's own scoring profile, and the in-game names of the players
+         | in this one fixture. The handle is the only identity printed on that screen,
+         | so it is the only thing that can turn a block into a squad.
+         |
+         | Nothing else goes. No identity card number, no telephone number, no email
+         | address, and no legal name except where a player's entry carries no in-game
+         | name at all and that is all there is to spell.
+         */
+        $nicknames = array_values(array_unique(array_filter(array_map(
+            fn (array $player) => $player['ign'] !== '' ? $player['ign'] : $player['name'],
+            $roster,
+        ))));
+
+        try {
+            $reading = $reader->read(ScoreSheetImage::fromUploads($data['images']), $definitions, $nicknames);
+
+            // The recorded figure rides along so the dialog can show a change as a
+            // change. Which figure that is only becomes known once the reader has said
+            // which field the elimination column belongs to.
+            $players = $this->withRecorded($match, $roster, $reading->field);
+
+            $result = (new PlayerSheetMatcher($entrants, $players))->match($reading->blocks);
+        } catch (ScoreSheetException $e) {
+            Log::warning('A per-player result screen could not be read.', [
+                'match' => $match->id,
+                'reason' => $e->getMessage(),
+            ]);
+
+            return response()->json(['ok' => false, 'message' => $e->publicMessage], 422);
+        }
+
+        // Blocks the reader could not turn into numbers join the blocks that matched
+        // no squad. Both are shown; neither is filled in.
+        $unmatched = array_merge($result['unmatched'], array_map(fn (array $block) => [
+            'read_as' => $block['read_as'],
+            'placement' => null,
+            'kills' => null,
+            'reason' => $block['reason'],
+        ], $reading->rejected));
+
+        AdminLogger::activity('tournaments.matches.score', sprintf(
+            'Read a per-player result screen for %s: %d of %d blocks matched, %d not.',
+            $match->label(),
+            count($result['teams']),
+            count($result['teams']) + count($unmatched),
+            count($unmatched),
+        ));
+
+        return response()->json([
+            'ok' => true,
+            'fields' => $fields->toArray(),
+
+            // The profile's own key for the elimination column, answered by the reader
+            // against the labels it was given. Nothing here or in the browser knows a
+            // personal figure is called Elims.
+            'player_field' => $this->playerField($definitions, $reading->field),
+
+            'teams' => $result['teams'],
+            'unmatched' => $unmatched,
+            'uncovered' => $result['uncovered'],
+            'clashes' => $result['clashes'],
+            'review_below' => ScoreSheetMatcher::REVIEW_BELOW,
+        ]);
+    }
+
+    /**
      * Everybody a card could be about, with the squad they played for.
      *
      * From the same roster the dialog's dropdown is built from, so the reader cannot
@@ -263,6 +413,70 @@ class ScoreSheetController extends Controller
         }
 
         return $candidates;
+    }
+
+    /**
+     * The personal figures this profile keeps, as the reader is told about them.
+     *
+     * Keys and labels only. The reader is matching a column on a screen against the
+     * names an operator typed, and the minimum and the step are the form's business.
+     *
+     * @return array<int, array{key: string, label: string}>
+     */
+    private function playerFieldsFor(?PointRule $rule): array
+    {
+        if ($rule === null || ! $rule->tracksPlayers()) {
+            return [];
+        }
+
+        return collect($rule->player_inputs ?? [])
+            ->filter(fn ($input) => is_array($input) && ($input['key'] ?? '') !== '')
+            ->map(fn (array $input) => [
+                'key' => (string) $input['key'],
+                'label' => (string) ($input['label'] ?? $input['key']),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array{key: string, label: string}>  $definitions
+     * @return array{key: string, label: string}
+     */
+    private function playerField(array $definitions, string $key): array
+    {
+        foreach ($definitions as $definition) {
+            if ($definition['key'] === $key) {
+                return $definition;
+            }
+        }
+
+        return ['key' => $key, 'label' => $key];
+    }
+
+    /**
+     * The roster, each person carrying what is already recorded for them in this
+     * fixture for the one field the screen fills in.
+     *
+     * @param  array<int, array{id: int, entrant_id: int, name: string, ign: string}>  $roster
+     * @return array<int, array{id: int, entrant_id: int, name: string, ign: string, current: int|float|null}>
+     */
+    private function withRecorded(TournamentMatch $match, array $roster, string $field): array
+    {
+        $recorded = [];
+
+        foreach ($match->entrants as $line) {
+            foreach ($line->players as $row) {
+                $recorded[(int) $row->event_participant_id] = $field === ''
+                    ? null
+                    : $row->input($field);
+            }
+        }
+
+        return array_map(
+            fn (array $player) => $player + ['current' => $recorded[$player['id']] ?? null],
+            $roster,
+        );
     }
 
     /**

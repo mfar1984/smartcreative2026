@@ -1307,7 +1307,7 @@ class MatchController extends Controller
             return [];
         }
 
-        $submitted = $request->input('players', []);
+        $submitted = $this->submittedPlayers($request);
         $rosters = $this->rostersFor($match, $rule);
         $onFile = $this->recordedPlayersFor($match);
         $errors = [];
@@ -1437,6 +1437,54 @@ class MatchController extends Controller
         }
 
         return $out;
+    }
+
+    /**
+     * The player ledger as it arrived, in whichever of the two shapes was sent.
+     *
+     * WHY THERE ARE TWO. One field per figure is how a form posts, and it is how this
+     * one posted until the screenshot reader began filling every panel in: seventeen
+     * squads of five with nine figures each, plus the played boxes, is past PHP's
+     * max_input_vars, which is the setting that stops reading a request and DROPS THE
+     * REST WITHOUT SAYING SO. Raising it on a server we do not own is not a fix. So
+     * the browser now folds the whole ledger into one JSON field and the hundreds of
+     * individual fields do not post at all: a full lobby costs one input variable.
+     *
+     * THE ARRAY SHAPE STILL WORKS, unchanged. A browser with no JavaScript posts the
+     * fields themselves and is read exactly as before, which is also why every test
+     * written before this still passes untouched.
+     *
+     * WHICH WINS WHEN BOTH ARRIVE: the JSON, and the array is ignored rather than
+     * merged into it. The JSON is written at the moment of sending from those same
+     * inputs, so it is the complete ledger by construction; an array arriving beside
+     * it can only be a partial copy, and a truncated request is precisely how that
+     * happens. Merging a complete record with a truncated one is how a figure gets
+     * counted twice, so one shape is chosen and the other is not consulted.
+     *
+     * @return array<int|string, mixed>
+     */
+    private function submittedPlayers(Request $request): array
+    {
+        $compact = $request->input('players_json');
+
+        if (! is_string($compact) || trim($compact) === '') {
+            return is_array($request->input('players')) ? $request->input('players') : [];
+        }
+
+        $decoded = json_decode($compact, true);
+
+        /*
+         | Refused rather than fallen back on. The browser sent a ledger and it did not
+         | arrive whole, which is the one case where quietly reading the other shape
+         | would save a result that is missing the figures somebody typed.
+         */
+        if (! is_array($decoded)) {
+            throw ValidationException::withMessages([
+                'score' => 'The personal figures did not reach the server in one piece, so nothing was saved. Save again.',
+            ]);
+        }
+
+        return $decoded;
     }
 
     /**

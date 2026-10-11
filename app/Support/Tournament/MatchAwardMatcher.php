@@ -19,17 +19,21 @@ use App\Services\Vision\MatchAwardCard;
  * that resembles nothing, or resembles two players equally well, comes back with no
  * player and the text that was read, for somebody to settle.
  *
- * It borrows ScoreSheetMatcher's normalising and its two thresholds rather than
- * keeping a second opinion about what two spellings of a name have in common.
+ * Who a nickname belongs to is PlayerNicknameMatcher's answer, shared with the
+ * per-player result screen: both read the same handles off the same game in the same
+ * font, and one opinion about who QXCikoYELL is beats two.
  */
 class MatchAwardMatcher
 {
+    private readonly PlayerNicknameMatcher $names;
+
     /**
      * @param  array<int, array{id: int, entrant_id: int, name: string, ign: string}>  $candidates
      *         everybody who could be named in this fixture
      */
-    public function __construct(private readonly array $candidates)
+    public function __construct(array $candidates)
     {
+        $this->names = new PlayerNicknameMatcher($candidates);
     }
 
     /**
@@ -84,7 +88,7 @@ class MatchAwardMatcher
                 continue;
             }
 
-            [$player, $confidence, $reason] = $this->best($card->player);
+            [$player, $confidence, $reason] = $this->names->best($card->player);
 
             $matched[$card->award] = [
                 'key' => $card->award,
@@ -127,71 +131,4 @@ class MatchAwardMatcher
         ];
     }
 
-    /**
-     * The best player for one nickname, or null with the reason why there is none.
-     *
-     * @return array{0: array{id: int, entrant_id: int, name: string, ign: string}|null, 1: float, 2: string}
-     */
-    private function best(string $raw): array
-    {
-        $needle = ScoreSheetMatcher::normalise($raw);
-
-        if ($needle === '') {
-            return [null, 0.0, 'the card had no nickname on it that could be read'];
-        }
-
-        $scores = [];
-
-        foreach ($this->candidates as $candidate) {
-            $scores[] = ['candidate' => $candidate, 'score' => $this->score($needle, $candidate)];
-        }
-
-        usort($scores, fn (array $a, array $b) => $b['score'] <=> $a['score']);
-
-        $top = $scores[0] ?? null;
-
-        if ($top === null || $top['score'] < ScoreSheetMatcher::MATCH_FLOOR) {
-            return [null, $top['score'] ?? 0.0, 'no player in this fixture goes by that in-game name'];
-        }
-
-        // A tie at the top is the one case worth refusing outright. Two players who
-        // chose nearly the same handle is exactly how the wrong one gets the award.
-        if (isset($scores[1]) && abs($scores[1]['score'] - $top['score']) < 0.0001) {
-            return [null, $top['score'], 'two players in this fixture go by that in-game name equally well'];
-        }
-
-        return [$top['candidate'], $top['score'], ''];
-    }
-
-    /**
-     * How well one card's nickname fits one player.
-     *
-     * The in-game name is what is printed on that screen, so it is what is compared.
-     * The legal name is tried too and never beats a better in-game match: it is there
-     * for the player whose entry carries no handle at all, who would otherwise be
-     * unreachable from a screenshot.
-     *
-     * @param  array{id: int, entrant_id: int, name: string, ign: string}  $candidate
-     */
-    private function score(string $needle, array $candidate): float
-    {
-        $best = 0.0;
-
-        foreach ([$candidate['ign'] ?? '', $candidate['name'] ?? ''] as $against) {
-            $compare = ScoreSheetMatcher::normalise((string) $against);
-
-            if ($compare === '') {
-                continue;
-            }
-
-            if ($compare === $needle) {
-                return 1.0;
-            }
-
-            similar_text($needle, $compare, $percent);
-            $best = max($best, round($percent / 100, 4));
-        }
-
-        return $best;
-    }
 }

@@ -3,10 +3,12 @@
 namespace App\Providers;
 
 use App\Contracts\MatchAwardReader;
+use App\Contracts\PlayerSheetReader;
 use App\Contracts\ScoreSheetReader;
 use App\Services\Backup\DatabaseDumper;
 use App\Services\Backup\MysqlDumper;
 use App\Services\Vision\GeminiMatchAwardReader;
+use App\Services\Vision\GeminiPlayerSheetReader;
 use App\Services\Vision\GeminiScoreSheetReader;
 use App\Support\MailSettings;
 use App\Support\SecuritySettings;
@@ -62,12 +64,13 @@ class AppServiceProvider extends ServiceProvider
          | day. These two lines are the only place Gemini is named outside its own
          | classes, so changing supplier is a new class and a binding.
          |
-         | One reads the results table, the other the game's Star of the Match
-         | screen. They share GeminiClient, which is where the key, the endpoint and
-         | the timeouts live.
+         | One reads the results table, one the game's Star of the Match screen, one
+         | the game's per-player result screen. They share GeminiClient, which is
+         | where the key, the endpoint and the timeouts live.
          */
         $this->app->bind(ScoreSheetReader::class, GeminiScoreSheetReader::class);
         $this->app->bind(MatchAwardReader::class, GeminiMatchAwardReader::class);
+        $this->app->bind(PlayerSheetReader::class, GeminiPlayerSheetReader::class);
     }
 
     /**

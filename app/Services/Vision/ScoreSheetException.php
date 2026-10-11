@@ -53,6 +53,36 @@ class ScoreSheetException extends RuntimeException
     }
 
     /**
+     * Asked to read a per-player screen for a profile that keeps no personal figures.
+     *
+     * The control is not drawn on such a fixture, but a POST does not need a button,
+     * and there is nowhere for a player's eliminations to go.
+     */
+    public static function noPlayerFields(): self
+    {
+        return new self(
+            'The scoring profile defines no personal figures.',
+            'This scoring profile keeps no personal figures, so there is nothing to read a per-player screen into. Add them to the profile first.',
+        );
+    }
+
+    /**
+     * The screen read, but none of the profile's personal figures is the one the
+     * elimination column belongs to.
+     *
+     * Refused rather than put on the first field: the figures on that screen are
+     * eliminations, and dropping them into Damage or Assists because it was the only
+     * field available would be inventing a statistic.
+     */
+    public static function noEliminationField(): self
+    {
+        return new self(
+            'No personal figure on this profile could be matched to the elimination column.',
+            'None of the personal figures on this scoring profile looks like an elimination count, so there is nowhere to put what the screen shows. Check the player fields on the profile, or type the figures in.',
+        );
+    }
+
+    /**
      * The model answered, but not with what it was asked for.
      *
      * A schema was declared on the request, so this is a model that ignored it or an
