@@ -95,10 +95,13 @@
         @endif
     </div>
 
-    <div class="px-5 pb-5">
+    {{-- No padding wrapper: the panel already divides its rows and field-row
+         carries its own px-5 py-4, so adding another here doubled the indent and
+         crowded the divider below. --}}
+    <div>
         <x-admin.field-row
             label="What The Add-ons Are"
-            help="Becomes the heading buyers see above the list, so it reads &quot;Add On Items&quot; rather than &quot;Extras&quot;. Leave it blank to keep Extras."
+            help="Becomes the heading buyers see above the list, so it reads “Add On Items” rather than “Extras”. Leave it blank to keep Extras."
             for="addon_group_name"
             error="addon_group_name">
             <input type="text" id="addon_group_name" name="addon_group_name" maxlength="60"

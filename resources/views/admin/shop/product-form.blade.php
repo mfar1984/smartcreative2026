@@ -378,7 +378,7 @@
 
                 <x-admin.field-row
                     label="Specifications"
-                    help="One per line as &quot;Label: Value&quot;. Rendered as a table. A line without a colon is shown as a heading on its own."
+                    help="One per line as “Label: Value”. Rendered as a table. A line without a colon is shown as a heading on its own."
                     for="specifications"
                     error="specifications">
                     <textarea id="specifications" name="specifications" rows="6" maxlength="4000"

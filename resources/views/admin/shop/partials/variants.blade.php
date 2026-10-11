@@ -63,10 +63,13 @@
         @enderror
     </div>
 
-    <div class="px-5 pb-5">
+    {{-- No padding wrapper: the panel already divides its rows and field-row
+         carries its own px-5 py-4, so adding another here doubled the indent and
+         crowded the divider below. --}}
+    <div>
         <x-admin.field-row
             label="What The Options Are"
-            help="Becomes the heading buyers choose from, so it reads &quot;Choose a Size&quot; rather than &quot;Choose an option&quot;. Required once there is at least one option."
+            help="Becomes the heading buyers choose from, so it reads “Choose a Size” rather than “Choose an option”. Required once there is at least one option."
             for="option_name"
             error="option_name">
             <input type="text" id="option_name" name="option_name" maxlength="60"
