@@ -43,7 +43,7 @@ class OrderController extends Controller
             ->withCount('items')
             // Eager loaded so the Hand Over cell can say a handover went out without
             // a verified code. One extra query for the page rather than one per row.
-            ->with(['handover', 'items'])
+            ->with(['handover', 'items.addons'])
             ->latest('id')
             ->paginate(self::PER_PAGE)
             ->withQueryString();
@@ -198,7 +198,10 @@ class OrderController extends Controller
 
     public function show(Request $request, ShopOrder $order)
     {
-        $order->load(['items', 'events.user', 'handover']);
+        // items.addons, so the Items panel's sub-rows cost one query rather than
+        // one per line, and addons.addon because each sub-row says whether the
+        // catalogue entry is still there.
+        $order->load(['items.addons.addon', 'events.user', 'handover']);
 
         return view('admin.shop.order-show', [
             'order' => $order,
@@ -952,7 +955,7 @@ class OrderController extends Controller
             fputcsv($handle, $header);
 
             $this->matching($filters)
-                ->with(['items', 'handover'])
+                ->with(['items.addons', 'handover'])
                 ->orderBy('id')
                 ->chunk(50, function ($orders) use ($handle) {
                     foreach ($orders as $order) {
@@ -998,6 +1001,11 @@ class OrderController extends Controller
                 $cell = (string) $item->name;
                 if (filled($item->variant_label)) {
                     $cell .= ' (' . $item->variant_label . ')';
+                }
+                // The extras after the size, because the counter has to prepare them
+                // as well: "Event Tee (L) + Engraving (Front)".
+                foreach ($item->addons as $addon) {
+                    $cell .= ' + ' . $addon->describe();
                 }
                 if ($item->quantity > 1) {
                     $cell .= ' x' . $item->quantity;

@@ -9,6 +9,7 @@ use App\Models\Event;
 use App\Models\ShopCategory;
 use App\Models\ShopProduct;
 use App\Services\AdminLogger;
+use App\Services\ShopProductAddonWriter;
 use App\Services\ShopVariantWriter;
 use App\Support\ShopSettings;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -94,7 +95,7 @@ class ProductController extends Controller
         ]), 'create'));
     }
 
-    public function store(ShopProductRequest $request, ShopVariantWriter $variants)
+    public function store(ShopProductRequest $request, ShopVariantWriter $variants, ShopProductAddonWriter $addons)
     {
         $product = new ShopProduct($request->productAttributes());
         $product->slug = $this->resolveSlug($request->input('slug'), $request->input('name'));
@@ -102,6 +103,7 @@ class ProductController extends Controller
 
         $product->categories()->sync($request->categoryIds());
         $variants->sync($product, $request->variantRows());
+        $addons->sync($product, $request->addonRows());
         $this->syncCoupons($request, $product);
 
         $this->addImages($request, $product);
@@ -112,6 +114,7 @@ class ProductController extends Controller
             'slug' => $product->slug,
             'price' => $product->price,
             'status' => $product->status,
+            'addons' => $product->addons()->count(),
         ]);
 
         return redirect()
@@ -124,14 +127,19 @@ class ProductController extends Controller
         return view('admin.shop.product-form', $this->formData($product, 'edit'));
     }
 
-    public function update(ShopProductRequest $request, ShopProduct $product, ShopVariantWriter $variants)
-    {
+    public function update(
+        ShopProductRequest $request,
+        ShopProduct $product,
+        ShopVariantWriter $variants,
+        ShopProductAddonWriter $addons,
+    ) {
         $before = [
             'name' => $product->name,
             'price' => $product->price,
             'status' => $product->status,
             'stock_quantity' => $product->stock_quantity,
             'variants' => $product->variants()->count(),
+            'addons' => $product->addons()->count(),
         ];
 
         $product->fill($request->productAttributes());
@@ -144,6 +152,7 @@ class ProductController extends Controller
 
         $product->categories()->sync($request->categoryIds());
         $variants->sync($product, $request->variantRows());
+        $addons->sync($product, $request->addonRows());
         $this->syncCoupons($request, $product);
 
         $this->removeImages($request, $product);
@@ -157,6 +166,7 @@ class ProductController extends Controller
             'status' => $product->status,
             'stock_quantity' => $product->stock_quantity,
             'variants' => $product->variants()->count(),
+            'addons' => $product->addons()->count(),
         ]);
 
         return redirect()
@@ -202,7 +212,7 @@ class ProductController extends Controller
     private function formData(ShopProduct $product, string $mode): array
     {
         if ($product->exists) {
-            $product->load(['images', 'variants', 'categories', 'collectionEvent']);
+            $product->load(['images', 'variants', 'addons.variants', 'categories', 'collectionEvent']);
         }
 
         return [

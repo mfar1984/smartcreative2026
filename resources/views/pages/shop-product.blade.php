@@ -344,6 +344,98 @@
                                 </fieldset>
                             @endif
 
+                            {{-- ==================== Extras ====================
+                                 Below the size, because they are chosen for whichever
+                                 size was picked. Posted as addons[id], and nothing here
+                                 carries any authority: App\Support\Cart resolves every
+                                 add-on, option and price against the catalogue, enforces
+                                 the compulsory ones itself, and prints its refusal
+                                 through the cart error block above. --}}
+                            @php $addons = $product->purchasableAddons(); @endphp
+
+                            @if ($addons->isNotEmpty())
+                                <div class="mb-5 space-y-3">
+                                    <h2 class="text-sm font-bold text-gray-900">Extras</h2>
+
+                                    @foreach ($addons as $addon)
+                                        <div class="rounded-lg border border-gray-200 p-4">
+                                            <div class="flex flex-wrap items-baseline justify-between gap-2">
+                                                <p class="text-sm font-semibold text-gray-900">
+                                                    {{ $addon->name }}
+
+                                                    @if ($addon->is_required)
+                                                        <span class="ml-1 inline-block rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800 align-middle">Required</span>
+                                                    @endif
+                                                </p>
+
+                                                <p class="text-sm font-bold text-gray-900 tabular-nums whitespace-nowrap">
+                                                    +{{ $addon->priceSummaryLabel() }}
+                                                </p>
+                                            </div>
+
+                                            @if (filled($addon->description))
+                                                <p class="text-xs text-gray-500 mt-0.5">{{ $addon->description }}</p>
+                                            @endif
+
+                                            @if ($addon->hasVariants())
+                                                <div class="mt-3 space-y-2 border-t border-gray-100 pt-3">
+                                                    @unless ($addon->is_required)
+                                                        {{-- Only an optional add-on can be declined, so only it
+                                                             gets a None row. On a compulsory one the row would be
+                                                             a choice the server refuses. --}}
+                                                        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2.5 cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition">
+                                                            <input type="radio" name="addons[{{ $addon->id }}]" value="" checked
+                                                                   class="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500">
+                                                            <span class="text-sm text-gray-700">None</span>
+                                                        </label>
+                                                    @endunless
+
+                                                    @foreach ($addon->variants as $option)
+                                                        @php $optionSoldOut = $option->isSoldOut(); @endphp
+
+                                                        <label @class([
+                                                            'flex items-center gap-3 rounded-lg border px-3 py-2.5 transition',
+                                                            'border-gray-200 cursor-pointer hover:border-blue-300 hover:bg-blue-50' => ! $optionSoldOut,
+                                                            'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed' => $optionSoldOut,
+                                                        ])>
+                                                            <input type="radio"
+                                                                   name="addons[{{ $addon->id }}]"
+                                                                   value="{{ $option->id }}"
+                                                                   @disabled($optionSoldOut)
+                                                                   @required($addon->is_required)
+                                                                   class="h-4 w-4 shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-40">
+
+                                                            <span @class(['min-w-0 flex-1 text-sm', 'line-through' => $optionSoldOut])>{{ $option->label }}</span>
+
+                                                            <span class="text-sm font-semibold tabular-nums whitespace-nowrap">
+                                                                +{{ App\Support\PaymentFigures::money($option->unitPrice()) }}
+                                                            </span>
+
+                                                            @if ($optionSoldOut)
+                                                                <span class="text-xs font-semibold text-red-600">Sold out</span>
+                                                            @endif
+                                                        </label>
+                                                    @endforeach
+                                                </div>
+                                            @elseif ($addon->is_required)
+                                                {{-- No input at all: the server adds a compulsory add-on with no
+                                                     options to every line, so a field here would only be
+                                                     something to tamper with. --}}
+                                                <p class="mt-3 border-t border-gray-100 pt-3 text-sm text-gray-700">
+                                                    Included &mdash; added to every order
+                                                </p>
+                                            @else
+                                                <label class="mt-3 flex items-center gap-3 border-t border-gray-100 pt-3 cursor-pointer">
+                                                    <input type="checkbox" name="addons[{{ $addon->id }}]" value="1"
+                                                           class="h-4 w-4 rounded border-gray-400 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                                                    <span class="text-sm text-gray-700">Add this</span>
+                                                </label>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
+
                             <div class="flex flex-wrap items-end gap-3">
                                 <div>
                                     <label for="quantity" class="block text-sm font-bold text-gray-900 mb-1.5">Quantity</label>

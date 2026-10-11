@@ -93,6 +93,11 @@
                 <tr>
                     <td style="padding:8px 0;color:#374151;border-bottom:1px solid #f3f4f6;">
                         {{ $item->name }}@if ($item->variant_label) <span style="color:#6b7280;">({{ $item->variant_label }})</span>@endif
+                        {{-- Extras in brackets after the item, the way the size already
+                             reads. Nothing is added for a line that has none. --}}
+                        @foreach ($item->addons as $addon)
+                            <span style="color:#6b7280;">+ {{ $addon->describe() }}</span>
+                        @endforeach
                         <span style="color:#6b7280;">&times; {{ $item->quantity }}</span>
                     </td>
                     <td style="padding:8px 0;color:#111827;text-align:right;white-space:nowrap;border-bottom:1px solid #f3f4f6;">

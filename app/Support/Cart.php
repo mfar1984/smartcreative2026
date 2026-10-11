@@ -3,6 +3,8 @@
 namespace App\Support;
 
 use App\Models\ShopProduct;
+use App\Models\ShopProductAddon;
+use App\Models\ShopProductAddonVariant;
 use App\Models\ShopProductVariant;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Session;
@@ -45,12 +47,14 @@ final class Cart
      *
      * Returns false when there is nothing to add: no such product, not on sale, or
      * an option that does not belong to it.
+     *
+     * @param  array<int|string, mixed>  $addons  add-on id => chosen option id, as posted
      */
-    public static function add(int $productId, ?int $variantId, int $quantity = 1): ?string
+    public static function add(int $productId, ?int $variantId, int $quantity = 1, array $addons = []): ?string
     {
         $product = ShopProduct::query()
             ->active()
-            ->with(['variants', 'collectionEvent'])
+            ->with(['variants', 'collectionEvent', 'addons.variants'])
             ->find($productId);
 
         if ($product === null) {
@@ -82,21 +86,120 @@ final class Cart
             return $clash;
         }
 
+        /*
+         | The extras, settled against the catalogue rather than taken as sent. A
+         | string back is the reason it was refused, exactly as above.
+         */
+        $resolved = self::resolveAddons($product, $addons);
+
+        if (is_string($resolved)) {
+            return $resolved;
+        }
+
         $lines = self::raw();
-        $key = self::key($productId, $variantId);
+        $key = self::key($productId, $variantId, $resolved);
 
         $existing = (int) ($lines[$key]['quantity'] ?? 0);
         $wanted = $existing + max(1, $quantity);
 
-        $lines[$key] = [
+        $line = [
             'product_id' => $productId,
             'variant_id' => $variantId,
-            'quantity' => self::clamp($wanted, $product, $variantId),
+            'quantity' => self::clamp($wanted, $product, $variantId, $resolved),
         ];
+
+        /*
+         | Only when something was actually chosen. A line with no extras keeps the
+         | exact three keys it has always had, so a basket from before this feature
+         | existed, and every total built from one, is untouched.
+         */
+        if ($resolved !== []) {
+            $line['addons'] = $resolved;
+        }
+
+        $lines[$key] = $line;
 
         self::store($lines);
 
         return null;
+    }
+
+    /**
+     * The extras on one line, decided here and nowhere else.
+     *
+     * The request contributes which add-on and which option, and nothing more: every
+     * price comes off the catalogue row, the same rule the rest of this class follows.
+     * Keys that are not purchasable add-ons of this product are ignored rather than
+     * refused, because an add-on switched off while somebody had the page open is not
+     * the buyer's mistake.
+     *
+     * Three things it will not let through:
+     *  - an option id that does not belong to the add-on, or has sold out;
+     *  - a compulsory add-on with options and no valid choice, which is refused in
+     *    words so the buyer knows what to do;
+     *  - a compulsory add-on with no options being left off, which cannot happen at
+     *    all: it is added whatever was posted, so there is nothing to tamper with.
+     *
+     * @param  array<int|string, mixed>  $posted
+     * @return array<int, int|null>|string  add-on id => option id or null, or the refusal
+     */
+    private static function resolveAddons(ShopProduct $product, array $posted): array|string
+    {
+        $resolved = [];
+
+        foreach ($product->purchasableAddons() as $addon) {
+            /** @var ShopProductAddon $addon */
+            $choice = $posted[$addon->id] ?? null;
+
+            if ($addon->hasVariants()) {
+                if (blank($choice)) {
+                    if ($addon->is_required) {
+                        return sprintf('Choose an option for "%s" before adding this to your basket.', $addon->name);
+                    }
+
+                    continue;
+                }
+
+                /** @var ShopProductAddonVariant|null $option */
+                $option = $addon->variants->firstWhere('id', (int) $choice);
+
+                // Not one of this add-on's options, or gone since the page loaded.
+                // Either way there is nothing here to sell.
+                if ($option === null || $option->isSoldOut()) {
+                    return self::UNAVAILABLE;
+                }
+
+                $resolved[$addon->id] = $option->id;
+
+                continue;
+            }
+
+            if ($addon->is_required) {
+                $resolved[$addon->id] = null;
+
+                continue;
+            }
+
+            /*
+             | No options, so the add-on id being there IS the choice.
+             |
+             | Two shapes have to mean the same thing: the tick box posts "1" when
+             | it is ticked and nothing at all when it is not, and a stored line
+             | holds the add-on id against null, because null is where an option id
+             | would have gone. Reading the value alone would make the stored shape
+             | look like a declined add-on and the extras would quietly vanish the
+             | first time the basket was read back.
+             */
+            if (! array_key_exists($addon->id, $posted)) {
+                continue;
+            }
+
+            if ($choice === null || ! in_array((string) $choice, ['', '0'], true)) {
+                $resolved[$addon->id] = null;
+            }
+        }
+
+        return $resolved;
     }
 
     /**
@@ -158,7 +261,7 @@ final class Cart
             return;
         }
 
-        $product = ShopProduct::query()->active()->with('variants')->find($lines[$key]['product_id']);
+        $product = ShopProduct::query()->active()->with(['variants', 'addons.variants'])->find($lines[$key]['product_id']);
 
         if ($product === null) {
             unset($lines[$key]);
@@ -167,7 +270,15 @@ final class Cart
             return;
         }
 
-        $lines[$key]['quantity'] = self::clamp($quantity, $product, $lines[$key]['variant_id']);
+        // Only the quantity is written, so the line keeps the extras it was added
+        // with. Re-resolving them here would be a second authority on a selection
+        // the key itself was built from.
+        $lines[$key]['quantity'] = self::clamp(
+            $quantity,
+            $product,
+            $lines[$key]['variant_id'],
+            self::storedAddons($lines[$key]),
+        );
 
         self::store($lines);
     }
@@ -191,7 +302,7 @@ final class Cart
     /**
      * The basket, priced from the database.
      *
-     * @return Collection<int, array{key: string, product: ShopProduct, variant: ShopProductVariant|null, quantity: int, unit_price: float, line_total: float, weight_grams: int, capped_to: int|null}>  weight_grams is per unit
+     * @return Collection<int, array{key: string, product: ShopProduct, variant: ShopProductVariant|null, quantity: int, unit_price: float, addons: array<int, array{addon: ShopProductAddon, variant: ShopProductAddonVariant|null, unit_price: float}>, addons_unit_price: float, line_total: float, weight_grams: int, capped_to: int|null}>  weight_grams and addons_unit_price are per unit
      */
     public static function lines(): Collection
     {
@@ -203,7 +314,7 @@ final class Cart
 
         $products = ShopProduct::query()
             ->active()
-            ->with(['variants', 'images', 'collectionEvent'])
+            ->with(['variants', 'images', 'collectionEvent', 'addons.variants'])
             ->whereKey(collect($raw)->pluck('product_id')->unique()->all())
             ->get()
             ->keyBy('id');
@@ -233,7 +344,22 @@ final class Cart
                 continue;
             }
 
-            $available = self::available($product, $variant);
+            /*
+             | The extras, resolved again from the catalogue on every read, which is
+             | how a price change or a sold out option is picked up. A refusal drops
+             | the line, exactly as a deleted option does above: it is no longer the
+             | thing the buyer put in the basket.
+             */
+            $selection = self::resolveAddons($product, self::storedAddons($line));
+
+            if (is_string($selection)) {
+                continue;
+            }
+
+            $addons = self::describeAddons($product, $selection);
+            $addonsUnit = round((float) array_sum(array_column($addons, 'unit_price')), 2);
+
+            $available = self::available($product, $variant, $selection);
             $quantity = (int) $line['quantity'];
             $capped = null;
 
@@ -254,7 +380,16 @@ final class Cart
                 'variant' => $variant,
                 'quantity' => $quantity,
                 'unit_price' => $unit,
-                'line_total' => round($unit * $quantity, 2),
+
+                /*
+                 | The extras, and what they add to one unit. unit_price stays the
+                 | product or option price alone, which is what the order line
+                 | snapshots and what ShopOrderItem::unit_price has always meant;
+                 | the extras ride on the line total instead.
+                 */
+                'addons' => $addons,
+                'addons_unit_price' => $addonsUnit,
+                'line_total' => round(($unit + $addonsUnit) * $quantity, 2),
                 /*
                  | Per unit, not per line, which is the same thing unit_price means
                  | and what ShopOrder::weightGrams() multiplies by the quantity.
@@ -270,11 +405,14 @@ final class Cart
                 'capped_to' => $capped,
             ]);
 
-            $kept[$key] = [
-                'product_id' => $line['product_id'],
-                'variant_id' => $line['variant_id'],
-                'quantity' => $quantity,
-            ];
+            /*
+             | The stored line kept verbatim apart from the quantity, so the write
+             | back below only fires when something really changed. Rebuilding it
+             | from three named keys would drop the selection on every read, and the
+             | basket would lose its extras the first time anybody looked at it.
+             */
+            $kept[$key] = $line;
+            $kept[$key]['quantity'] = $quantity;
         }
 
         /*
@@ -402,13 +540,33 @@ final class Cart
      | Internals
      * ------------------------------------------------------------------ */
 
-    public static function key(int $productId, ?int $variantId): string
+    /**
+     * The identity of a line.
+     *
+     * The same product in the same size with different extras is two lines, so the
+     * selection is folded in as a short fingerprint. With no extras the string is
+     * exactly what it has always been, which is what keeps a basket somebody is
+     * part way through, and every caller passing two arguments, working.
+     *
+     * @param  array<int, int|null>  $addons  add-on id => option id or null
+     */
+    public static function key(int $productId, ?int $variantId, array $addons = []): string
     {
-        return $productId . ':' . ($variantId ?? 'base');
+        $key = $productId . ':' . ($variantId ?? 'base');
+
+        if ($addons === []) {
+            return $key;
+        }
+
+        // Sorted, so the same two extras chosen in either order are one line rather
+        // than two priced the same.
+        ksort($addons);
+
+        return $key . ':a' . substr(sha1((string) json_encode($addons)), 0, 12);
     }
 
     /**
-     * @return array<string, array{product_id: int, variant_id: int|null, quantity: int}>
+     * @return array<string, array{product_id: int, variant_id: int|null, quantity: int, addons?: array<int, int|null>}>
      */
     private static function raw(): array
     {
@@ -432,24 +590,88 @@ final class Cart
     }
 
     /**
-     * How many are left to sell, or null when the answer is unlimited.
+     * The selection stored on a session line, as add-on id => option id or null.
+     *
+     * @param  array<string, mixed>  $line
+     * @return array<int, int|null>
      */
-    private static function available(ShopProduct $product, ?ShopProductVariant $variant): ?int
+    private static function storedAddons(array $line): array
     {
-        if (! $product->track_inventory) {
-            return null;
+        return is_array($line['addons'] ?? null) ? $line['addons'] : [];
+    }
+
+    /**
+     * A resolved selection turned into rows a view and the order writer can read.
+     *
+     * Priced from the catalogue, never from the session: the stored selection says
+     * which extras, and the rows say what they cost right now.
+     *
+     * @param  array<int, int|null>  $selection
+     * @return array<int, array{addon: ShopProductAddon, variant: ShopProductAddonVariant|null, unit_price: float}>
+     */
+    private static function describeAddons(ShopProduct $product, array $selection): array
+    {
+        $rows = [];
+
+        foreach ($selection as $addonId => $optionId) {
+            /** @var ShopProductAddon|null $addon */
+            $addon = $product->addons->firstWhere('id', $addonId);
+
+            if ($addon === null) {
+                continue;
+            }
+
+            $option = $optionId === null ? null : $addon->variants->firstWhere('id', $optionId);
+
+            $rows[] = [
+                'addon' => $addon,
+                'variant' => $option,
+                'unit_price' => $option !== null ? $option->unitPrice() : $addon->unitPrice(),
+            ];
         }
 
-        return $variant !== null ? $variant->stockLeft() : $product->stockLeft();
+        return $rows;
+    }
+
+    /**
+     * How many are left to sell, or null when the answer is unlimited.
+     *
+     * The lowest of what the product or its option has left, what every chosen
+     * extra has left, and the per order cap any of them sets. One engraving per
+     * medal (D4), so ten medals need ten engravings and the smallest figure wins.
+     *
+     * @param  array<int, int|null>  $selection
+     */
+    private static function available(ShopProduct $product, ?ShopProductVariant $variant, array $selection = []): ?int
+    {
+        $figures = [];
+
+        if ($product->track_inventory) {
+            $figures[] = $variant !== null ? $variant->stockLeft() : $product->stockLeft();
+        }
+
+        foreach (self::describeAddons($product, $selection) as $row) {
+            $figures[] = $row['variant'] !== null
+                ? $row['variant']->stockLeft()
+                : $row['addon']->stockLeft();
+
+            $figures[] = $row['addon']->perOrderCap();
+        }
+
+        $figures = array_filter($figures, fn (?int $figure) => $figure !== null);
+
+        return $figures === [] ? null : (int) min($figures);
     }
 
     /**
      * Hold a quantity to what is sellable and to the per line cap.
+     *
+     * @param  array<int, int|null>  $selection
      */
-    private static function clamp(int $quantity, ShopProduct $product, ?int $variantId): int
+    private static function clamp(int $quantity, ShopProduct $product, ?int $variantId, array $selection = []): int
     {
         $variant = $variantId === null ? null : $product->variants->firstWhere('id', $variantId);
-        $available = self::available($product, $variant);
+        $available = self::available($product, $variant, $selection);
 
         $ceiling = $available === null
             ? self::MAX_PER_LINE

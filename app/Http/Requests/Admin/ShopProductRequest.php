@@ -20,8 +20,21 @@ class ShopProductRequest extends FormRequest
     /** How many pictures one product may carry. */
     private const MAX_IMAGES = 8;
 
+    /**
+     * Caps on the add-on builder. Lower than the option cap because an add-on is a
+     * question put to the buyer, and twenty questions on one product page is already
+     * more than anybody reads.
+     */
+    private const MAX_ADDONS = 20;
+
+    /** Options within one add-on. */
+    private const MAX_ADDON_OPTIONS = 20;
+
     /** @var Collection<int, \App\Models\ShopProductVariant>|null */
     private ?Collection $storedVariants = null;
+
+    /** @var Collection<int, \App\Models\ShopProductAddon>|null */
+    private ?Collection $storedAddons = null;
 
     public function authorize(): bool
     {
@@ -184,6 +197,39 @@ class ShopProductRequest extends FormRequest
 
             // Nullable means unlimited.
             'variants.*.stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
+
+            /* ---------------- Add-ons ----------------
+             |
+             | Extras taken alongside whichever option was chosen, such as engraving.
+             | Shaped like the event add-on rules because it is the same question
+             | asked of a product, and a second shape would mean a second set of
+             | messages to keep in step.
+             */
+
+            'addons' => ['array', 'max:' . self::MAX_ADDONS],
+            'addons.*.id' => ['nullable', 'integer'],
+            'addons.*.name' => ['required', 'string', 'max:180'],
+            'addons.*.description' => ['nullable', 'string', 'max:255'],
+
+            // Required rather than defaulted to zero: a forgotten price would give
+            // the extra away on every order.
+            'addons.*.price' => ['required', 'numeric', 'min:0', 'max:999999.99'],
+
+            'addons.*.max_quantity' => ['nullable', 'integer', 'min:1', 'max:1000'],
+
+            // Nullable means unlimited, which is not the same as zero.
+            'addons.*.stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
+
+            'addons.*.is_required' => ['boolean'],
+            'addons.*.is_active' => ['boolean'],
+
+            'addons.*.variants' => ['array', 'max:' . self::MAX_ADDON_OPTIONS],
+            'addons.*.variants.*.id' => ['nullable', 'integer'],
+            'addons.*.variants.*.label' => ['required', 'string', 'max:60'],
+
+            // Blank means charge the add-on's price, so null is meaningful.
+            'addons.*.variants.*.price' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
+            'addons.*.variants.*.stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
         ];
     }
 
@@ -207,6 +253,16 @@ class ShopProductRequest extends FormRequest
             'variants.*.price.numeric' => 'An option price must be a number, or blank to use the product price.',
             'variants.*.weight_kg.numeric' => 'An option weight must be a number in kilograms, or blank to use the product weight.',
             'variants.*.stock.integer' => 'Option stock must be a whole number, or blank for unlimited.',
+
+            'addons.max' => 'A product can carry at most ' . self::MAX_ADDONS . ' add-ons.',
+            'addons.*.name.required' => 'Every add-on needs a name, for example "Laser Engraving".',
+            'addons.*.price.required' => 'Every add-on needs a price. Enter 0 if it is included.',
+            'addons.*.price.numeric' => 'The add-on price must be a number.',
+            'addons.*.stock.integer' => 'Add-on stock must be a whole number, or blank for unlimited.',
+            'addons.*.variants.max' => 'An add-on can carry at most ' . self::MAX_ADDON_OPTIONS . ' options.',
+            'addons.*.variants.*.label.required' => 'Every add-on option needs a label, for example "Front".',
+            'addons.*.variants.*.price.numeric' => 'An option price must be a number, or blank to charge the add-on price.',
+            'addons.*.variants.*.stock.integer' => 'Option stock must be a whole number, or blank for unlimited.',
         ];
     }
 
@@ -231,6 +287,7 @@ class ShopProductRequest extends FormRequest
             'cost_price' => $this->filled('cost_price') ? $this->input('cost_price') : null,
 
             'variants' => $this->normalisedVariants(),
+            'addons' => $this->normalisedProductAddons(),
             'payment_methods' => $this->normalisedPaymentMethods(),
         ]);
     }
@@ -271,6 +328,10 @@ class ShopProductRequest extends FormRequest
             fn (Validator $validator) => $this->checkOptionNameIsGiven($validator),
             fn (Validator $validator) => $this->checkNothingSoldWasRemoved($validator),
             fn (Validator $validator) => $this->checkCollectionPointIsUsable($validator),
+
+            fn (Validator $validator) => $this->checkAddonOptionLabelsAreUnique($validator),
+            fn (Validator $validator) => $this->checkAddonStockCoversWhatHasGone($validator),
+            fn (Validator $validator) => $this->checkNoSoldAddonWasRemoved($validator),
         ];
     }
 
@@ -418,6 +479,173 @@ class ShopProductRequest extends FormRequest
     }
 
     /* ---------------------------------------------------------------------
+     | Add-on checks
+     |
+     | Three rules a per field rule cannot express, shaped like the option checks
+     | above because they guard the same three things: a unique index, a stock
+     | figure that has to stay above what has gone, and a row somebody has paid for.
+     * ------------------------------------------------------------------ */
+
+    /**
+     * Two options with the same label inside one add-on are indistinguishable to a
+     * buyer, and shop_product_addon_variants carries a unique index on
+     * (add-on, label) that would otherwise surface as a 500 on save.
+     */
+    private function checkAddonOptionLabelsAreUnique(Validator $validator): void
+    {
+        foreach ((array) $this->input('addons', []) as $i => $addon) {
+            $seen = [];
+
+            foreach ((array) ($addon['variants'] ?? []) as $j => $option) {
+                $label = mb_strtolower(trim((string) ($option['label'] ?? '')));
+
+                if ($label === '') {
+                    continue;
+                }
+
+                if (isset($seen[$label])) {
+                    $validator->errors()->add(
+                        "addons.{$i}.variants.{$j}.label",
+                        sprintf('"%s" is listed more than once in this add-on.', $option['label']),
+                    );
+
+                    continue;
+                }
+
+                $seen[$label] = true;
+            }
+        }
+    }
+
+    /**
+     * Stock is a total, not a remainder, so it can never be set below what has
+     * already been ordered. The add-on's own figure and each option's are checked
+     * against their own stock_taken, because the two counts are kept separately.
+     */
+    private function checkAddonStockCoversWhatHasGone(Validator $validator): void
+    {
+        $stored = $this->storedAddons();
+
+        if ($stored->isEmpty()) {
+            return;
+        }
+
+        foreach ((array) $this->input('addons', []) as $i => $row) {
+            $addon = blank($row['id'] ?? null) ? null : $stored->get((int) $row['id']);
+
+            if ($addon === null) {
+                continue;
+            }
+
+            if (($row['stock'] ?? null) !== null && (int) $row['stock'] < $addon->stock_taken) {
+                $validator->errors()->add(
+                    "addons.{$i}.stock",
+                    sprintf('%d already ordered, so stock cannot go below %d.', $addon->stock_taken, $addon->stock_taken),
+                );
+            }
+
+            $options = $addon->variants->keyBy('id');
+
+            foreach ((array) ($row['variants'] ?? []) as $j => $option) {
+                $model = blank($option['id'] ?? null) ? null : $options->get((int) $option['id']);
+
+                if ($model === null || ($option['stock'] ?? null) === null) {
+                    continue;
+                }
+
+                if ((int) $option['stock'] < $model->stock_taken) {
+                    $validator->errors()->add(
+                        "addons.{$i}.variants.{$j}.stock",
+                        sprintf('%d already ordered, so stock cannot go below %d.', $model->stock_taken, $model->stock_taken),
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Removing an add-on or an option somebody has already paid for is refused.
+     *
+     * The order lines would survive — they keep their own copy of the name and
+     * price — but the link back to the catalogue and its stock count would be gone
+     * for good. Setting the stock to what has gone stops it selling while keeping
+     * the record, so the message says that rather than only saying no.
+     */
+    private function checkNoSoldAddonWasRemoved(Validator $validator): void
+    {
+        $stored = $this->storedAddons();
+
+        if ($stored->isEmpty()) {
+            return;
+        }
+
+        $rows = (array) $this->input('addons', []);
+
+        $keptAddonIds = collect($rows)
+            ->pluck('id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        foreach ($stored as $addon) {
+            if (! in_array($addon->id, $keptAddonIds, true)) {
+                if ($addon->stock_taken > 0) {
+                    $validator->errors()->add(
+                        'addons',
+                        sprintf(
+                            'Add-on "%s" has %d order(s), so it cannot be removed. Set its stock to %d to stop selling it instead.',
+                            $addon->name,
+                            $addon->stock_taken,
+                            $addon->stock_taken,
+                        ),
+                    );
+                }
+
+                foreach ($addon->variants->filter(fn ($option) => $option->stock_taken > 0) as $option) {
+                    $validator->errors()->add(
+                        'addons',
+                        sprintf(
+                            'Option "%s" of add-on "%s" has %d order(s), so it cannot be removed. Set its stock to %d to stop selling it instead.',
+                            $option->label,
+                            $addon->name,
+                            $option->stock_taken,
+                            $option->stock_taken,
+                        ),
+                    );
+                }
+
+                continue;
+            }
+
+            // The add-on stayed, so only the options dropped from inside it matter.
+            $row = collect($rows)->first(fn ($candidate) => (int) ($candidate['id'] ?? 0) === $addon->id);
+
+            $keptOptionIds = collect($row['variants'] ?? [])
+                ->pluck('id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            $removed = $addon->variants
+                ->whereNotIn('id', $keptOptionIds)
+                ->filter(fn ($option) => $option->stock_taken > 0);
+
+            foreach ($removed as $option) {
+                $validator->errors()->add(
+                    'addons',
+                    sprintf(
+                        'Option "%s" of add-on "%s" has %d order(s), so it cannot be removed. Set its stock to %d to stop selling it instead.',
+                        $option->label,
+                        $addon->name,
+                        $option->stock_taken,
+                        $option->stock_taken,
+                    ),
+                );
+            }
+        }
+    }
+
+    /* ---------------------------------------------------------------------
      | Normalising
      * ------------------------------------------------------------------ */
 
@@ -471,6 +699,101 @@ class ShopProductRequest extends FormRequest
     }
 
     /**
+     * Tidy the add-on rows before they are validated.
+     *
+     * Re-indexed from zero so the error keys line up with the rows on screen, rows
+     * the operator opened but never typed into are dropped so a stray click on
+     * "Add an Add-on" cannot block a save, and null stays distinct from zero for
+     * both price and stock.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalisedProductAddons(): array
+    {
+        $rows = $this->input('addons');
+
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $clean = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $id = blank($row['id'] ?? null) ? null : (int) $row['id'];
+            $name = is_string($row['name'] ?? null) ? trim($row['name']) : '';
+            $price = ($row['price'] ?? '') === '' ? null : $row['price'];
+            $stock = ($row['stock'] ?? '') === '' ? null : $row['stock'];
+            $options = $this->normalisedAddonOptions($row['variants'] ?? []);
+
+            /*
+             | Untouched blank row. A row that carries an id is kept even when blank,
+             | so clearing a saved add-on's name is reported rather than silently
+             | deleting the add-on and the stock count with it.
+             */
+            if ($id === null && $name === '' && $price === null && $stock === null && $options === []) {
+                continue;
+            }
+
+            $clean[] = [
+                'id' => $id,
+                'name' => $name,
+                'description' => filled($row['description'] ?? null) ? trim((string) $row['description']) : null,
+                'price' => $price,
+                'max_quantity' => blank($row['max_quantity'] ?? null) ? null : (int) $row['max_quantity'],
+                'stock' => $stock,
+                'is_required' => (bool) ($row['is_required'] ?? false),
+                'is_active' => (bool) ($row['is_active'] ?? false),
+                'variants' => $options,
+            ];
+        }
+
+        return $clean;
+    }
+
+    /**
+     * @param  mixed  $options
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalisedAddonOptions($options): array
+    {
+        if (! is_array($options)) {
+            return [];
+        }
+
+        $clean = [];
+
+        foreach ($options as $option) {
+            if (! is_array($option)) {
+                continue;
+            }
+
+            $id = blank($option['id'] ?? null) ? null : (int) $option['id'];
+            $label = is_string($option['label'] ?? null) ? trim($option['label']) : '';
+
+            // Same rule as the add-on rows above: a blank new row is dropped, a
+            // blank saved row is kept so clearing its label is reported.
+            if ($id === null && $label === '') {
+                continue;
+            }
+
+            $clean[] = [
+                'id' => $id,
+                'label' => $label,
+
+                // Blank means "charge the add-on's price", so it must not become zero.
+                'price' => ($option['price'] ?? '') === '' ? null : $option['price'],
+                'stock' => ($option['stock'] ?? '') === '' ? null : $option['stock'],
+            ];
+        }
+
+        return $clean;
+    }
+
+    /**
      * The options currently stored against the product being edited.
      *
      * @return Collection<int, \App\Models\ShopProductVariant>
@@ -485,6 +808,26 @@ class ShopProductRequest extends FormRequest
 
         return $this->storedVariants = $product instanceof ShopProduct
             ? $product->variants()->get()
+            : collect();
+    }
+
+    /**
+     * The add-ons currently stored against the product being edited, keyed by id.
+     *
+     * Memoised because all three add-on checks walk the same list.
+     *
+     * @return Collection<int, \App\Models\ShopProductAddon>
+     */
+    private function storedAddons(): Collection
+    {
+        if ($this->storedAddons !== null) {
+            return $this->storedAddons;
+        }
+
+        $product = $this->route('product');
+
+        return $this->storedAddons = $product instanceof ShopProduct
+            ? $product->addons()->with('variants')->get()->keyBy('id')
             : collect();
     }
 
@@ -511,6 +854,11 @@ class ShopProductRequest extends FormRequest
             'coupons_present',
 
             'variants',
+
+            // Written to their own tables by ShopProductAddonWriter, never to the
+            // products row.
+            'addons',
+
             'images',
             'remove_images',
             'featured_image',
@@ -611,6 +959,16 @@ class ShopProductRequest extends FormRequest
 
             return $row;
         }, $rows);
+    }
+
+    /**
+     * Validated add-on rows, in the order the form submitted them.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function addonRows(): array
+    {
+        return $this->validated()['addons'] ?? [];
     }
 
     /**

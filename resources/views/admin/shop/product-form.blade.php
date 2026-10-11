@@ -279,6 +279,16 @@
             {{-- ==================== Options ==================== --}}
             @include('admin.shop.partials.variants', ['product' => $product, 'input' => $input])
 
+            {{-- ==================== Add-ons ====================
+
+                 Directly after Options, because the two answer neighbouring
+                 questions: which one of this product, and what else goes with it. --}}
+            @include('admin.shop.partials.addons', [
+                'product' => $product,
+                'input' => $input,
+                'currency' => $currency,
+            ])
+
             {{-- ==================== Pictures ==================== --}}
             <x-admin.panel title="Pictures" icon="photo">
                 @if ($product->exists && $product->images->isNotEmpty())
@@ -774,6 +784,164 @@
             }
 
             remove.closest('[data-variant-row]').remove();
+            syncChrome();
+        });
+
+        syncChrome();
+    })();
+
+    /* ---------------------------------------------------------------------
+     | Add-ons builder
+     |
+     | The same nextIndex()/syncChrome() approach as the Options builder above, on
+     | its own set of ids and data attributes. It has to stay on its own set: both
+     | builders live on this page, and a shared selector would have one cloning the
+     | other's rows and submitting them under the wrong field names.
+     |
+     | Two levels of cloning, so the option rows are indexed per add-on card rather
+     | than globally: addons[i][variants][j][...].
+     * ------------------------------------------------------------------ */
+    (function () {
+        const list = document.getElementById('product-addon-list');
+        const emptyState = document.getElementById('product-addon-empty');
+        const addButton = document.getElementById('product-addon-add');
+        const template = document.getElementById('product-addon-template');
+        const optionTemplate = document.getElementById('product-addon-option-template');
+
+        if (!list || !addButton || !template || !optionTemplate) {
+            return;
+        }
+
+        // Read the highest index in use rather than counting rows, so a removal in
+        // the middle cannot cause two add-ons to share a name.
+        function nextAddonIndex() {
+            let highest = -1;
+
+            list.querySelectorAll('[data-product-addon-row] input[name], [data-product-addon-row] select[name]').forEach(function (field) {
+                const match = field.name.match(/^addons\[(\d+)\]/);
+
+                if (match) {
+                    highest = Math.max(highest, parseInt(match[1], 10));
+                }
+            });
+
+            return highest + 1;
+        }
+
+        // The index of this card, read off a field rather than from the position in
+        // the list, so the two stay in step after a removal.
+        function addonIndexOf(row) {
+            const field = row.querySelector('input[name^="addons["]');
+            const match = field ? field.name.match(/^addons\[(\d+)\]/) : null;
+
+            return match ? match[1] : '0';
+        }
+
+        function nextOptionIndex(row) {
+            let highest = -1;
+
+            row.querySelectorAll('[data-product-addon-option-row] input[name]').forEach(function (field) {
+                const match = field.name.match(/^addons\[\d+\]\[variants\]\[(\d+)\]/);
+
+                if (match) {
+                    highest = Math.max(highest, parseInt(match[1], 10));
+                }
+            });
+
+            return highest + 1;
+        }
+
+        function syncChrome() {
+            const count = list.querySelectorAll('[data-product-addon-row]').length;
+
+            emptyState?.classList.toggle('hidden', count > 0);
+
+            list.querySelectorAll('[data-product-addon-row]').forEach(function (row) {
+                const options = row.querySelectorAll('[data-product-addon-option-row]').length;
+                const note = row.querySelector('[data-product-addon-option-empty]');
+
+                note?.classList.toggle('hidden', options > 0);
+            });
+        }
+
+        function build(html) {
+            const holder = document.createElement('div');
+            holder.innerHTML = html.trim();
+
+            return holder.firstElementChild;
+        }
+
+        addButton.addEventListener('click', function () {
+            const row = build(template.innerHTML.split('__INDEX__').join(nextAddonIndex()));
+
+            list.appendChild(row);
+            syncChrome();
+
+            // Straight into the name, since that is the first thing to type.
+            row.querySelector('input[type="text"]')?.focus();
+        });
+
+        list.addEventListener('click', function (event) {
+            const optionAdd = event.target.closest('[data-product-addon-option-add]');
+
+            if (optionAdd) {
+                const row = optionAdd.closest('[data-product-addon-row]');
+                const optionList = row.querySelector('[data-product-addon-option-list]');
+
+                const option = build(
+                    optionTemplate.innerHTML
+                        .split('__INDEX__').join(addonIndexOf(row))
+                        .split('__OINDEX__').join(nextOptionIndex(row))
+                );
+
+                optionList.appendChild(option);
+                syncChrome();
+                option.querySelector('input[type="text"]')?.focus();
+
+                return;
+            }
+
+            const optionRemove = event.target.closest('[data-product-addon-option-remove]');
+
+            if (optionRemove) {
+                /*
+                 | An option somebody has already ordered cannot be pulled out: the
+                 | order line would keep its snapshot but lose the link back to the
+                 | catalogue and its stock count. Refused here as well as on save.
+                 */
+                if (optionRemove.hasAttribute('data-product-addon-option-locked')) {
+                    window.alert(
+                        'This option has ' + optionRemove.getAttribute('data-product-addon-option-locked') +
+                        ' order(s), so it cannot be removed.\n\n' +
+                        'Set its stock to the number already ordered to stop selling it.'
+                    );
+
+                    return;
+                }
+
+                optionRemove.closest('[data-product-addon-option-row]').remove();
+                syncChrome();
+
+                return;
+            }
+
+            const remove = event.target.closest('[data-product-addon-remove]');
+
+            if (!remove) {
+                return;
+            }
+
+            if (remove.hasAttribute('data-product-addon-locked')) {
+                window.alert(
+                    'This add-on has ' + remove.getAttribute('data-product-addon-locked') +
+                    ' order(s), so it cannot be removed.\n\n' +
+                    'Set its stock to the number already ordered, or untick "Offer this add-on", to stop selling it.'
+                );
+
+                return;
+            }
+
+            remove.closest('[data-product-addon-row]').remove();
             syncChrome();
         });
 

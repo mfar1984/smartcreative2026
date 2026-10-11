@@ -207,6 +207,17 @@
                             <li class="flex flex-wrap justify-between gap-3 px-5 py-3.5">
                                 <span class="min-w-0">
                                     <span class="block text-sm font-semibold text-gray-900">{{ $item->label() }}</span>
+
+                                    {{-- The extras on this line, read off the order's own
+                                         snapshot rows rather than the catalogue, so they
+                                         still read correctly after the add-on is renamed
+                                         or deleted. --}}
+                                    @foreach ($item->addons as $addon)
+                                        <span class="block text-xs text-gray-500 tabular-nums">
+                                            + {{ $addon->describe() }} &mdash; {{ $addon->unitPriceLabel() }} each
+                                        </span>
+                                    @endforeach
+
                                     <span class="block text-xs text-gray-500 tabular-nums">
                                         {{ $item->unitPriceLabel() }} &times; {{ $item->quantity }}
                                     </span>

@@ -234,6 +234,16 @@
                                             @if ($line['variant'])
                                                 <span class="block text-xs text-gray-500">{{ $line['variant']->label }}</span>
                                             @endif
+
+                                            {{-- Sub-rows, so a line with no extras looks
+                                                 exactly as it did. --}}
+                                            @foreach ($line['addons'] as $addon)
+                                                <span class="block text-xs text-gray-500 tabular-nums">
+                                                    + {{ $addon['addon']->name }}@if ($addon['variant']) ({{ $addon['variant']->label }})@endif
+                                                    &mdash; {{ App\Support\PaymentFigures::money($addon['unit_price']) }} each
+                                                </span>
+                                            @endforeach
+
                                             <span class="block text-xs text-gray-500 tabular-nums">&times; {{ $line['quantity'] }}</span>
                                         </span>
                                         <span class="font-semibold text-gray-900 tabular-nums whitespace-nowrap">

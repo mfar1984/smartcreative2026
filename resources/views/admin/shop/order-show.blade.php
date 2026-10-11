@@ -115,8 +115,38 @@
 
                                         <td class="px-5 py-3 text-right tabular-nums text-gray-700">{{ $item->unitPriceLabel() }}</td>
                                         <td class="px-5 py-3 text-center tabular-nums text-gray-700">{{ $item->quantity }}</td>
-                                        <td class="px-5 py-3 text-right tabular-nums font-semibold text-gray-900">{{ $item->lineTotalLabel() }}</td>
+                                        <td class="px-5 py-3 text-right tabular-nums font-semibold text-gray-900">
+                                            {{ $item->lineTotalLabel() }}
+
+                                            @if ($item->addons->isNotEmpty())
+                                                {{-- The product's own money on this line, so the
+                                                     sub-rows below read as the arithmetic rather
+                                                     than as a column that does not add up. --}}
+                                                <span class="block text-xs font-normal text-gray-500">
+                                                    {{ App\Support\PaymentFigures::money($item->baseLineTotal()) }} + extras
+                                                </span>
+                                            @endif
+                                        </td>
                                     </tr>
+
+                                    {{-- One row per extra, indented under the line it was bought
+                                         with. A line with none renders nothing extra, so the table
+                                         is exactly what it was. --}}
+                                    @foreach ($item->addons as $addon)
+                                        <tr class="bg-gray-50/60">
+                                            <td class="px-5 py-2 pl-9 text-xs text-gray-600">
+                                                + {{ $addon->describe() }}
+
+                                                @unless ($addon->addon)
+                                                    <span class="block text-xs text-gray-400">No longer in the catalogue</span>
+                                                @endunless
+                                            </td>
+                                            <td class="px-5 py-2"></td>
+                                            <td class="px-5 py-2 text-right tabular-nums text-xs text-gray-600">{{ $addon->unitPriceLabel() }}</td>
+                                            <td class="px-5 py-2 text-center tabular-nums text-xs text-gray-600">{{ $addon->quantity }}</td>
+                                            <td class="px-5 py-2 text-right tabular-nums text-xs text-gray-700">{{ $addon->lineTotalLabel() }}</td>
+                                        </tr>
+                                    @endforeach
                                 @endforeach
                             </tbody>
 

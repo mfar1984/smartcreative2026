@@ -141,6 +141,32 @@ class ShopProduct extends Model
             ->orderBy('id');
     }
 
+    /**
+     * Extras that can be taken with this product, such as engraving.
+     *
+     * A separate question from variants: the variant is which one of the product,
+     * the add-on is what else goes with whichever variant was chosen.
+     */
+    public function addons(): HasMany
+    {
+        return $this->hasMany(ShopProductAddon::class)
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
+    /**
+     * Add-ons the storefront should offer, mirroring Event::purchasableAddons().
+     *
+     * Filtered in PHP rather than by a query so an already loaded relation is
+     * reused; the product page walks the same list several times.
+     *
+     * @return \Illuminate\Support\Collection<int, ShopProductAddon>
+     */
+    public function purchasableAddons()
+    {
+        return $this->addons->filter(fn (ShopProductAddon $addon) => $addon->isPurchasable())->values();
+    }
+
     /* ---------------------------------------------------------------------
      | Images
      * ------------------------------------------------------------------ */

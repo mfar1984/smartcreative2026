@@ -547,7 +547,9 @@ class CheckoutController extends Controller
     private function findOrder(string $reference): ShopOrder
     {
         return ShopOrder::query()
-            ->with('items')
+            // items.addons, so the confirmation page lists the extras without a
+            // query per line.
+            ->with('items.addons')
             ->where('reference', $reference)
             ->firstOrFail();
     }

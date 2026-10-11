@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Support\PaymentFigures;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * One line on an order.
@@ -53,6 +54,37 @@ class ShopOrderItem extends Model
     public function variant(): BelongsTo
     {
         return $this->belongsTo(ShopProductVariant::class, 'shop_product_variant_id');
+    }
+
+    /**
+     * The extras taken with this line.
+     *
+     * Ordered by id, which is the order they were written in, so an invoice lists
+     * them the way the buyer chose them.
+     */
+    public function addons(): HasMany
+    {
+        return $this->hasMany(ShopOrderItemAddon::class)->orderBy('id');
+    }
+
+    /**
+     * What the extras came to on this line.
+     */
+    public function addonsTotal(): float
+    {
+        return round((float) $this->addons->sum(fn (ShopOrderItemAddon $addon) => (float) $addon->line_total), 2);
+    }
+
+    /**
+     * The product's own money on this line, before the extras.
+     *
+     * line_total already includes the extras, so a view that shows both figures can
+     * print the arithmetic — base plus extras equals the line — rather than leaving
+     * a reader to assume the column adds up.
+     */
+    public function baseLineTotal(): float
+    {
+        return round((float) $this->unit_price * (int) $this->quantity, 2);
     }
 
     /**

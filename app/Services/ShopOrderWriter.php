@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\ShopOrder;
 use App\Models\ShopOrderEvent;
 use App\Models\ShopProduct;
+use App\Models\ShopProductAddon;
+use App\Models\ShopProductAddonVariant;
 use App\Models\ShopProductVariant;
 use App\Support\Cart;
 use App\Support\ShippingSettings;
@@ -145,7 +147,7 @@ class ShopOrderWriter
                 /** @var ShopProductVariant|null $variant */
                 $variant = $line['variant'];
 
-                $order->items()->create([
+                $item = $order->items()->create([
                     'shop_product_id' => $product->id,
                     'shop_product_variant_id' => $variant?->id,
 
@@ -158,6 +160,30 @@ class ShopOrderWriter
                     'line_total' => $line['line_total'],
                     'weight_grams' => $line['weight_grams'] ?: null,
                 ]);
+
+                /*
+                 | The extras taken with this line, snapshotted the same way.
+                 |
+                 | One per unit bought, so ten medals are ten engravings and the
+                 | arithmetic closes: unit_price × quantity plus every add-on line
+                 | total is this line's line_total, which Cart already worked out.
+                 | Nothing above changes — items_total, the discount, the postage and
+                 | the grand total are all built from line_total, which carries the
+                 | add-on money already.
+                 */
+                foreach ($line['addons'] ?? [] as $addon) {
+                    $unitPrice = round((float) $addon['unit_price'], 2);
+
+                    $item->addons()->create([
+                        'shop_product_addon_id' => $addon['addon']->id,
+                        'shop_product_addon_variant_id' => $addon['variant']?->id,
+                        'name' => $addon['addon']->name,
+                        'variant_label' => $addon['variant']?->label,
+                        'unit_price' => $unitPrice,
+                        'quantity' => $line['quantity'],
+                        'line_total' => round($unitPrice * (int) $line['quantity'], 2),
+                    ]);
+                }
             }
 
             $this->record($order, ShopOrder::STATUS_PENDING_PAYMENT, sprintf(
@@ -288,7 +314,40 @@ class ShopOrderWriter
      */
     private function takeStock(ShopOrder $order): void
     {
+        // The extras come off with the lines they belong to, so they are loaded
+        // with them rather than one query per line.
+        $order->loadMissing('items.addons');
+
         foreach ($order->items as $item) {
+            /*
+             | The extras on this line, counted the same way the size is: the
+             | option's figure where the add-on has options, its own where it does
+             | not. The same split ShopProduct::stockLeft() makes.
+             |
+             | There is no decrement anywhere to match this, and that is deliberate
+             | rather than missing. Across the shop the ONLY writer of
+             | shop_product_variants.stock_taken is the increment below: a refund, a
+             | move to cancelled and deleting an order all give nothing back. An
+             | add-on that quietly returned stock while the size it was bought with
+             | did not would be a new asymmetry on a live store, so it follows the
+             | one path the sizes follow and nothing else.
+             */
+            foreach ($item->addons as $addon) {
+                if ($addon->shop_product_addon_variant_id !== null) {
+                    ShopProductAddonVariant::query()
+                        ->whereKey($addon->shop_product_addon_variant_id)
+                        ->increment('stock_taken', $addon->quantity);
+
+                    continue;
+                }
+
+                if ($addon->shop_product_addon_id !== null) {
+                    ShopProductAddon::query()
+                        ->whereKey($addon->shop_product_addon_id)
+                        ->increment('stock_taken', $addon->quantity);
+                }
+            }
+
             if ($item->shop_product_variant_id !== null) {
                 ShopProductVariant::query()
                     ->whereKey($item->shop_product_variant_id)

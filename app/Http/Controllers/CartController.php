@@ -54,6 +54,15 @@ class CartController extends Controller
             'product_id' => ['required', 'integer'],
             'variant_id' => ['nullable', 'integer'],
             'quantity' => ['nullable', 'integer', 'min:1', 'max:' . Cart::MAX_PER_LINE],
+
+            /*
+             | The chosen extras, checked for shape only. Which add-on, which option,
+             | whether it is compulsory and what any of it costs are all settled
+             | against the database in Cart, the rule this whole class follows: a
+             | validation rule here would be a second authority free to disagree.
+             */
+            'addons' => ['nullable', 'array'],
+            'addons.*' => ['nullable'],
         ]);
 
         /*
@@ -66,6 +75,7 @@ class CartController extends Controller
             (int) $validated['product_id'],
             isset($validated['variant_id']) ? (int) $validated['variant_id'] : null,
             (int) ($validated['quantity'] ?? 1),
+            (array) ($validated['addons'] ?? []),
         );
 
         if ($refusal !== null) {

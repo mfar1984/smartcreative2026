@@ -21,7 +21,7 @@ class ShopOrderChargeBuilder
      */
     public function build(ShopOrder $order): GatewayCharge
     {
-        $order->loadMissing(['items', 'couponCode']);
+        $order->loadMissing(['items.addons', 'couponCode']);
 
         $products = [];
 
@@ -68,6 +68,34 @@ class ShopOrderChargeBuilder
                     // declares it as a string and casts on the way in.
                     'quantity' => (string) (int) $item->quantity,
                 ];
+
+                /*
+                 | An extra is its own line, straight after the line it was bought
+                 | with.
+                 |
+                 | Not cosmetic. shop_order_items.unit_price is the product or option
+                 | price alone and the add-on money rides on items_total through the
+                 | line total, so without these lines the guard below — line total
+                 | against grand total, to the cent — would refuse EVERY gateway
+                 | payment on an order carrying an extra, before any HTTP call.
+                 |
+                 | A free extra is left out rather than sent at zero: CHIP is being
+                 | asked to charge for products, and a nil product adds nothing to
+                 | the sum either way.
+                 */
+                foreach ($item->addons as $addon) {
+                    $price = $this->cents((float) $addon->unit_price);
+
+                    if ($price <= 0) {
+                        continue;
+                    }
+
+                    $products[] = [
+                        'name' => $this->trim($item->label() . ' · ' . $addon->describe()),
+                        'price' => $price,
+                        'quantity' => (string) (int) $addon->quantity,
+                    ];
+                }
             }
         }
 

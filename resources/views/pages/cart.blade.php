@@ -100,6 +100,16 @@
                                         <p class="text-sm text-gray-500 mt-0.5 tabular-nums">
                                             {{ App\Support\PaymentFigures::money($line['unit_price']) }} each
                                         </p>
+
+                                        {{-- The extras chosen with this line, indented under
+                                             it. A line without any renders nothing at all, so
+                                             the layout is exactly what it was. --}}
+                                        @foreach ($line['addons'] as $addon)
+                                            <p class="text-xs text-gray-500 mt-0.5 tabular-nums">
+                                                + {{ $addon['addon']->name }}@if ($addon['variant']) ({{ $addon['variant']->label }})@endif
+                                                &mdash; {{ App\Support\PaymentFigures::money($addon['unit_price']) }} each
+                                            </p>
+                                        @endforeach
                                     </div>
 
                                     <div class="flex items-center gap-4 sm:flex-col sm:items-end sm:gap-2">

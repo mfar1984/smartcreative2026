@@ -88,7 +88,10 @@ class ShopController extends Controller
         // active() before the slug lookup, so a draft 404s rather than 403s. There
         // is nothing to tell a stranger about a product that is not for sale.
         $product = ShopProduct::query()
-            ->with(['images', 'variants', 'categories'])
+            // addons.variants because purchasableAddons() filters the loaded
+            // relation, so the Extras block costs one query rather than one per
+            // add-on.
+            ->with(['images', 'variants', 'categories', 'addons.variants'])
             ->active()
             ->where('slug', $slug)
             ->firstOrFail();
