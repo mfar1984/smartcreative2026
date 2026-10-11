@@ -1,0 +1,21 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "{\"rows\":[{\"team\":\"MDESA\",\"rank\":\"1\",\"kp\":\"12\"},{\"team\":\"96K\",\"rank\":\"2\",\"kp\":\"9\"},{\"team\":\"V18\",\"rank\":\"I0\",\"kp\":\"4\"},{\"team\":\"KLASIK\",\"rank\":\"I6\",\"kp\":\"II\"},{\"team\":\"-\",\"rank\":\"\",\"kp\":\"\"},{\"team\":\"NOT IN THIS LOBBY\",\"rank\":\"I2\",\"kp\":\"3\"},{\"team\":\"SPARTAN\",\"rank\":\"O\",\"kp\":\"5\"}]}"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 912,
+    "candidatesTokenCount": 214,
+    "totalTokenCount": 1126
+  },
+  "modelVersion": "gemini-flash-latest"
+}

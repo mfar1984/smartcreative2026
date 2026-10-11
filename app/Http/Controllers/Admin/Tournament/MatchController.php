@@ -15,6 +15,7 @@ use App\Models\TournamentStage;
 use App\Services\AdminLogger;
 use App\Support\ParticipantOptions;
 use App\Support\Tournament\PlayerStandingsCalculator;
+use App\Support\Tournament\ScoreSheetFields;
 use App\Support\Tournament\ScoringEngine;
 use App\Support\Tournament\StageAdvancer;
 use App\Support\Tournament\StandingsCalculator;
@@ -242,6 +243,14 @@ class MatchController extends Controller
             'lines' => $match->entrants->sortBy(fn ($line) => [$line->slot ?? 99, $line->id])->values(),
             'requiresProof' => (bool) $match->tournament->setting('require_proof', false),
             'canScore' => $request->user()->hasPermission('tournaments.matches.score'),
+
+            /*
+             | Whether a screenshot of a results table has anything to fill in here,
+             | and which inputs it would fill. Null for a profile with no table of
+             | positions and counts — badminton has no screenshot to read — which is
+             | what keeps the Upload Screenshot panel off those screens.
+             */
+            'sheetFields' => ScoreSheetFields::forRule($rule)?->toArray(),
 
             // The player ledger. Empty arrays when the profile has tracking off, which
             // is what keeps the form identical to what it is today for those profiles.

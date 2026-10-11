@@ -38,6 +38,7 @@ use App\Http\Controllers\Admin\Sponsorship\SponsorAreaController;
 use App\Http\Controllers\Admin\Tournament\HallOfFameController;
 use App\Http\Controllers\Admin\Tournament\MatchController;
 use App\Http\Controllers\Admin\Tournament\PointRuleController;
+use App\Http\Controllers\Admin\Tournament\ScoreSheetController;
 use App\Http\Controllers\Admin\Tournament\StageController;
 use App\Http\Controllers\Admin\Tournament\StandingController;
 use App\Http\Controllers\Admin\Tournament\TournamentController;
@@ -875,6 +876,19 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::delete('matches/{match}/score', [MatchController::class, 'clear'])
                 ->middleware(['permission:tournaments.matches.score', 'throttle:20,1'])
                 ->name('matches.score.clear');
+
+            /*
+            | Reading a result off a photograph of the results table. The scoring
+            | permission, because it is the scoring screen's own tool, and the same
+            | throttle as clearing a result because every press is a paid call to
+            | somebody else's model.
+            |
+            | It saves nothing. The answer goes into the form for the operator to
+            | check, and the result is still written by the PUT above.
+            */
+            Route::post('matches/{match}/score/read', [ScoreSheetController::class, 'read'])
+                ->middleware(['permission:tournaments.matches.score', 'throttle:20,1'])
+                ->name('matches.score.read');
 
             /*
             | The map a fixture is on and when it starts. Behind the draw permission

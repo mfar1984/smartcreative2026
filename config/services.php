@@ -28,6 +28,20 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    /*
+    | Google Gemini, which reads a results table off a screenshot on the score
+    | entry screen.
+    |
+    | The model id is a setting and not a constant: Google retires model ids on
+    | its own schedule, and a retired one must be answerable with a line in .env
+    | rather than with a deploy. "gemini-flash-latest" is the cheap, current
+    | Flash alias and the documented default.
+    */
+    'gemini' => [
+        'key' => env('GEMINI_API_KEY'),
+        'model' => env('GEMINI_MODEL', 'gemini-flash-latest'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

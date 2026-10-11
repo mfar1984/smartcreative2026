@@ -99,6 +99,83 @@
                 </p>
             </div>
         @else
+            {{-- ===== Read it off a screenshot =====
+                 Seventeen rows of position and kills typed by hand at a desk with a
+                 results screen in the other hand is where the mistakes come from. The
+                 table is read off an image and offered for checking; it is never saved
+                 from here.
+
+                 Above the form and outside it, both deliberately: outside, so no file
+                 picked here is posted with the result, and above, so the rows it fills
+                 in are the ones directly below. Only drawn where the profile has a
+                 table of positions to fill, which is what $sheetFields answers. --}}
+            @if ($canScore && $sheetFields !== null)
+                {{-- The picker, kept out of the form so no image chosen here is ever
+                     posted with the result. Hidden because the control the operator
+                     presses is Detect Image AI in the Result panel's own header, beside
+                     the table it fills in; this is only what that button opens. --}}
+                <div data-sheet class="hidden"
+                     data-sheet-url="{{ route('admin.tournaments.matches.score.read', $match) }}">
+                    <label for="sheet-images" class="sr-only">Results table screenshots</label>
+                    <input type="file" id="sheet-images" accept="image/jpeg,image/png,image/webp" multiple>
+                </div>
+
+                {{-- The review step, and the reason this feature is allowed to exist.
+                     Every row is shown with what is on the form now beside what was
+                     read, and a row the matcher was not sure of arrives unticked. --}}
+                <div id="sheet-dialog"
+                     class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/60 p-4"
+                     role="dialog" aria-modal="true" aria-labelledby="sheet-dialog-title">
+
+                    <div class="w-full max-w-3xl rounded-xl bg-white shadow-xl overflow-hidden max-h-full flex flex-col">
+                        <div class="flex items-start justify-between gap-4 px-5 py-4 border-b border-gray-200">
+                            <div>
+                                <h2 id="sheet-dialog-title" class="text-base font-bold text-gray-900">
+                                    What the screenshot says
+                                </h2>
+                                <p class="text-sm text-gray-500 mt-0.5">
+                                    {{ $match->label() }} &middot; check every row against the image, then
+                                    Apply. Untick anything you would rather type yourself.
+                                </p>
+                            </div>
+
+                            <button type="button" data-sheet-close
+                                    class="shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
+                                    aria-label="Close">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div class="overflow-y-auto px-5 py-4">
+                            <div data-sheet-rows class="space-y-2"></div>
+                            <div data-sheet-clashes class="hidden mt-5"></div>
+                            <div data-sheet-unmatched class="hidden mt-5"></div>
+                            <div data-sheet-uncovered class="hidden mt-5"></div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-t border-gray-200 bg-gray-50">
+                            <p class="text-xs text-gray-500 max-w-sm">
+                                Apply only types these figures into the form. Nothing is saved until you
+                                press {{ $match->isSettled() ? 'Correct Result' : 'Save Result' }}.
+                            </p>
+
+                            <div class="flex flex-wrap gap-2.5">
+                                <button type="button" data-sheet-close
+                                        class="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                    Cancel
+                                </button>
+                                <button type="button" data-sheet-apply
+                                        class="rounded-lg border border-blue-600 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                    Apply
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            @endif
+
             {{-- The form is built from the profile's declared inputs. There is no branch
                  on the sport anywhere here: PUBG asks for placement, kills and players
                  because its profile says so, and badminton asks for sets because its
@@ -118,6 +195,24 @@
                 <input type="hidden" name="_form_start" value="1">
 
                 <x-admin.panel :title="'Result — ' . $rule->name" icon="clipboard" :flush="true">
+                    {{-- In the panel's own header because that is where the table it
+                         fills in starts. A plain button, never a submit: it opens the
+                         picker outside this form and the result is still saved by the
+                         button at the bottom. --}}
+                    @if ($canScore && $sheetFields !== null)
+                        <x-slot:actions>
+                            <span data-sheet-status role="status" aria-live="polite"
+                                  class="hidden text-xs mr-2"></span>
+
+                            <button type="button" data-sheet-pick
+                                    title="Read the placement and kills off a photograph of the results table"
+                                    class="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                                <x-admin.icon name="clipboard" class="w-3.5 h-3.5" />
+                                Detect Image AI
+                            </button>
+                        </x-slot:actions>
+                    @endif
+
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead class="bg-gray-50 text-left">
@@ -1260,3 +1355,404 @@
     })();
 </script>
 @endpush
+
+{{-- Only shipped where the control exists, which is the same gate the button
+     carries: a battle royale lobby, and an operator who may score it. --}}
+@if ($canScore && $sheetFields !== null)
+@push('scripts')
+<script>
+    (function () {
+        /*
+         | Detect Image AI: read the results table off a photograph.
+         |
+         | Three rules this script exists to keep.
+         |
+         | It never saves. The endpoint it calls writes nothing, and Apply types into
+         | the inputs above and stops there. The result still goes through the same
+         | Save button, the same validation and the same transaction as a figure
+         | typed by hand, because a score that arrived on its own is a score nobody
+         | checked.
+         |
+         | It never chooses. A row the server was unsure of, and a row two images
+         | disagreed on, arrive unticked and marked. Rows that matched nothing and
+         | competitors no row covered are listed in full, so what the reader missed
+         | is on the screen rather than merely absent from it.
+         |
+         | And it builds every line of the dialog with textContent. Those names came
+         | out of a model reading somebody's photograph; they are data, and they are
+         | not ours to hand to a browser as markup.
+         |
+         | The player panels are left alone on purpose. Opening every one of them to
+         | fill it in is what pushed this form past PHP's limit on fields per request
+         | once already — see the note on data-skip-unopened above.
+         */
+        const sheet = document.querySelector('[data-sheet]');
+        const dialog = document.getElementById('sheet-dialog');
+        const trigger = document.querySelector('[data-sheet-pick]');
+
+        if (!sheet || !dialog || !trigger) {
+            return;
+        }
+
+        const picker = document.getElementById('sheet-images');
+        const status = document.querySelector('[data-sheet-status]');
+        const rowsBox = dialog.querySelector('[data-sheet-rows]');
+        const clashBox = dialog.querySelector('[data-sheet-clashes]');
+        const unmatchedBox = dialog.querySelector('[data-sheet-unmatched]');
+        const uncoveredBox = dialog.querySelector('[data-sheet-uncovered]');
+        const tokenField = document.querySelector('#score-form input[name="_token"]');
+
+        let reading = null;
+        let busy = false;
+
+        function say(message, tone) {
+            if (!status) {
+                return;
+            }
+
+            if (!message) {
+                status.className = 'hidden text-xs mr-2';
+                status.textContent = '';
+
+                return;
+            }
+
+            status.textContent = message;
+            status.className = 'text-xs mr-2 font-semibold '
+                + (tone === 'bad' ? 'text-red-600' : 'text-gray-500');
+        }
+
+        function el(tag, className, text) {
+            const node = document.createElement(tag);
+
+            node.className = className || '';
+
+            if (text !== undefined && text !== null) {
+                node.textContent = String(text);
+            }
+
+            return node;
+        }
+
+        function field(entrantId, key) {
+            return document.querySelector('[name="lines[' + entrantId + '][' + key + ']"]');
+        }
+
+        function winnerRadio(entrantId, key) {
+            return document.querySelector('input[name="single[' + key + ']"][value="' + entrantId + '"]');
+        }
+
+        /*
+         | What the form says now, read off the form rather than off the answer.
+         |
+         | The server sends what is recorded, but the operator may have typed since
+         | the page loaded, and the figure Apply would overwrite is the one in the
+         | box in front of them.
+         */
+        function onForm(entrantId, key, recorded) {
+            const input = field(entrantId, key);
+
+            if (input && input.value !== '') {
+                return input.value;
+            }
+
+            return (recorded === null || recorded === undefined || recorded === '')
+                ? 'blank'
+                : String(recorded);
+        }
+
+        function change(label, from, to) {
+            const line = el('span', 'block text-xs text-gray-600 mt-0.5');
+
+            line.appendChild(el('span', 'font-semibold text-gray-500', label + ' '));
+            line.appendChild(el('span', 'text-gray-500', from));
+            line.appendChild(el('span', 'mx-1 text-gray-400', '\u2192'));
+            line.appendChild(el('span', 'font-bold text-gray-900 tabular-nums', to));
+
+            return line;
+        }
+
+        function block(boxNode, title, tone, lines) {
+            boxNode.textContent = '';
+
+            if (lines.length === 0) {
+                boxNode.className = 'hidden mt-5';
+
+                return;
+            }
+
+            boxNode.className = 'mt-5 rounded-lg border p-3 '
+                + (tone === 'amber' ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-gray-50');
+
+            boxNode.appendChild(el(
+                'p',
+                'text-xs font-bold uppercase tracking-wide mb-1.5 '
+                    + (tone === 'amber' ? 'text-amber-800' : 'text-gray-600'),
+                title,
+            ));
+
+            const list = el('ul', 'space-y-1');
+
+            lines.forEach(function (text) {
+                list.appendChild(el(
+                    'li',
+                    'text-xs ' + (tone === 'amber' ? 'text-amber-800' : 'text-gray-600'),
+                    text,
+                ));
+            });
+
+            boxNode.appendChild(list);
+        }
+
+        function render(data) {
+            const placement = data.fields.placement;
+            const kills = data.fields.kills;
+            const winner = data.fields.winner;
+
+            rowsBox.textContent = '';
+
+            if (data.rows.length === 0) {
+                // Nothing matched and nothing read either: the reader was told to
+                // return no rows rather than invent them, so this is the wrong
+                // screenshot rather than a hard one.
+                rowsBox.appendChild(el(
+                    'p',
+                    'rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800',
+                    data.unmatched.length === 0
+                        ? 'This does not look like a PUBG results table. Nothing was read from it.'
+                        : 'Nothing in the image could be matched to a competitor in this fixture.',
+                ));
+            }
+
+            data.rows.forEach(function (row, index) {
+                // Unsure of the name, or read two different ways in two images.
+                // Either way the operator decides, so it starts unticked.
+                const flagged = row.low_confidence || row.conflict;
+
+                const line = el('label', 'flex items-start gap-3 rounded-lg border p-3 cursor-pointer '
+                    + (flagged ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-blue-50/30'));
+
+                const box = document.createElement('input');
+
+                box.type = 'checkbox';
+                box.className = 'mt-0.5 w-5 h-5 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40';
+                box.checked = !flagged;
+                box.setAttribute('data-sheet-row', String(index));
+                line.appendChild(box);
+
+                const body = el('span', 'min-w-0 flex-1');
+                const head = el('span', 'flex flex-wrap items-center gap-2');
+
+                head.appendChild(el('span', 'text-sm font-semibold text-gray-900', row.name));
+
+                if (winner && row.winner) {
+                    head.appendChild(el(
+                        'span',
+                        'rounded bg-amber-100 px-1.5 py-0.5 text-xs font-bold text-amber-800',
+                        winner.label,
+                    ));
+                }
+
+                if (flagged) {
+                    head.appendChild(el(
+                        'span',
+                        'rounded bg-amber-200 px-1.5 py-0.5 text-xs font-bold text-amber-900',
+                        row.conflict ? 'Images disagree' : 'Check the name',
+                    ));
+                }
+
+                body.appendChild(head);
+
+                if (row.read_as && row.read_as !== row.name) {
+                    body.appendChild(el('span', 'block text-xs text-gray-400 mt-0.5',
+                        'Printed as "' + row.read_as + '"'));
+                }
+
+                body.appendChild(change(
+                    placement.label,
+                    onForm(row.entrant_id, placement.key, row.current.placement),
+                    row.placement,
+                ));
+
+                body.appendChild(change(
+                    kills.label,
+                    onForm(row.entrant_id, kills.key, row.current.kills),
+                    row.kills,
+                ));
+
+                line.appendChild(body);
+                rowsBox.appendChild(line);
+            });
+
+            block(clashBox, 'Read two different ways', 'amber', data.clashes.map(function (clash) {
+                return clash.name + ': kept ' + placement.label.toLowerCase() + ' ' + clash.kept.placement
+                    + ' with ' + clash.kept.kills + ' ' + kills.label.toLowerCase()
+                    + ', another image gave ' + clash.also_read.placement + ' with '
+                    + clash.also_read.kills + '. Check which is right.';
+            }));
+
+            block(unmatchedBox, 'Rows nobody could be found for', 'amber', data.unmatched.map(function (row) {
+                const figures = row.placement === null
+                    ? ''
+                    : ' (' + placement.label.toLowerCase() + ' ' + row.placement + ', '
+                        + row.kills + ' ' + kills.label.toLowerCase() + ')';
+
+                return '"' + row.read_as + '"' + figures + ' — ' + row.reason + '.';
+            }));
+
+            block(uncoveredBox, 'Competitors no row covered', 'gray', data.uncovered.map(function (entrant) {
+                return entrant.name;
+            }));
+        }
+
+        function open() {
+            dialog.classList.remove('hidden');
+            dialog.classList.add('flex');
+            dialog.querySelector('[data-sheet-apply]')?.focus();
+        }
+
+        function close() {
+            dialog.classList.add('hidden');
+            dialog.classList.remove('flex');
+            trigger.focus();
+        }
+
+        function apply() {
+            if (reading === null) {
+                return;
+            }
+
+            const placementKey = reading.fields.placement.key;
+            const killsKey = reading.fields.kills.key;
+            const winnerKey = reading.fields.winner ? reading.fields.winner.key : null;
+
+            let filled = 0;
+
+            rowsBox.querySelectorAll('[data-sheet-row]').forEach(function (box) {
+                if (!box.checked) {
+                    return;
+                }
+
+                const row = reading.rows[Number(box.getAttribute('data-sheet-row'))];
+
+                if (!row) {
+                    return;
+                }
+
+                const placementInput = field(row.entrant_id, placementKey);
+                const killsInput = field(row.entrant_id, killsKey);
+
+                if (placementInput) {
+                    placementInput.value = String(row.placement);
+                }
+
+                if (killsInput) {
+                    killsInput.value = String(row.kills);
+                }
+
+                // A radio group, so ticking the winner unticks whoever held it. Never
+                // untick on its own: a row that is not the winner says nothing about
+                // who is, and Nobody stays available at the foot of the table.
+                if (winnerKey && row.winner) {
+                    const radio = winnerRadio(row.entrant_id, winnerKey);
+
+                    if (radio) {
+                        radio.checked = true;
+                    }
+                }
+
+                filled++;
+            });
+
+            close();
+
+            say(filled === 0
+                ? 'Nothing was filled in.'
+                : filled + (filled === 1 ? ' row' : ' rows') + ' filled in. Nothing is saved until you press Save.');
+        }
+
+        trigger.addEventListener('click', function () {
+            if (!busy) {
+                picker.click();
+            }
+        });
+
+        picker.addEventListener('change', function () {
+            if (busy || picker.files.length === 0) {
+                return;
+            }
+
+            const body = new FormData();
+
+            body.append('_token', tokenField ? tokenField.value : '');
+
+            Array.prototype.forEach.call(picker.files, function (file) {
+                body.append('images[]', file);
+            });
+
+            busy = true;
+            trigger.disabled = true;
+            say(picker.files.length === 1 ? 'Reading the image...' : 'Reading ' + picker.files.length + ' images...');
+
+            fetch(sheet.dataset.sheetUrl, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                body: body,
+            })
+                .then(function (response) {
+                    return response.json()
+                        .then(function (data) { return { ok: response.ok, data: data }; })
+                        .catch(function () { return { ok: false, data: {} }; });
+                })
+                .then(function (result) {
+                    if (result.ok && result.data.ok) {
+                        reading = result.data;
+                        render(reading);
+                        say('');
+                        open();
+
+                        return;
+                    }
+
+                    // A refusal from the reader carries a message; a refusal from
+                    // validation carries errors instead.
+                    const errors = result.data.errors
+                        ? Object.values(result.data.errors).flat().join(' ')
+                        : null;
+
+                    say(result.data.message || errors || 'The screenshot could not be read.', 'bad');
+                })
+                .catch(function () {
+                    say('The screenshot could not be read. Type the figures in instead.', 'bad');
+                })
+                .finally(function () {
+                    busy = false;
+                    trigger.disabled = false;
+
+                    // Cleared so picking the same file again still fires a change.
+                    picker.value = '';
+                });
+        });
+
+        dialog.querySelector('[data-sheet-apply]')?.addEventListener('click', apply);
+
+        dialog.querySelectorAll('[data-sheet-close]').forEach(function (button) {
+            button.addEventListener('click', close);
+        });
+
+        dialog.addEventListener('click', function (event) {
+            if (event.target === dialog) {
+                close();
+            }
+        });
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && !dialog.classList.contains('hidden')) {
+                close();
+            }
+        });
+    })();
+</script>
+@endpush
+@endif

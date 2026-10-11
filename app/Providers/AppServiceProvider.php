@@ -2,8 +2,10 @@
 
 namespace App\Providers;
 
+use App\Contracts\ScoreSheetReader;
 use App\Services\Backup\DatabaseDumper;
 use App\Services\Backup\MysqlDumper;
+use App\Services\Vision\GeminiScoreSheetReader;
 use App\Support\MailSettings;
 use App\Support\SecuritySettings;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -51,6 +53,14 @@ class AppServiceProvider extends ServiceProvider
          | no backup never builds it.
          */
         $this->app->bind(DatabaseDumper::class, fn () => MysqlDumper::forDefaultConnection());
+
+        /*
+         | The screenshot reader on the score screen, behind an interface for the
+         | same reason: the supplier is bought by the call and will be changed one
+         | day. This line is the only place Gemini is named outside its own class,
+         | so changing supplier is a new class and this binding.
+         */
+        $this->app->bind(ScoreSheetReader::class, GeminiScoreSheetReader::class);
     }
 
     /**
