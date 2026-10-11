@@ -361,6 +361,103 @@ class UserController extends Controller
         ));
     }
 
+    /**
+     * Switch one account on or off from its row, without opening the edit form.
+     *
+     * Shared by all four tabs, because the rules are the same wherever the row was
+     * drawn and two copies of a lockout guard are two copies that will disagree.
+     *
+     * The row hides the control an operator may not use, but HIDING A CONTROL IS
+     * NOT THE GUARD: a crafted PUT arrives here having never drawn the row, so
+     * every refusal is decided below, server side, in this order.
+     *
+     *   1. Cross-tab. The four tabs are four lists over one table, so an id from
+     *      one is a valid route parameter on another's routes. Checked first, so a
+     *      foreign id is refused before anything about it is read, exactly as
+     *      update() and destroy() do.
+     *   2. Self-lock. An operator who switches their own account off keeps this
+     *      session and loses the next one, and cannot undo it from inside because
+     *      an inactive account never gets past the login screen. Same wording as
+     *      update()'s guard, answered as a redirect rather than a
+     *      ValidationException because there is no form to send them back to.
+     *      Deactivation only: switching an account back ON is always somebody
+     *      else's doing, for the same reason.
+     *   3. Last administering account. Zero active super admins is the only state
+     *      nobody can recover from — every other role can be rebuilt by a super
+     *      admin, and hasPermission() short-circuits to true for that role alone.
+     *      The exact rule destroy() already enforces, reused rather than restated
+     *      so lock and delete cannot drift apart.
+     *
+     * The role is read from the ROW, never assumed from the endpoint, so guard 3
+     * is applied on all four endpoints even though only the Users tab can carry a
+     * super admin today.
+     *
+     * A refused attempt is written to the activity log at WARN. The existing
+     * destroy() refusals leave no trace, and "who tried to switch the owner off"
+     * is exactly what somebody will be looking for afterwards.
+     *
+     * The TARGET state is posted rather than flipped, so a second click on a stale
+     * page cannot silently undo the first.
+     */
+    private function setActivation(Request $request, User $user, string $tab, string $prefix, string $noun)
+    {
+        $this->refuseCrossTab($user, $tab);
+
+        $request->validate(['is_active' => ['required', 'boolean']]);
+
+        $target = $request->boolean('is_active');
+        $back = route('admin.settings.users', $tab === 'users' ? [] : ['tab' => $tab]);
+
+        if (! $target && $user->is($request->user())) {
+            AdminLogger::activity(
+                "{$prefix}.update",
+                sprintf('Refused to deactivate own account %s.', $user->logLabel()),
+                null,
+                null,
+                AdminLogger::LEVEL_WARN,
+            );
+
+            return redirect()->to($back)->withErrors(['user' => 'You cannot deactivate your own account.']);
+        }
+
+        if (! $target && $user->role?->isSuperAdmin() && $this->activeSuperAdminCount() <= 1) {
+            AdminLogger::activity(
+                "{$prefix}.update",
+                sprintf('Refused to deactivate the last active Super Admin %s.', $user->logLabel()),
+                null,
+                null,
+                AdminLogger::LEVEL_WARN,
+            );
+
+            return redirect()->to($back)->withErrors([
+                'user' => 'This is the last active Super Admin. Create another one before deactivating this account.',
+            ]);
+        }
+
+        $before = (bool) $user->is_active;
+
+        $user->update(['is_active' => $target]);
+
+        /*
+         | The family's existing *.update action slug, on purpose. A lock IS an edit
+         | of this account, and a slug of its own would file it in a different
+         | filter bucket from every other edit to the same row — so somebody reading
+         | one account's history would have to know to look twice.
+         */
+        AdminLogger::activity("{$prefix}.update", sprintf(
+            '%s %s %s.',
+            $target ? 'Activated' : 'Deactivated',
+            strtolower($noun),
+            $user->logLabel(),
+        ));
+
+        AdminLogger::audit($user, 'updated', ['is_active' => $before], ['is_active' => $target]);
+
+        return redirect()->to($back)->with('status', $target
+            ? sprintf('%s %s activated.', $noun, $user->username)
+            : sprintf('%s %s deactivated and can no longer sign in.', $noun, $user->username));
+    }
+
     public function store(StoreUserRequest $request)
     {
         $user = User::create($request->validated());
@@ -429,6 +526,11 @@ class UserController extends Controller
         return redirect()
             ->route('admin.settings.users')
             ->with('status', sprintf('User %s updated.', $user->username));
+    }
+
+    public function toggleActive(Request $request, User $user)
+    {
+        return $this->setActivation($request, $user, 'users', 'users', 'User');
     }
 
     public function destroy(Request $request, User $user)
@@ -542,6 +644,11 @@ class UserController extends Controller
         return redirect()
             ->route('admin.settings.users', ['tab' => 'handler'])
             ->with('status', sprintf('Handler %s updated.', $user->username));
+    }
+
+    public function toggleActiveHandler(Request $request, User $user)
+    {
+        return $this->setActivation($request, $user, 'handler', 'handlers', 'Handler');
     }
 
     /**
@@ -662,6 +769,11 @@ class UserController extends Controller
         return redirect()
             ->route('admin.settings.users', ['tab' => 'sponsorship'])
             ->with('status', sprintf('Sponsorship account %s updated.', $user->username));
+    }
+
+    public function toggleActiveSponsor(Request $request, User $user)
+    {
+        return $this->setActivation($request, $user, 'sponsorship', 'sponsors', 'Sponsorship account');
     }
 
     /**
@@ -816,6 +928,11 @@ class UserController extends Controller
         return redirect()
             ->route('admin.settings.users', ['tab' => 'monitoring'])
             ->with('status', sprintf('Monitoring account %s updated.', $user->username));
+    }
+
+    public function toggleActiveMonitor(Request $request, User $user)
+    {
+        return $this->setActivation($request, $user, 'monitoring', 'monitors', 'Monitoring account');
     }
 
     /**

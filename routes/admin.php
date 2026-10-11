@@ -1432,6 +1432,20 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::put('users/{user}', [UserController::class, 'update'])
                 ->middleware('permission:users.update')
                 ->name('users.update');
+
+            /*
+             | Lock / unlock an account from its row, without opening the edit form.
+             |
+             | Behind *.update rather than *.delete on all four families below:
+             | locking is an EDIT of is_active, the same field the edit form already
+             | writes, and somebody trusted to edit an account is already trusted to
+             | switch it off. Tying it to delete would mean a role that may edit an
+             | account could not stop it signing in.
+             */
+            Route::put('users/{user}/activation', [UserController::class, 'toggleActive'])
+                ->middleware(['permission:users.update', 'throttle:20,1'])
+                ->name('users.activation');
+
             Route::delete('users/{user}', [UserController::class, 'destroy'])
                 ->middleware('permission:users.delete')
                 ->name('users.destroy');
@@ -1444,6 +1458,9 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::put('users/handlers/{user}', [UserController::class, 'updateHandler'])
                 ->middleware('permission:handlers.update')
                 ->name('users.handlers.update');
+            Route::put('users/handlers/{user}/activation', [UserController::class, 'toggleActiveHandler'])
+                ->middleware(['permission:handlers.update', 'throttle:20,1'])
+                ->name('users.handlers.activation');
             Route::delete('users/handlers/{user}', [UserController::class, 'destroyHandler'])
                 ->middleware('permission:handlers.delete')
                 ->name('users.handlers.destroy');
@@ -1460,6 +1477,9 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::put('users/sponsors/{user}', [UserController::class, 'updateSponsor'])
                 ->middleware('permission:sponsors.update')
                 ->name('users.sponsors.update');
+            Route::put('users/sponsors/{user}/activation', [UserController::class, 'toggleActiveSponsor'])
+                ->middleware(['permission:sponsors.update', 'throttle:20,1'])
+                ->name('users.sponsors.activation');
             Route::delete('users/sponsors/{user}', [UserController::class, 'destroySponsor'])
                 ->middleware('permission:sponsors.delete')
                 ->name('users.sponsors.destroy');
@@ -1479,6 +1499,9 @@ Route::prefix('admin')->name('admin.')->group(function () {
             Route::put('users/monitors/{user}', [UserController::class, 'updateMonitor'])
                 ->middleware('permission:monitors.update')
                 ->name('users.monitors.update');
+            Route::put('users/monitors/{user}/activation', [UserController::class, 'toggleActiveMonitor'])
+                ->middleware(['permission:monitors.update', 'throttle:20,1'])
+                ->name('users.monitors.activation');
             Route::delete('users/monitors/{user}', [UserController::class, 'destroyMonitor'])
                 ->middleware('permission:monitors.delete')
                 ->name('users.monitors.destroy');

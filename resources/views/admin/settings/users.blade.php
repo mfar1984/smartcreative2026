@@ -95,7 +95,9 @@
 
                         <tbody class="divide-y divide-gray-100">
                             @forelse ($users as $index => $row)
-                                <tr class="hover:bg-blue-50/40">
+                                {{-- A locked row is greyed so the list reads at a glance, without
+                                     anybody having to scan the Status column row by row. --}}
+                                <tr @class(['hover:bg-blue-50/40', 'bg-gray-50 opacity-60' => ! $row->is_active])>
                                     <td class="px-6 py-3 text-gray-500">{{ $users->firstItem() + $index }}</td>
 
                                     <td class="px-6 py-3">
@@ -155,6 +157,39 @@
                                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                                                     </svg>
                                                 </button>
+                                            @endif
+
+                                            {{-- Lock / unlock, behind the same flag as Edit above: locking is
+                                                 an edit of is_active. The deactivate half is hidden on your own
+                                                 row the way Delete already is, but the server guard in
+                                                 UserController::setActivation() is what actually enforces that.
+                                                 The activate half is never hidden. --}}
+                                            @if ($canUpdate)
+                                                @if (! $row->is_active)
+                                                    <form action="{{ route('admin.settings.users.activation', $row) }}" method="POST">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="is_active" value="1">
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1 p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition"
+                                                                title="Activate {{ $row->name }}" aria-label="Activate {{ $row->name }}">
+                                                            <x-admin.icon name="lock-open" class="w-4 h-4" />
+                                                            <span class="text-xs font-semibold">Activate</span>
+                                                        </button>
+                                                    </form>
+                                                @elseif (! $row->is(auth()->user()))
+                                                    <form action="{{ route('admin.settings.users.activation', $row) }}" method="POST"
+                                                          onsubmit="return confirm('Deactivate {{ addslashes($row->name) }}? They will not be able to sign in.');">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="is_active" value="0">
+                                                        <button type="submit"
+                                                                class="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100 transition"
+                                                                title="Deactivate {{ $row->name }}" aria-label="Deactivate {{ $row->name }}">
+                                                            <x-admin.icon name="lock" class="w-4 h-4" />
+                                                        </button>
+                                                    </form>
+                                                @endif
                                             @endif
 
                                             @if ($canDelete && ! $row->is(auth()->user()))
@@ -270,7 +305,8 @@
 
                         <tbody class="divide-y divide-gray-100">
                             @forelse ($handlers as $index => $row)
-                                <tr class="hover:bg-blue-50/40 align-top">
+                                {{-- Greyed when locked, same as the Users tab. --}}
+                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-50 opacity-60' => ! $row->is_active])>
                                     <td class="px-6 py-3 text-gray-500">{{ $handlers->firstItem() + $index }}</td>
 
                                     <td class="px-6 py-3">
@@ -313,6 +349,35 @@
                                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                                                     </svg>
                                                 </button>
+                                            @endif
+
+                                            {{-- Lock / unlock, behind the same flag as Edit above. --}}
+                                            @if ($canUpdateHandler)
+                                                @if (! $row->is_active)
+                                                    <form action="{{ route('admin.settings.users.handlers.activation', $row) }}" method="POST">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="is_active" value="1">
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1 p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition"
+                                                                title="Activate {{ $row->name }}" aria-label="Activate {{ $row->name }}">
+                                                            <x-admin.icon name="lock-open" class="w-4 h-4" />
+                                                            <span class="text-xs font-semibold">Activate</span>
+                                                        </button>
+                                                    </form>
+                                                @else
+                                                    <form action="{{ route('admin.settings.users.handlers.activation', $row) }}" method="POST"
+                                                          onsubmit="return confirm('Deactivate {{ addslashes($row->name) }}? They will not be able to sign in.');">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="is_active" value="0">
+                                                        <button type="submit"
+                                                                class="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100 transition"
+                                                                title="Deactivate {{ $row->name }}" aria-label="Deactivate {{ $row->name }}">
+                                                            <x-admin.icon name="lock" class="w-4 h-4" />
+                                                        </button>
+                                                    </form>
+                                                @endif
                                             @endif
 
                                             @if ($canDeleteHandler)
@@ -475,7 +540,8 @@
                                     $fundedLine = implode(' · ', $fundedParts);
                                 @endphp
 
-                                <tr class="hover:bg-blue-50/40 align-top">
+                                {{-- Greyed when locked, same as the Users tab. --}}
+                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-50 opacity-60' => ! $row->is_active])>
                                     <td class="px-6 py-3 text-gray-500">{{ $sponsors->firstItem() + $index }}</td>
 
                                     <td class="px-6 py-3">
@@ -533,6 +599,35 @@
                                                         title="Edit {{ $row->name }}" aria-label="Edit {{ $row->name }}">
                                                     <x-admin.icon name="pencil" class="w-4 h-4" />
                                                 </button>
+                                            @endif
+
+                                            {{-- Lock / unlock, behind the same flag as Edit above. --}}
+                                            @if ($canUpdateSponsor)
+                                                @if (! $row->is_active)
+                                                    <form action="{{ route('admin.settings.users.sponsors.activation', $row) }}" method="POST">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="is_active" value="1">
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1 p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition"
+                                                                title="Activate {{ $row->name }}" aria-label="Activate {{ $row->name }}">
+                                                            <x-admin.icon name="lock-open" class="w-4 h-4" />
+                                                            <span class="text-xs font-semibold">Activate</span>
+                                                        </button>
+                                                    </form>
+                                                @else
+                                                    <form action="{{ route('admin.settings.users.sponsors.activation', $row) }}" method="POST"
+                                                          onsubmit="return confirm('Deactivate {{ addslashes($row->name) }}? They will not be able to sign in.');">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="is_active" value="0">
+                                                        <button type="submit"
+                                                                class="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100 transition"
+                                                                title="Deactivate {{ $row->name }}" aria-label="Deactivate {{ $row->name }}">
+                                                            <x-admin.icon name="lock" class="w-4 h-4" />
+                                                        </button>
+                                                    </form>
+                                                @endif
                                             @endif
 
                                             @if ($canDeleteSponsor)
@@ -658,7 +753,8 @@
 
                         <tbody class="divide-y divide-gray-100">
                             @forelse ($monitors as $index => $row)
-                                <tr class="hover:bg-blue-50/40 align-top">
+                                {{-- Greyed when locked, same as the Users tab. --}}
+                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-50 opacity-60' => ! $row->is_active])>
                                     <td class="px-6 py-3 text-gray-500">{{ $monitors->firstItem() + $index }}</td>
 
                                     <td class="px-6 py-3">
@@ -701,6 +797,35 @@
                                                         title="Edit {{ $row->name }}" aria-label="Edit {{ $row->name }}">
                                                     <x-admin.icon name="pencil" class="w-4 h-4" />
                                                 </button>
+                                            @endif
+
+                                            {{-- Lock / unlock, behind the same flag as Edit above. --}}
+                                            @if ($canUpdateMonitor)
+                                                @if (! $row->is_active)
+                                                    <form action="{{ route('admin.settings.users.monitors.activation', $row) }}" method="POST">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="is_active" value="1">
+                                                        <button type="submit"
+                                                                class="inline-flex items-center gap-1 p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition"
+                                                                title="Activate {{ $row->name }}" aria-label="Activate {{ $row->name }}">
+                                                            <x-admin.icon name="lock-open" class="w-4 h-4" />
+                                                            <span class="text-xs font-semibold">Activate</span>
+                                                        </button>
+                                                    </form>
+                                                @else
+                                                    <form action="{{ route('admin.settings.users.monitors.activation', $row) }}" method="POST"
+                                                          onsubmit="return confirm('Deactivate {{ addslashes($row->name) }}? They will not be able to sign in.');">
+                                                        @csrf
+                                                        @method('PUT')
+                                                        <input type="hidden" name="is_active" value="0">
+                                                        <button type="submit"
+                                                                class="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100 transition"
+                                                                title="Deactivate {{ $row->name }}" aria-label="Deactivate {{ $row->name }}">
+                                                            <x-admin.icon name="lock" class="w-4 h-4" />
+                                                        </button>
+                                                    </form>
+                                                @endif
                                             @endif
 
                                             @if ($canDeleteMonitor)
