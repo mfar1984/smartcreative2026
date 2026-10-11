@@ -56,6 +56,7 @@ class PublicFormRateLimitTest extends SecurityTestCase
         'shop.order.pay' => 'throttle:public-reference',
         'cart.store' => 'throttle:public-cart',
         'cart.update' => 'throttle:public-cart',
+        'cart.remove' => 'throttle:public-cart',
         'cart.clear' => 'throttle:public-cart',
     ];
 

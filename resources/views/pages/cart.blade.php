@@ -72,47 +72,55 @@
                                     $image = $product->featuredImageUrl();
                                 @endphp
 
-                                <div class="flex flex-wrap sm:flex-nowrap gap-4 rounded-lg border border-gray-200 p-4">
-                                    <a href="{{ route('shop.product', $product->slug) }}"
-                                       class="shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-gray-900">
-                                        @if ($image)
-                                            <img src="{{ $image }}" alt="{{ $product->name }}" class="w-full h-full object-cover">
-                                        @else
-                                            <span class="flex w-full h-full items-center justify-center text-lg font-bold text-white/25" aria-hidden="true">
-                                                {{ Str::upper(Str::substr($product->name, 0, 2)) }}
-                                            </span>
-                                        @endif
-                                    </a>
+                                {{-- A column on a phone, a row from sm up.
+                                     The picture and the words stay together; the quantity
+                                     box and the line total drop to a row of their own
+                                     underneath. All three abreast at phone width left the
+                                     text column so narrow that the name and the add-on
+                                     price breakdown read one word per line. --}}
+                                <div class="flex flex-col gap-4 rounded-lg border border-gray-200 p-4 sm:flex-row">
+                                    <div class="flex min-w-0 flex-1 gap-4">
+                                        <a href="{{ route('shop.product', $product->slug) }}"
+                                           class="shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-gray-900">
+                                            @if ($image)
+                                                <img src="{{ $image }}" alt="{{ $product->name }}" class="w-full h-full object-cover">
+                                            @else
+                                                <span class="flex w-full h-full items-center justify-center text-lg font-bold text-white/25" aria-hidden="true">
+                                                    {{ Str::upper(Str::substr($product->name, 0, 2)) }}
+                                                </span>
+                                            @endif
+                                        </a>
 
-                                    <div class="flex-1 min-w-0">
-                                        <h2 class="text-base font-bold text-gray-900">
-                                            <a href="{{ route('shop.product', $product->slug) }}" class="hover:text-blue-700 transition">
-                                                {{ $product->name }}
-                                            </a>
-                                        </h2>
+                                        <div class="flex-1 min-w-0">
+                                            <h2 class="text-base font-bold text-gray-900">
+                                                <a href="{{ route('shop.product', $product->slug) }}" class="hover:text-blue-700 transition">
+                                                    {{ $product->name }}
+                                                </a>
+                                            </h2>
 
-                                        @if ($line['variant'])
-                                            <p class="text-sm text-gray-500 mt-0.5">
-                                                {{ $product->option_name }}: <span class="font-semibold text-gray-700">{{ $line['variant']->label }}</span>
+                                            @if ($line['variant'])
+                                                <p class="text-sm text-gray-500 mt-0.5">
+                                                    {{ $product->option_name }}: <span class="font-semibold text-gray-700">{{ $line['variant']->label }}</span>
+                                                </p>
+                                            @endif
+
+                                            <p class="text-sm text-gray-500 mt-0.5 tabular-nums">
+                                                {{ App\Support\PaymentFigures::money($line['unit_price']) }} each
                                             </p>
-                                        @endif
 
-                                        <p class="text-sm text-gray-500 mt-0.5 tabular-nums">
-                                            {{ App\Support\PaymentFigures::money($line['unit_price']) }} each
-                                        </p>
-
-                                        {{-- The extras chosen with this line, indented under
-                                             it. A line without any renders nothing at all, so
-                                             the layout is exactly what it was. --}}
-                                        @foreach ($line['addons'] as $addon)
-                                            <p class="text-xs text-gray-500 mt-0.5 tabular-nums">
-                                                + {{ $addon['addon']->name }}@if ($addon['variant']) ({{ $addon['variant']->label }})@endif
-                                                &mdash; {{ App\Support\PaymentFigures::money($addon['unit_price']) }} each
-                                            </p>
-                                        @endforeach
+                                            {{-- The extras chosen with this line, indented under
+                                                 it. A line without any renders nothing at all, so
+                                                 the layout is exactly what it was. --}}
+                                            @foreach ($line['addons'] as $addon)
+                                                <p class="text-xs text-gray-500 mt-0.5 tabular-nums">
+                                                    + {{ $addon['addon']->name }}@if ($addon['variant']) ({{ $addon['variant']->label }})@endif
+                                                    &mdash; {{ App\Support\PaymentFigures::money($addon['unit_price']) }} each
+                                                </p>
+                                            @endforeach
+                                        </div>
                                     </div>
 
-                                    <div class="flex items-center gap-4 sm:flex-col sm:items-end sm:gap-2">
+                                    <div class="flex items-center justify-between gap-4 sm:flex-col sm:items-end sm:justify-start sm:gap-2">
                                         <div>
                                             <label for="qty-{{ $loop->index }}" class="sr-only">Quantity</label>
                                             <input type="number" id="qty-{{ $loop->index }}"
@@ -122,20 +130,42 @@
                                                    class="w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm text-right tabular-nums focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40">
                                         </div>
 
-                                        <p class="text-base font-bold text-gray-900 tabular-nums whitespace-nowrap">
-                                            {{ App\Support\PaymentFigures::money($line['line_total']) }}
-                                        </p>
+                                        <div class="flex items-center gap-1.5">
+                                            <p class="text-base font-bold text-gray-900 tabular-nums whitespace-nowrap">
+                                                {{ App\Support\PaymentFigures::money($line['line_total']) }}
+                                            </p>
+
+                                            {{-- Submits the one-line DELETE form declared after
+                                                 the update form, reached by id: a form inside
+                                                 this one is not legal HTML, and a submit button
+                                                 that did belong to the update form would also be
+                                                 its default button, so pressing Enter in a
+                                                 quantity box would delete a line. --}}
+                                            <button type="submit" form="cart-remove-{{ $line['key'] }}"
+                                                    class="shrink-0 rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 transition"
+                                                    aria-label="Remove {{ $product->name }} from your basket">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             @endforeach
 
-                            <div class="flex flex-wrap items-center gap-3 pt-2">
+                            <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
                                 <button type="submit"
                                         class="rounded-lg border-2 border-gray-300 px-5 py-2.5 text-sm font-semibold text-gray-700 hover:border-blue-400 hover:text-blue-700 transition">
                                     Update basket
                                 </button>
 
-                                <p class="text-xs text-gray-500">Set a quantity to 0 to remove a line.</p>
+                                {{-- Far from "Continue to checkout", and confirmed before it
+                                     fires: emptying the basket cannot be undone. --}}
+                                <button type="submit" form="cart-clear"
+                                        class="rounded-lg px-3 py-2.5 text-sm font-semibold text-gray-500 hover:text-red-700 transition">
+                                    Empty basket
+                                </button>
                             </div>
                         </div>
 
@@ -214,6 +244,24 @@
                         </div>
 
                     </div>
+                </form>
+
+                {{-- The removal forms, siblings of the update form rather than children
+                     of it, because HTML has no nested forms. Each button above points
+                     here by id. POST only, with a token: a GET link would let a crawler
+                     or a browser prefetch empty somebody's basket. --}}
+                @foreach ($lines as $line)
+                    <form id="cart-remove-{{ $line['key'] }}" action="{{ route('cart.remove') }}" method="POST" class="hidden">
+                        @csrf
+                        @method('DELETE')
+                        <input type="hidden" name="key" value="{{ $line['key'] }}">
+                    </form>
+                @endforeach
+
+                <form id="cart-clear" action="{{ route('cart.clear') }}" method="POST" class="hidden"
+                      onsubmit="return confirm('Empty your basket? Everything in it will be removed.');">
+                    @csrf
+                    @method('DELETE')
                 </form>
             @endif
 

@@ -104,6 +104,27 @@ class CartController extends Controller
             ->with('status', 'Basket updated.');
     }
 
+    /**
+     * Take one line out of the basket.
+     *
+     * Only the line key is read, and Cart::remove ignores a key the basket does not
+     * hold, so a stale or made up key does nothing rather than erroring. Quantities
+     * posted alongside it are deliberately not applied: this press means "drop this
+     * one", and nothing else on the page should move because of it.
+     */
+    public function remove(Request $request)
+    {
+        $validated = $request->validate([
+            'key' => ['required', 'string'],
+        ]);
+
+        Cart::remove($validated['key']);
+
+        return redirect()
+            ->route('cart')
+            ->with('status', 'Removed from your basket.');
+    }
+
     public function destroy()
     {
         Cart::clear();

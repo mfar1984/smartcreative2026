@@ -264,6 +264,21 @@ Route::get('/cart', [CartController::class, 'index'])->name('cart');
 Route::put('/cart', [CartController::class, 'update'])
     ->middleware('throttle:public-cart')
     ->name('cart.update');
+
+/*
+| Taking one line out.
+|
+| Its own route rather than a zero posted through cart.update, because the button
+| sits inside each basket line and HTML has no nested forms: a submit button inside
+| the update form would also become that form's default button, so pressing Enter
+| or "Go" in a quantity box would delete a line instead of updating the basket.
+|
+| DELETE, never GET: a crawler or a link prefetch would otherwise empty baskets.
+*/
+Route::delete('/cart/line', [CartController::class, 'remove'])
+    ->middleware('throttle:public-cart')
+    ->name('cart.remove');
+
 Route::delete('/cart', [CartController::class, 'destroy'])
     ->middleware('throttle:public-cart')
     ->name('cart.clear');
