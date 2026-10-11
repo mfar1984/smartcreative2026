@@ -7,6 +7,7 @@ use App\Models\EventParticipant;
 use App\Models\EventRegistration;
 use App\Support\ParticipantOptions;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
@@ -107,7 +108,10 @@ class TransferRegistrationRequest extends FormRequest
             'add.*.email' => ['required', 'string', 'email:rfc', 'max:190'],
             'add.*.date_of_birth' => ['nullable', 'date', 'before:today'],
             'add.*.gender' => ['nullable', 'string', 'max:20'],
-            'add.*.race' => ['nullable', 'string', 'max:40'],
+            // Still optional, for the reason above, but it has to be one of ours
+            // when given. The retired keys are allowed so a counter can record an
+            // arrival the way the entry they are joining was recorded.
+            'add.*.race' => ['nullable', Rule::in(ParticipantOptions::raceKeysWithLegacy())],
             'add.*.address_line_1' => ['nullable', 'string', 'max:180'],
             'add.*.city' => ['nullable', 'string', 'max:100'],
             'add.*.state' => ['nullable', 'string', 'max:100'],

@@ -111,7 +111,9 @@ class SwapPlayerRequest extends FormRequest
 
             'email' => ['nullable', 'string', 'email:rfc', 'max:190'],
             'gender' => ['nullable', Rule::in(array_keys(ParticipantOptions::GENDERS))],
-            'race' => ['nullable', Rule::in(array_keys(ParticipantOptions::RACES))],
+            // With the retired keys, so a substitute can be recorded as whatever the
+            // person they replace was stored as.
+            'race' => ['nullable', Rule::in(ParticipantOptions::raceKeysWithLegacy())],
             'date_of_birth' => ['nullable', 'date', 'before:today'],
 
             'reason' => ['nullable', 'string', 'max:255'],

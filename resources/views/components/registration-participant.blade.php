@@ -10,7 +10,7 @@
     @param array      $values     previously submitted values for this row
     @param array      $roles      role slug => label
     @param array      $genders
-    @param array      $races
+    @param array      $races      group label => [key => label], already grouped for the select
     @param array      $states
     @param array      $countries
     @param string     $role       decided by the event mode, submitted hidden
@@ -234,9 +234,7 @@
             <label for="{{ $id('race') }}" class="{{ $label }}">Race <span class="text-red-600" aria-hidden="true">*</span></label>
             <select id="{{ $id('race') }}" name="{{ $name('race') }}" required class="{{ $field }} bg-white">
                 <option value="">Select</option>
-                @foreach ($races as $raceValue => $raceLabel)
-                    <option value="{{ $raceValue }}" @selected($value('race') === $raceValue)>{{ $raceLabel }}</option>
-                @endforeach
+                <x-race-options :groups="$races" :selected="$value('race')" />
             </select>
             @error($errorKey('race'))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
         </div>

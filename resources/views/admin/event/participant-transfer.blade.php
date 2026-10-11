@@ -369,11 +369,11 @@
 
                                     <div>
                                         <label for="add_{{ $i }}_race" class="{{ $lbl }}">Race</label>
+                                        {{-- Somebody arriving, so no retired key is offered. --}}
                                         <select id="add_{{ $i }}_race" name="add[{{ $i }}][race]" class="{{ $input }}">
                                             <option value="">Not recorded</option>
-                                            @foreach (ParticipantOptions::RACES as $key => $text)
-                                                <option value="{{ $key }}" @selected(old('add.' . $i . '.race') === $key)>{{ $text }}</option>
-                                            @endforeach
+                                            <x-race-options :groups="ParticipantOptions::raceGroups()"
+                                                            :selected="old('add.' . $i . '.race')" />
                                         </select>
                                     </div>
                                 </div>

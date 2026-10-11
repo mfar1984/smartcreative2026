@@ -284,7 +284,9 @@ class EventParticipant extends Model
             return '—';
         }
 
-        return ParticipantOptions::RACES[$this->race] ?? $this->race;
+        // Resolves the retired keys too, so an entry stored as bumiputera-sarawak
+        // reads as "Bumiputera Sarawak" and not as its raw slug.
+        return ParticipantOptions::raceLabel($this->race) ?? $this->race;
     }
 
     public function age(): ?int

@@ -896,11 +896,14 @@
 
                                     <div>
                                         <label for="race_{{ $participant->id }}" class="{{ $personLabel }}">Race</label>
+                                        {{-- raceGroups() is handed this row's stored value so a
+                                             retired key still shows as the chosen option. Without
+                                             it the select would render blank and quietly rewrite
+                                             the record on save. --}}
                                         <select id="race_{{ $participant->id }}" name="race" class="{{ $personInput }}">
                                             <option value="">Not recorded</option>
-                                            @foreach (ParticipantOptions::RACES as $key => $text)
-                                                <option value="{{ $key }}" @selected($valueOf('race', $participant->race) === $key)>{{ $text }}</option>
-                                            @endforeach
+                                            <x-race-options :groups="ParticipantOptions::raceGroups($participant->race)"
+                                                            :selected="$valueOf('race', $participant->race)" />
                                         </select>
                                         @if ($isPersonReopened)
                                             @error('race') <p class="text-xs text-red-600 mt-1">{{ $message }}</p> @enderror

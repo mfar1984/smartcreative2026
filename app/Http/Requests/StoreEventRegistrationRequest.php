@@ -146,7 +146,9 @@ class StoreEventRegistrationRequest extends FormRequest
             'participants.*.addons.*' => ['nullable'],
 
             'participants.*.gender' => ['required', Rule::in(array_keys(ParticipantOptions::GENDERS))],
-            'participants.*.race' => ['required', Rule::in(array_keys(ParticipantOptions::RACES))],
+            // The current list only. A new registration has no business picking one
+            // of the retired umbrella buckets.
+            'participants.*.race' => ['required', Rule::in(ParticipantOptions::raceKeys())],
             // Required here only, for the reason given against the postcode above.
             'participants.*.emergency_contact_name' => ['required', 'string', 'max:180'],
             'participants.*.emergency_contact_phone' => ['required', 'string', 'max:30', 'regex:/^[0-9+\-\s()]+$/'],

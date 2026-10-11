@@ -95,7 +95,10 @@ class AttendanceController extends Controller
                 && $request->user()->hasPermission('participants.export'),
 
             'genders' => ParticipantOptions::GENDERS,
-            'races' => ParticipantOptions::RACES,
+
+            // Grouped for the select. A swap records an incoming person, so no
+            // retired key is offered.
+            'races' => ParticipantOptions::raceGroups(),
         ];
 
         return view('admin.event.attendance', $data + match ($tab) {

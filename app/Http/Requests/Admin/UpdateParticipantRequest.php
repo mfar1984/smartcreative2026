@@ -80,9 +80,15 @@ class UpdateParticipantRequest extends FormRequest
                 $this->wasGiven($participant, 'gender'),
                 Rule::in(array_keys(ParticipantOptions::GENDERS)),
             ],
+            /*
+             | The retired keys are accepted here, unlike on the public form.
+             | Entries already stored against one have to stay correctable: refusing
+             | the value they already hold would lock their record shut over a field
+             | nobody is trying to change.
+             */
             'race' => [
                 $this->wasGiven($participant, 'race'),
-                Rule::in(array_keys(ParticipantOptions::RACES)),
+                Rule::in(ParticipantOptions::raceKeysWithLegacy()),
             ],
 
             'emergency_contact_name' => ['nullable', 'string', 'max:180'],

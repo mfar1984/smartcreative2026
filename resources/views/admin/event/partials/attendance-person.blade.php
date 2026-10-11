@@ -8,7 +8,7 @@
     @param \App\Models\EventRegistration $registration
     @param bool $canUpdate
     @param array $genders
-    @param array $races
+    @param array $races     group label => [key => label], already grouped for the select
 --}}
 @php
     $attendance = $participant->attendance;
@@ -331,9 +331,8 @@
                                     <label for="swap-race-{{ $participant->id }}" class="block text-xs font-semibold text-gray-700 mb-1">Race</label>
                                     <select id="swap-race-{{ $participant->id }}" name="race" class="{{ $swapInput }} bg-white">
                                         <option value="">Not recorded</option>
-                                        @foreach ($races as $key => $label)
-                                            <option value="{{ $key }}" @selected(old('_swap_for') == $participant->id && old('race') === $key)>{{ $label }}</option>
-                                        @endforeach
+                                        <x-race-options :groups="$races"
+                                                        :selected="old('_swap_for') == $participant->id ? old('race') : null" />
                                     </select>
                                 </div>
                             </div>

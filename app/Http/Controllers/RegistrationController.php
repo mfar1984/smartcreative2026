@@ -113,7 +113,10 @@ class RegistrationController extends Controller
             // Roles are decided by each event's mode, not chosen by the
             // visitor, so no role list is handed to the view.
             'genders' => ParticipantOptions::GENDERS,
-            'races' => ParticipantOptions::RACES,
+
+            // Grouped, because the list runs to 77. No retired key is passed: this
+            // form only ever makes a new choice.
+            'races' => ParticipantOptions::raceGroups(),
             'states' => ParticipantOptions::STATES,
             'countries' => ParticipantOptions::COUNTRIES,
         ]);
