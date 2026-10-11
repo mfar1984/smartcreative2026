@@ -58,7 +58,9 @@ class SecurityLogTest extends SecurityTestCase
             'role' => ParticipantOptions::ROLE_PARTICIPANT,
             'full_name' => "Siobhan O'Brien",
             'ic_number' => '900101010001',
+            'date_of_birth' => '1990-01-01',
             'address_line_1' => "12 O'Connell Road",
+            'postcode' => '93000',
             'city' => 'Kuching',
             'state' => 'Sarawak',
             'country' => 'Malaysia',
@@ -66,6 +68,8 @@ class SecurityLogTest extends SecurityTestCase
             'email' => 'siobhan@example.test',
             'gender' => 'female',
             'race' => 'malay',
+            'emergency_contact_name' => 'Siti Aminah',
+            'emergency_contact_phone' => '0129876543',
         ];
     }
 

@@ -53,7 +53,9 @@ class CouponRegressionGuardTest extends CouponTestCase
                 'role' => \App\Support\ParticipantOptions::ROLE_PARTICIPANT,
                 'full_name' => 'Member One',
                 'ic_number' => '900101010001',
+                'date_of_birth' => '1990-01-01',
                 'address_line_1' => '1 Jalan Sibu',
+                'postcode' => '96000',
                 'city' => 'Sibu',
                 'state' => 'Sarawak',
                 'country' => 'Malaysia',
@@ -61,6 +63,8 @@ class CouponRegressionGuardTest extends CouponTestCase
                 'email' => 'member1@example.com',
                 'gender' => 'male',
                 'race' => 'malay',
+                'emergency_contact_name' => 'Siti Aminah',
+                'emergency_contact_phone' => '0149876543',
             ]],
             'addons' => [$addon->id => ['choice' => (string) $small->id]],
         ])->assertSessionHasNoErrors();
@@ -85,7 +89,9 @@ class CouponRegressionGuardTest extends CouponTestCase
                 'role' => \App\Support\ParticipantOptions::ROLE_PARTICIPANT,
                 'full_name' => 'Member One',
                 'ic_number' => '900101010002',
+                'date_of_birth' => '1990-01-01',
                 'address_line_1' => '1 Jalan Sibu',
+                'postcode' => '96000',
                 'city' => 'Sibu',
                 'state' => 'Sarawak',
                 'country' => 'Malaysia',
@@ -93,6 +99,8 @@ class CouponRegressionGuardTest extends CouponTestCase
                 'email' => 'member2@example.com',
                 'gender' => 'male',
                 'race' => 'malay',
+                'emergency_contact_name' => 'Siti Aminah',
+                'emergency_contact_phone' => '0149876544',
             ]],
         ])->assertSessionHasNoErrors();
 

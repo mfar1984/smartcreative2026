@@ -86,10 +86,19 @@ class StoreEventRegistrationRequest extends FormRequest
             // event's map rather than sharing one flag.
             ...$this->ignRules($event),
 
-            'participants.*.date_of_birth' => ['nullable', 'date', 'before:today'],
+            /*
+             | Asked of everybody registering from the public form from now on.
+             |
+             | Only here. The columns stay nullable and the admin, transfer and
+             | swap paths keep accepting a blank, because a substitute signed in at
+             | the counter at short notice will not have produced a postcode, and
+             | demanding one there would block a change that has to happen. The
+             | entries already on file are not retroactively wrong either.
+             */
+            'participants.*.date_of_birth' => ['required', 'date', 'before:today'],
             'participants.*.address_line_1' => ['required', 'string', 'max:180'],
             'participants.*.address_line_2' => ['nullable', 'string', 'max:180'],
-            'participants.*.postcode' => ['nullable', 'string', 'max:12'],
+            'participants.*.postcode' => ['required', 'string', 'max:12'],
             'participants.*.city' => ['required', 'string', 'max:100'],
             'participants.*.state' => ['required', 'string', 'max:100'],
             'participants.*.country' => ['required', 'string', 'max:100'],
@@ -138,8 +147,9 @@ class StoreEventRegistrationRequest extends FormRequest
 
             'participants.*.gender' => ['required', Rule::in(array_keys(ParticipantOptions::GENDERS))],
             'participants.*.race' => ['required', Rule::in(array_keys(ParticipantOptions::RACES))],
-            'participants.*.emergency_contact_name' => ['nullable', 'string', 'max:180'],
-            'participants.*.emergency_contact_phone' => ['nullable', 'string', 'max:30', 'regex:/^[0-9+\-\s()]+$/'],
+            // Required here only, for the reason given against the postcode above.
+            'participants.*.emergency_contact_name' => ['required', 'string', 'max:180'],
+            'participants.*.emergency_contact_phone' => ['required', 'string', 'max:30', 'regex:/^[0-9+\-\s()]+$/'],
 
             // Shape only. What the quantities mean, and what they cost, is
             // settled against the database by AddonOrder.
@@ -263,6 +273,13 @@ class StoreEventRegistrationRequest extends FormRequest
             'participants.*.phone.regex' => 'The telephone number may only contain digits, spaces and the characters + - ( ).',
             'participants.*.date_of_birth.before' => 'The date of birth must be in the past.',
             'team_name.required' => 'Enter the team or organisation name.',
+
+            // Said plainly, because these four became compulsory after people had
+            // already registered without them and the form has to explain itself.
+            'participants.*.date_of_birth.required' => 'Enter this person\'s date of birth.',
+            'participants.*.postcode.required' => 'Enter the postcode.',
+            'participants.*.emergency_contact_name.required' => 'Enter somebody to contact in an emergency.',
+            'participants.*.emergency_contact_phone.required' => 'Enter the emergency contact\'s number.',
 
             'participants.*.ic_front.required' => 'Attach the front of this person\'s identity card.',
             'participants.*.ic_back.required' => 'Attach the back of this person\'s identity card.',

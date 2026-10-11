@@ -106,7 +106,9 @@ class PerParticipantAddonChargeTest extends TestCase
             'role' => ParticipantOptions::ROLE_PARTICIPANT,
             'full_name' => 'Member ' . $n,
             'ic_number' => '900101' . str_pad((string) $n, 6, '0', STR_PAD_LEFT),
+            'date_of_birth' => '1990-01-01',
             'address_line_1' => $n . ' Jalan Sibu',
+            'postcode' => '96000',
             'city' => 'Sibu',
             'state' => 'Sarawak',
             'country' => 'Malaysia',
@@ -114,6 +116,8 @@ class PerParticipantAddonChargeTest extends TestCase
             'email' => 'member' . $n . '@example.test',
             'gender' => 'male',
             'race' => 'malay',
+            'emergency_contact_name' => 'Siti Aminah',
+            'emergency_contact_phone' => '01900000' . $n,
         ];
     }
 

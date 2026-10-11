@@ -213,8 +213,8 @@
         @endif
 
         <div>
-            <label for="{{ $id('date_of_birth') }}" class="{{ $label }}">Date of Birth</label>
-            <input type="date" id="{{ $id('date_of_birth') }}" name="{{ $name('date_of_birth') }}"
+            <label for="{{ $id('date_of_birth') }}" class="{{ $label }}">Date of Birth <span class="text-red-600" aria-hidden="true">*</span></label>
+            <input type="date" id="{{ $id('date_of_birth') }}" name="{{ $name('date_of_birth') }}" required
                    value="{{ $value('date_of_birth') }}" class="{{ $field }}">
             @error($errorKey('date_of_birth'))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
         </div>
@@ -257,8 +257,8 @@
         </div>
 
         <div>
-            <label for="{{ $id('postcode') }}" class="{{ $label }}">Postcode</label>
-            <input type="text" id="{{ $id('postcode') }}" name="{{ $name('postcode') }}" maxlength="12"
+            <label for="{{ $id('postcode') }}" class="{{ $label }}">Postcode <span class="text-red-600" aria-hidden="true">*</span></label>
+            <input type="text" id="{{ $id('postcode') }}" name="{{ $name('postcode') }}" required maxlength="12"
                    value="{{ $value('postcode') }}" class="{{ $field }}">
             @error($errorKey('postcode'))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
         </div>
@@ -304,15 +304,15 @@
 
         {{-- Emergency contact --}}
         <div>
-            <label for="{{ $id('emergency_contact_name') }}" class="{{ $label }}">Emergency Contact Name</label>
-            <input type="text" id="{{ $id('emergency_contact_name') }}" name="{{ $name('emergency_contact_name') }}" maxlength="180"
+            <label for="{{ $id('emergency_contact_name') }}" class="{{ $label }}">Emergency Contact Name <span class="text-red-600" aria-hidden="true">*</span></label>
+            <input type="text" id="{{ $id('emergency_contact_name') }}" name="{{ $name('emergency_contact_name') }}" required maxlength="180"
                    value="{{ $value('emergency_contact_name') }}" class="{{ $field }}">
             @error($errorKey('emergency_contact_name'))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
         </div>
 
         <div>
-            <label for="{{ $id('emergency_contact_phone') }}" class="{{ $label }}">Emergency Contact Number</label>
-            <input type="tel" id="{{ $id('emergency_contact_phone') }}" name="{{ $name('emergency_contact_phone') }}" maxlength="30"
+            <label for="{{ $id('emergency_contact_phone') }}" class="{{ $label }}">Emergency Contact Number <span class="text-red-600" aria-hidden="true">*</span></label>
+            <input type="tel" id="{{ $id('emergency_contact_phone') }}" name="{{ $name('emergency_contact_phone') }}" required maxlength="30"
                    value="{{ $value('emergency_contact_phone') }}" class="{{ $field }}">
             @error($errorKey('emergency_contact_phone'))<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
         </div>

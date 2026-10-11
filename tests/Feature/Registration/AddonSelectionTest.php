@@ -88,7 +88,9 @@ class AddonSelectionTest extends TestCase
             'role' => ParticipantOptions::ROLE_PARTICIPANT,
             'full_name' => 'Runner ' . $n,
             'ic_number' => '900101' . str_pad((string) $n, 6, '0', STR_PAD_LEFT),
+            'date_of_birth' => '1990-01-01',
             'address_line_1' => $n . ' Jalan Satu',
+            'postcode' => '50450',
             'city' => 'Kuala Lumpur',
             'state' => 'W.P. Kuala Lumpur',
             'country' => 'Malaysia',
@@ -96,6 +98,8 @@ class AddonSelectionTest extends TestCase
             'email' => 'runner' . $n . '@example.test',
             'gender' => 'male',
             'race' => 'malay',
+            'emergency_contact_name' => 'Siti Aminah',
+            'emergency_contact_phone' => '01900000' . $n,
         ];
     }
 

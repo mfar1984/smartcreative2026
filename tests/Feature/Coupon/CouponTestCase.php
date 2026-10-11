@@ -322,7 +322,9 @@ abstract class CouponTestCase extends TestCase
             'role' => ParticipantOptions::ROLE_PARTICIPANT,
             'full_name' => 'Member One',
             'ic_number' => '9001010'.random_int(10000, 99999),
+            'date_of_birth' => '1990-01-01',
             'address_line_1' => '1 Jalan Sibu',
+            'postcode' => '96000',
             'city' => 'Sibu',
             'state' => 'Sarawak',
             'country' => 'Malaysia',
@@ -330,6 +332,8 @@ abstract class CouponTestCase extends TestCase
             'email' => 'member-'.uniqid().'@example.com',
             'gender' => 'male',
             'race' => 'malay',
+            'emergency_contact_name' => 'Siti Aminah',
+            'emergency_contact_phone' => '0149876543',
         ];
     }
 

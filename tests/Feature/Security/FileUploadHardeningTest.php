@@ -527,7 +527,9 @@ class FileUploadHardeningTest extends TestCase
                     'role' => ParticipantOptions::ROLE_PARTICIPANT,
                     'full_name' => 'Aminah Yusof',
                     'ic_number' => '900101071234',
+                    'date_of_birth' => '1990-01-01',
                     'address_line_1' => '1 Jalan Sibu',
+                    'postcode' => '96000',
                     'city' => 'Sibu',
                     'state' => 'Sarawak',
                     'country' => 'Malaysia',
@@ -535,6 +537,8 @@ class FileUploadHardeningTest extends TestCase
                     'email' => 'entrant-'.uniqid().'@example.com',
                     'gender' => 'male',
                     'race' => 'malay',
+                    'emergency_contact_name' => 'Siti Aminah',
+                    'emergency_contact_phone' => '0149876543',
                 ],
             ],
         ];

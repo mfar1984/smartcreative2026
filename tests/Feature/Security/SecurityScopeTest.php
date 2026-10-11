@@ -166,7 +166,9 @@ class SecurityScopeTest extends ShopPaymentTestCase
             'role' => ParticipantOptions::ROLE_PARTICIPANT,
             'full_name' => 'Member ' . $n,
             'ic_number' => '900101' . str_pad((string) $n, 6, '0', STR_PAD_LEFT),
+            'date_of_birth' => '1990-01-01',
             'address_line_1' => $n . ' Jalan Dua',
+            'postcode' => '40000',
             'city' => 'Shah Alam',
             'state' => 'Selangor',
             'country' => 'Malaysia',
@@ -174,6 +176,8 @@ class SecurityScopeTest extends ShopPaymentTestCase
             'email' => 'member' . $n . '@example.test',
             'gender' => 'female',
             'race' => 'malay',
+            'emergency_contact_name' => 'Siti Aminah',
+            'emergency_contact_phone' => '01900000' . str_pad((string) $n, 2, '0', STR_PAD_LEFT),
         ];
     }
 }
