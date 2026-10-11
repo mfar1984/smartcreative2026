@@ -197,17 +197,34 @@ class UserActivationToggleTest extends TestCase
         }
     }
 
-    public function test_your_own_row_offers_no_deactivate_control(): void
+    public function test_your_own_row_offers_no_deactivate_control_on_any_tab(): void
     {
         $this->deploy();
 
-        $owner = $this->superAdmin();
+        /*
+         | An operator who manages a tab can be listed on it, so all four tabs hide
+         | the deactivate half of their own row — not as a guard, which lives in the
+         | controller, but so nobody is offered a button that always errors. Each
+         | case also asserts the control IS drawn for somebody else on the same tab,
+         | or an absent control would pass for a hidden one.
+         */
+        $cases = [
+            [[], $this->userWith(['users.view', 'users.update']), fn () => $this->administrator()],
+            [['tab' => 'handler'], $this->userWith(['handlers.view', 'handlers.update'], ['is_handler' => true]), fn () => $this->handler()],
+            [['tab' => 'sponsorship'], $this->userWith(['sponsors.view', 'sponsors.update'], ['is_sponsor' => true]), fn () => $this->sponsor()],
+            [['tab' => 'monitoring'], $this->userWith(['monitors.view', 'monitors.update'], ['is_monitor' => true]), fn () => $this->monitor()],
+        ];
 
-        $response = $this->actingAs($owner)->get(route('admin.settings.users'));
+        foreach ($cases as [$tab, $operator, $make]) {
+            $other = $make();
 
-        $response->assertOk();
-        $response->assertSee($owner->name);
-        $response->assertDontSee(sprintf('aria-label="Deactivate %s"', $owner->name), false);
+            $response = $this->actingAs($operator)->get(route('admin.settings.users', $tab));
+
+            $response->assertOk();
+            $response->assertSee($operator->name);
+            $response->assertDontSee(sprintf('aria-label="Deactivate %s"', $operator->name), false);
+            $response->assertSee(sprintf('aria-label="Deactivate %s"', $other->name), false);
+        }
     }
 
     public function test_a_view_only_role_is_offered_no_activation_control(): void
@@ -458,6 +475,39 @@ class UserActivationToggleTest extends TestCase
 
             $this->assertTrue($row->fresh()->is_active, $name);
         }
+    }
+
+    public function test_posting_the_state_a_row_already_has_is_neither_a_write_nor_a_refusal(): void
+    {
+        $this->deploy();
+
+        $this->superAdmin();
+        $off = $this->superAdmin('Switched Off Juliet');
+        $off->forceFill(['is_active' => false])->save();
+
+        $operator = $this->userWith(['users.view', 'users.update']);
+
+        // Unreachable from the screen, which offers an inactive row Activate, so
+        // this is the crafted PUT. It must not be answered with the last-super-admin
+        // refusal: that sentence is about a different row than the one posted, and a
+        // submit that changes nothing has nothing to warn about.
+        $this->actingAs($operator)
+            ->put(route('admin.settings.users.activation', $off), ['is_active' => '0'])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('admin.settings.users'));
+
+        $this->assertFalse($off->fresh()->is_active);
+
+        $this->assertDatabaseMissing('activity_logs', [
+            'user_id' => $operator->id,
+            'level' => AdminLogger::LEVEL_WARN,
+        ]);
+
+        $this->assertDatabaseMissing('audit_logs', [
+            'auditable_type' => User::class,
+            'auditable_id' => $off->id,
+            'event' => 'updated',
+        ]);
     }
 
     public function test_a_post_without_a_target_state_changes_nothing(): void

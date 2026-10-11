@@ -408,6 +408,17 @@ class UserController extends Controller
         $target = $request->boolean('is_active');
         $back = route('admin.settings.users', $tab === 'users' ? [] : ['tab' => $tab]);
 
+        /*
+         | A row already in the posted state is a stale submit, not a change, so it
+         | is answered before the guards below. Otherwise posting "off" at an
+         | account that is already off could be refused with the last-super-admin
+         | message — a sentence about a different row than the one being touched —
+         | and would file a warning about an attempt that changes nothing.
+         */
+        if ((bool) $user->is_active === $target) {
+            return redirect()->to($back);
+        }
+
         if (! $target && $user->is($request->user())) {
             AdminLogger::activity(
                 "{$prefix}.update",

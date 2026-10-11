@@ -351,7 +351,11 @@
                                                 </button>
                                             @endif
 
-                                            {{-- Lock / unlock, behind the same flag as Edit above. --}}
+                                            {{-- Lock / unlock, behind the same flag as Edit above. Your own
+                                                 row is offered no deactivate half, same as the Users tab — an
+                                                 operator who manages this tab can be listed on it. The server
+                                                 guard is what enforces it; this only avoids offering a button
+                                                 that always errors. --}}
                                             @if ($canUpdateHandler)
                                                 @if (! $row->is_active)
                                                     <form action="{{ route('admin.settings.users.handlers.activation', $row) }}" method="POST">
@@ -365,7 +369,7 @@
                                                             <span class="text-xs font-semibold">Activate</span>
                                                         </button>
                                                     </form>
-                                                @else
+                                                @elseif (! $row->is(auth()->user()))
                                                     <form action="{{ route('admin.settings.users.handlers.activation', $row) }}" method="POST"
                                                           onsubmit="return confirm('Deactivate {{ addslashes($row->name) }}? They will not be able to sign in.');">
                                                         @csrf
@@ -601,7 +605,11 @@
                                                 </button>
                                             @endif
 
-                                            {{-- Lock / unlock, behind the same flag as Edit above. --}}
+                                            {{-- Lock / unlock, behind the same flag as Edit above. Your own
+                                                 row is offered no deactivate half, same as the Users tab — an
+                                                 operator who manages this tab can be listed on it. The server
+                                                 guard is what enforces it; this only avoids offering a button
+                                                 that always errors. --}}
                                             @if ($canUpdateSponsor)
                                                 @if (! $row->is_active)
                                                     <form action="{{ route('admin.settings.users.sponsors.activation', $row) }}" method="POST">
@@ -615,7 +623,7 @@
                                                             <span class="text-xs font-semibold">Activate</span>
                                                         </button>
                                                     </form>
-                                                @else
+                                                @elseif (! $row->is(auth()->user()))
                                                     <form action="{{ route('admin.settings.users.sponsors.activation', $row) }}" method="POST"
                                                           onsubmit="return confirm('Deactivate {{ addslashes($row->name) }}? They will not be able to sign in.');">
                                                         @csrf
@@ -799,7 +807,11 @@
                                                 </button>
                                             @endif
 
-                                            {{-- Lock / unlock, behind the same flag as Edit above. --}}
+                                            {{-- Lock / unlock, behind the same flag as Edit above. Your own
+                                                 row is offered no deactivate half, same as the Users tab — an
+                                                 operator who manages this tab can be listed on it. The server
+                                                 guard is what enforces it; this only avoids offering a button
+                                                 that always errors. --}}
                                             @if ($canUpdateMonitor)
                                                 @if (! $row->is_active)
                                                     <form action="{{ route('admin.settings.users.monitors.activation', $row) }}" method="POST">
@@ -813,7 +825,7 @@
                                                             <span class="text-xs font-semibold">Activate</span>
                                                         </button>
                                                     </form>
-                                                @else
+                                                @elseif (! $row->is(auth()->user()))
                                                     <form action="{{ route('admin.settings.users.monitors.activation', $row) }}" method="POST"
                                                           onsubmit="return confirm('Deactivate {{ addslashes($row->name) }}? They will not be able to sign in.');">
                                                         @csrf
