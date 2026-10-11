@@ -46,6 +46,9 @@ class ShopProduct extends Model
         self::FULFILMENT_OFFLINE => 'Offline, collected at a counter',
     ];
 
+    /** The heading above the add-ons when the operator typed none. */
+    public const ADDON_GROUP_FALLBACK = 'Extras';
+
     protected $fillable = [
         'slug',
         'name',
@@ -65,6 +68,7 @@ class ShopProduct extends Model
         'width_mm',
         'height_mm',
         'option_name',
+        'addon_group_name',
         'highlights',
         'included_items',
         'specifications',
@@ -165,6 +169,21 @@ class ShopProduct extends Model
     public function purchasableAddons()
     {
         return $this->addons->filter(fn (ShopProductAddon $addon) => $addon->isPurchasable())->values();
+    }
+
+    /**
+     * What the storefront calls the group of add-ons.
+     *
+     * The operator types it, the way option_name names the group of sizes, because
+     * "Extras" is not the right word for every product. Falling back rather than
+     * being required: every product already in the shop has nothing stored here, and
+     * each of them must keep the heading it has today.
+     */
+    public function addonGroupName(): string
+    {
+        return filled($this->addon_group_name)
+            ? (string) $this->addon_group_name
+            : self::ADDON_GROUP_FALLBACK;
     }
 
     /* ---------------------------------------------------------------------

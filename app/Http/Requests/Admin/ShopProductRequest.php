@@ -4,6 +4,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Models\ShopOrder;
 use App\Models\ShopProduct;
+use App\Models\ShopProductAddon;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
@@ -176,6 +177,14 @@ class ShopProductRequest extends FormRequest
 
             'option_name' => ['nullable', 'string', 'max:60'],
 
+            /*
+             | What the group of add-ons is called on the storefront. Nullable, unlike
+             | option_name: a blank one falls back to "Extras", which is what every
+             | product in the shop reads today, so requiring it would refuse to save a
+             | product that is already correct.
+             */
+            'addon_group_name' => ['nullable', 'string', 'max:60'],
+
             'variants' => ['array', 'max:' . self::MAX_VARIANTS],
             'variants.*.id' => ['nullable', 'integer'],
             'variants.*.label' => ['required', 'string', 'max:60'],
@@ -222,6 +231,10 @@ class ShopProductRequest extends FormRequest
 
             'addons.*.is_required' => ['boolean'],
             'addons.*.is_active' => ['boolean'],
+
+            // Normalised to a known value before it gets here, so this is the guard
+            // against anything the normaliser is ever changed to let through.
+            'addons.*.selection_type' => ['required', Rule::in(array_keys(ShopProductAddon::SELECTION_TYPES))],
 
             'addons.*.variants' => ['array', 'max:' . self::MAX_ADDON_OPTIONS],
             'addons.*.variants.*.id' => ['nullable', 'integer'],
@@ -747,6 +760,19 @@ class ShopProductRequest extends FormRequest
                 'stock' => $stock,
                 'is_required' => (bool) ($row['is_required'] ?? false),
                 'is_active' => (bool) ($row['is_active'] ?? false),
+
+                /*
+                 | Coerced rather than refused, the way EventRequest handles its own
+                 | selection_type: an add-on saved before the dropdown existed posts
+                 | nothing here, and that is not an operator error to report. Radio is
+                 | the fallback because it is what every such add-on already does.
+                 */
+                'selection_type' => in_array(
+                    $row['selection_type'] ?? null,
+                    array_keys(ShopProductAddon::SELECTION_TYPES),
+                    true,
+                ) ? $row['selection_type'] : ShopProductAddon::SELECTION_RADIO,
+
                 'variants' => $options,
             ];
         }
@@ -896,6 +922,12 @@ class ShopProductRequest extends FormRequest
         // heading on the storefront.
         if ($this->input('variants', []) === []) {
             $data['option_name'] = null;
+        }
+
+        // Same rule for the add-ons heading: with no add-ons there is no group for
+        // it to name, and a stored word would come back on the next one added.
+        if ($this->input('addons', []) === []) {
+            $data['addon_group_name'] = null;
         }
 
         return $data;

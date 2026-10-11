@@ -21,12 +21,32 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class ShopProductAddon extends Model
 {
+    /** One option only, which is what every add-on did before the setting existed. */
+    public const SELECTION_RADIO = 'radio';
+
+    /** As many options as the buyer wants, each priced in its own right. */
+    public const SELECTION_CHECKBOX = 'checkbox';
+
+    /**
+     * Input type => label shown in the admin dropdown.
+     *
+     * The event module's third type, quantity, is deliberately absent: a shop add-on
+     * has no quantity of its own. It rides one-per-unit on the basket line, so "how
+     * many" is already answered by the line's own Quantity box, and max_quantity caps
+     * that line rather than counting boxes inside the add-on.
+     */
+    public const SELECTION_TYPES = [
+        self::SELECTION_RADIO => 'Radio button — choose one option only',
+        self::SELECTION_CHECKBOX => 'Checkbox — tick as many options as needed',
+    ];
+
     protected $fillable = [
         'shop_product_id',
         'name',
         'description',
         'price',
         'is_required',
+        'selection_type',
         'max_quantity',
         'stock',
         'stock_taken',
@@ -85,6 +105,41 @@ class ShopProductAddon extends Model
         return $this->variants->isNotEmpty();
     }
 
+    /* ---------------------------------------------------------------------
+     | How the buyer answers it
+     |
+     | Only asked once the add-on has options. Without them the storefront draws a
+     | tick box because there is nothing to choose between, so the setting is left
+     | out of that branch entirely rather than given a meaning it cannot have.
+     * ------------------------------------------------------------------ */
+
+    public function isCheckboxSelection(): bool
+    {
+        return $this->selection_type === self::SELECTION_CHECKBOX;
+    }
+
+    /**
+     * Anything that is not explicitly a checkbox, so a row written before the column
+     * existed, or carrying a value this release does not know, still behaves the way
+     * it was bought: one option only.
+     */
+    public function isRadioSelection(): bool
+    {
+        return ! $this->isCheckboxSelection();
+    }
+
+    public function selectionTypeLabel(): string
+    {
+        return self::SELECTION_TYPES[$this->selection_type]
+            ?? self::SELECTION_TYPES[self::SELECTION_RADIO];
+    }
+
+    /** Whether more than one of its options may be taken at once. */
+    public function allowsManyOptions(): bool
+    {
+        return $this->hasVariants() && $this->isCheckboxSelection();
+    }
+
     public function unitPrice(): float
     {
         return (float) $this->price;
@@ -100,6 +155,26 @@ class ShopProductAddon extends Model
     public function priceSummaryLabel(): string
     {
         return PaymentFigures::money($this->unitPrice());
+    }
+
+    /**
+     * Whether taking this adds nothing to what is owed.
+     *
+     * Derived rather than a setting, as EventAddon::costsNothing() is, so it cannot
+     * be misconfigured into hiding a charge that is really being made. An add-on
+     * whose every option resolves to zero is one whose cost already sits in the
+     * product price, and "+RM 0.00" beside it is noise that reads as though
+     * something were still being charged.
+     */
+    public function costsNothing(): bool
+    {
+        if ($this->hasVariants()) {
+            return $this->variants->every(
+                fn (ShopProductAddonVariant $option) => abs($option->unitPrice()) < 0.01
+            );
+        }
+
+        return abs($this->unitPrice()) < 0.01;
     }
 
     /* ---------------------------------------------------------------------

@@ -17,6 +17,10 @@
     $isActive = array_key_exists('is_active', $row) ? (bool) $row['is_active'] : true;
     $isRequired = (bool) ($row['is_required'] ?? false);
 
+    // Radio for a blank row, because that is what every add-on did before the
+    // dropdown existed and it is the safer of the two: one answer, not several.
+    $selectionType = (string) ($row['selection_type'] ?? \App\Models\ShopProductAddon::SELECTION_RADIO);
+
     $taken = (int) ($row['stock_taken'] ?? 0);
     $soldOptions = collect($options)->filter(fn ($option) => (int) ($option['stock_taken'] ?? 0) > 0);
     $sold = $taken + (int) $soldOptions->sum(fn ($option) => (int) $option['stock_taken']);
@@ -92,6 +96,23 @@
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Input Type</label>
+                    <select name="{{ $name }}[selection_type]"
+                            class="{{ $miniInput }} bg-white">
+                        @foreach (\App\Models\ShopProductAddon::SELECTION_TYPES as $value => $label)
+                            <option value="{{ $value }}" @selected($selectionType === $value)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                    <p class="text-[11px] text-gray-500 mt-1">
+                        Only applies once the add-on has options. With none it is a single tick
+                        box, because there is nothing to choose between.
+                    </p>
+                    @error("addons.{$index}.selection_type")
+                        <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                    @enderror
+                </div>
+
                 <div>
                     <label class="block text-xs font-semibold text-gray-700 mb-1">Max Per Order</label>
                     <input type="number" name="{{ $name }}[max_quantity]" min="1" max="1000"

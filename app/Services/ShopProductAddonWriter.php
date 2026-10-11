@@ -74,6 +74,10 @@ class ShopProductAddonWriter
             'is_required' => (bool) ($row['is_required'] ?? false),
             'is_active' => (bool) ($row['is_active'] ?? false),
 
+            // Already reconciled to a known value by the form request; the fallback
+            // is here only so a caller that builds rows by hand cannot write a blank.
+            'selection_type' => $row['selection_type'] ?? ShopProductAddon::SELECTION_RADIO,
+
             // Display order follows the order of the form, so the list comes back
             // the way it was left without needing a drag handle.
             'sort_order' => $position,

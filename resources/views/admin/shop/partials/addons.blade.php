@@ -33,6 +33,7 @@
                     'stock_taken' => $addon->stock_taken,
                     'is_required' => $addon->is_required ? '1' : '0',
                     'is_active' => $addon->is_active ? '1' : '0',
+                    'selection_type' => $addon->selection_type ?? \App\Models\ShopProductAddon::SELECTION_RADIO,
                     'variants' => $addon->variants
                         ->map(fn ($option) => [
                             'id' => $option->id,
@@ -74,6 +75,10 @@
             <p class="text-xs text-red-600 mt-2">{{ $message }}</p>
         @enderror
 
+        @error('addon_group_name')
+            <p class="text-xs text-red-600 mt-2">{{ $message }}</p>
+        @enderror
+
         @php
             $productAddonErrors = collect($errors->keys())->filter(fn ($key) => str_starts_with($key, 'addons.'));
         @endphp
@@ -88,6 +93,19 @@
                 </div>
             </div>
         @endif
+    </div>
+
+    <div class="px-5 pb-5">
+        <x-admin.field-row
+            label="What The Add-ons Are"
+            help="Becomes the heading buyers see above the list, so it reads &quot;Add On Items&quot; rather than &quot;Extras&quot;. Leave it blank to keep Extras."
+            for="addon_group_name"
+            error="addon_group_name">
+            <input type="text" id="addon_group_name" name="addon_group_name" maxlength="60"
+                   value="{{ old('addon_group_name', $product->addon_group_name) }}"
+                   placeholder="e.g. Extras"
+                   class="{{ $input }} max-w-xs">
+        </x-admin.field-row>
     </div>
 
     <div class="px-5 pb-5">

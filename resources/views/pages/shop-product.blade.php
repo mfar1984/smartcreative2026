@@ -344,18 +344,24 @@
                                 </fieldset>
                             @endif
 
-                            {{-- ==================== Extras ====================
+                            {{-- ==================== Add-ons ====================
                                  Below the size, because they are chosen for whichever
-                                 size was picked. Posted as addons[id], and nothing here
-                                 carries any authority: App\Support\Cart resolves every
-                                 add-on, option and price against the catalogue, enforces
-                                 the compulsory ones itself, and prints its refusal
-                                 through the cart error block above. --}}
+                                 size was picked. The heading is whatever the operator
+                                 typed, falling back to "Extras", because the word is not
+                                 right for every product.
+
+                                 Posted as addons[id] for a radio add-on and addons[id][]
+                                 for a checkbox one, and nothing here carries any
+                                 authority: App\Support\Cart resolves every add-on,
+                                 option and price against the catalogue, refuses a second
+                                 selection on a radio add-on, enforces the compulsory ones
+                                 itself, and prints its refusal through the cart error
+                                 block above. --}}
                             @php $addons = $product->purchasableAddons(); @endphp
 
                             @if ($addons->isNotEmpty())
                                 <div class="mb-5 space-y-3">
-                                    <h2 class="text-sm font-bold text-gray-900">Extras</h2>
+                                    <h2 class="text-sm font-bold text-gray-900">{{ $product->addonGroupName() }}</h2>
 
                                     @foreach ($addons as $addon)
                                         <div class="rounded-lg border border-gray-200 p-4">
@@ -368,8 +374,16 @@
                                                     @endif
                                                 </p>
 
+                                                {{-- "+RM 0.00" against something deliberately priced at
+                                                     zero is noise, and it reads as though a charge were
+                                                     still being made. The word says so instead, the way
+                                                     the registration form already does. --}}
                                                 <p class="text-sm font-bold text-gray-900 tabular-nums whitespace-nowrap">
-                                                    +{{ $addon->priceSummaryLabel() }}
+                                                    @if ($addon->costsNothing())
+                                                        Included
+                                                    @else
+                                                        +{{ $addon->priceSummaryLabel() }}
+                                                    @endif
                                                 </p>
                                             </div>
 
@@ -378,17 +392,21 @@
                                             @endif
 
                                             @if ($addon->hasVariants())
+                                                @php $manyAllowed = $addon->allowsManyOptions(); @endphp
+
                                                 <div class="mt-3 space-y-2 border-t border-gray-100 pt-3">
-                                                    @unless ($addon->is_required)
-                                                        {{-- Only an optional add-on can be declined, so only it
-                                                             gets a None row. On a compulsory one the row would be
-                                                             a choice the server refuses. --}}
+                                                    @if (! $addon->is_required && ! $manyAllowed)
+                                                        {{-- Only an optional radio add-on gets a None row: a
+                                                             radio group cannot be cleared once it is answered,
+                                                             and on a compulsory one the row would be a choice
+                                                             the server refuses. A checkbox needs none, because
+                                                             leaving every box alone already declines it. --}}
                                                         <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2.5 cursor-pointer hover:border-blue-300 hover:bg-blue-50 transition">
                                                             <input type="radio" name="addons[{{ $addon->id }}]" value="" checked
                                                                    class="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500">
                                                             <span class="text-sm text-gray-700">None</span>
                                                         </label>
-                                                    @endunless
+                                                    @endif
 
                                                     @foreach ($addon->variants as $option)
                                                         @php $optionSoldOut = $option->isSoldOut(); @endphp
@@ -398,17 +416,32 @@
                                                             'border-gray-200 cursor-pointer hover:border-blue-300 hover:bg-blue-50' => ! $optionSoldOut,
                                                             'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed' => $optionSoldOut,
                                                         ])>
-                                                            <input type="radio"
-                                                                   name="addons[{{ $addon->id }}]"
+                                                            {{-- A checkbox group posts a list, so its name carries
+                                                                 the [] and each box is independent. The radio keeps
+                                                                 one name for the whole group, which is what holds it
+                                                                 to a single answer in the browser. --}}
+                                                            <input type="{{ $manyAllowed ? 'checkbox' : 'radio' }}"
+                                                                   name="addons[{{ $addon->id }}]{{ $manyAllowed ? '[]' : '' }}"
                                                                    value="{{ $option->id }}"
                                                                    @disabled($optionSoldOut)
-                                                                   @required($addon->is_required)
-                                                                   class="h-4 w-4 shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-40">
+                                                                   @required(! $manyAllowed && $addon->is_required)
+                                                                   @class([
+                                                                       'h-4 w-4 shrink-0 border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-40',
+                                                                       'rounded' => $manyAllowed,
+                                                                   ])>
 
                                                             <span @class(['min-w-0 flex-1 text-sm', 'line-through' => $optionSoldOut])>{{ $option->label }}</span>
 
+                                                            {{-- Same rule as the head figure: a free option shows
+                                                                 no money, and says "Free" only when a priced option
+                                                                 sits beside it, where an empty cell would look like
+                                                                 a rendering fault. --}}
                                                             <span class="text-sm font-semibold tabular-nums whitespace-nowrap">
-                                                                +{{ App\Support\PaymentFigures::money($option->unitPrice()) }}
+                                                                @if ($option->unitPrice() >= 0.01)
+                                                                    +{{ App\Support\PaymentFigures::money($option->unitPrice()) }}
+                                                                @elseif (! $addon->costsNothing())
+                                                                    <span class="text-gray-400">Free</span>
+                                                                @endif
                                                             </span>
 
                                                             @if ($optionSoldOut)
@@ -417,6 +450,14 @@
                                                         </label>
                                                     @endforeach
                                                 </div>
+
+                                                @if ($manyAllowed && $addon->is_required)
+                                                    {{-- A checkbox group cannot be marked required in markup
+                                                         without requiring every box, so the rule is the
+                                                         server's and this is the warning that comes before it.
+                                                         Cart refuses the line either way. --}}
+                                                    <p class="text-xs text-gray-500 mt-2">Tick at least one.</p>
+                                                @endif
                                             @elseif ($addon->is_required)
                                                 {{-- No input at all: the server adds a compulsory add-on with no
                                                      options to every line, so a field here would only be

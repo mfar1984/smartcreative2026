@@ -48,7 +48,7 @@ final class Cart
      * Returns false when there is nothing to add: no such product, not on sale, or
      * an option that does not belong to it.
      *
-     * @param  array<int|string, mixed>  $addons  add-on id => chosen option id, as posted
+     * @param  array<int|string, mixed>  $addons  add-on id => chosen option id, or a list of them from a checkbox group, as posted
      */
     public static function add(int $productId, ?int $variantId, int $quantity = 1, array $addons = []): ?string
     {
@@ -133,15 +133,17 @@ final class Cart
      * refused, because an add-on switched off while somebody had the page open is not
      * the buyer's mistake.
      *
-     * Three things it will not let through:
+     * Four things it will not let through:
      *  - an option id that does not belong to the add-on, or has sold out;
+     *  - more than one option against a radio add-on, which the markup cannot
+     *    produce and charging both would bill for a choice never offered;
      *  - a compulsory add-on with options and no valid choice, which is refused in
      *    words so the buyer knows what to do;
      *  - a compulsory add-on with no options being left off, which cannot happen at
      *    all: it is added whatever was posted, so there is nothing to tamper with.
      *
      * @param  array<int|string, mixed>  $posted
-     * @return array<int, int|null>|string  add-on id => option id or null, or the refusal
+     * @return array<int, int|array<int, int>|null>|string  add-on id => option id, option ids, or null; or the refusal
      */
     private static function resolveAddons(ShopProduct $product, array $posted): array|string
     {
@@ -152,7 +154,9 @@ final class Cart
             $choice = $posted[$addon->id] ?? null;
 
             if ($addon->hasVariants()) {
-                if (blank($choice)) {
+                $wanted = self::chosenOptionIds($choice);
+
+                if ($wanted === []) {
                     if ($addon->is_required) {
                         return sprintf('Choose an option for "%s" before adding this to your basket.', $addon->name);
                     }
@@ -160,16 +164,42 @@ final class Cart
                     continue;
                 }
 
-                /** @var ShopProductAddonVariant|null $option */
-                $option = $addon->variants->firstWhere('id', (int) $choice);
-
-                // Not one of this add-on's options, or gone since the page loaded.
-                // Either way there is nothing here to sell.
-                if ($option === null || $option->isSoldOut()) {
+                /*
+                 | A radio add-on is one answer. Two ids against it means the form was
+                 | bypassed, and both are refused rather than one silently kept: which
+                 | one to drop is not ours to decide, and the buyer would be charged
+                 | for something they cannot see on the page.
+                 */
+                if (count($wanted) > 1 && ! $addon->isCheckboxSelection()) {
                     return self::UNAVAILABLE;
                 }
 
-                $resolved[$addon->id] = $option->id;
+                $chosen = [];
+
+                foreach ($wanted as $optionId) {
+                    /** @var ShopProductAddonVariant|null $option */
+                    $option = $addon->variants->firstWhere('id', $optionId);
+
+                    // Not one of this add-on's options, or gone since the page
+                    // loaded. Either way there is nothing here to sell.
+                    if ($option === null || $option->isSoldOut()) {
+                        return self::UNAVAILABLE;
+                    }
+
+                    $chosen[] = $option->id;
+                }
+
+                // Sorted so the same two options ticked in either order are one
+                // basket line rather than two priced the same.
+                sort($chosen);
+
+                /*
+                 | One choice stays a bare id, which is the exact shape every basket
+                 | and every line fingerprint held before a checkbox add-on existed.
+                 | Wrapping it in a list would key the same selection differently and
+                 | split a basket somebody is part way through into duplicate lines.
+                 */
+                $resolved[$addon->id] = count($chosen) === 1 ? $chosen[0] : $chosen;
 
                 continue;
             }
@@ -200,6 +230,30 @@ final class Cart
         }
 
         return $resolved;
+    }
+
+    /**
+     * The option ids posted against one add-on, whatever shape they arrived in.
+     *
+     * A radio posts one value, a checkbox group posts a list, and a stored line
+     * holds either a bare id or a list of them. All four are read here so the rest
+     * of the class never has to ask which it is looking at.
+     *
+     * Blank values are dropped because that is what "None" and an unticked box send;
+     * a literal "0" is kept and fails the lookup below, exactly as it did before.
+     *
+     * @return array<int, int>
+     */
+    private static function chosenOptionIds(mixed $choice): array
+    {
+        $values = is_array($choice) ? $choice : [$choice];
+
+        return collect($values)
+            ->reject(fn ($value) => blank($value))
+            ->map(fn ($value) => (int) $value)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -548,7 +602,7 @@ final class Cart
      * exactly what it has always been, which is what keeps a basket somebody is
      * part way through, and every caller passing two arguments, working.
      *
-     * @param  array<int, int|null>  $addons  add-on id => option id or null
+     * @param  array<int, int|array<int, int>|null>  $addons  add-on id => option id, option ids, or null
      */
     public static function key(int $productId, ?int $variantId, array $addons = []): string
     {
@@ -566,7 +620,7 @@ final class Cart
     }
 
     /**
-     * @return array<string, array{product_id: int, variant_id: int|null, quantity: int, addons?: array<int, int|null>}>
+     * @return array<string, array{product_id: int, variant_id: int|null, quantity: int, addons?: array<int, int|array<int, int>|null>}>
      */
     private static function raw(): array
     {
@@ -590,10 +644,11 @@ final class Cart
     }
 
     /**
-     * The selection stored on a session line, as add-on id => option id or null.
+     * The selection stored on a session line, as add-on id => option id, option ids,
+     * or null.
      *
      * @param  array<string, mixed>  $line
-     * @return array<int, int|null>
+     * @return array<int, int|array<int, int>|null>
      */
     private static function storedAddons(array $line): array
     {
@@ -606,14 +661,14 @@ final class Cart
      * Priced from the catalogue, never from the session: the stored selection says
      * which extras, and the rows say what they cost right now.
      *
-     * @param  array<int, int|null>  $selection
+     * @param  array<int, int|array<int, int>|null>  $selection
      * @return array<int, array{addon: ShopProductAddon, variant: ShopProductAddonVariant|null, unit_price: float}>
      */
     private static function describeAddons(ShopProduct $product, array $selection): array
     {
         $rows = [];
 
-        foreach ($selection as $addonId => $optionId) {
+        foreach ($selection as $addonId => $chosen) {
             /** @var ShopProductAddon|null $addon */
             $addon = $product->addons->firstWhere('id', $addonId);
 
@@ -621,13 +676,21 @@ final class Cart
                 continue;
             }
 
-            $option = $optionId === null ? null : $addon->variants->firstWhere('id', $optionId);
+            /*
+             | One row per chosen option, because that is what each of them costs and
+             | what each writes to the order. A checkbox add-on holds a list; a radio
+             | one and an add-on with no options hold a single value, and null is the
+             | second of those — the add-on itself, taken with nothing to choose.
+             */
+            foreach (is_array($chosen) ? $chosen : [$chosen] as $optionId) {
+                $option = $optionId === null ? null : $addon->variants->firstWhere('id', $optionId);
 
-            $rows[] = [
-                'addon' => $addon,
-                'variant' => $option,
-                'unit_price' => $option !== null ? $option->unitPrice() : $addon->unitPrice(),
-            ];
+                $rows[] = [
+                    'addon' => $addon,
+                    'variant' => $option,
+                    'unit_price' => $option !== null ? $option->unitPrice() : $addon->unitPrice(),
+                ];
+            }
         }
 
         return $rows;
@@ -640,7 +703,7 @@ final class Cart
      * extra has left, and the per order cap any of them sets. One engraving per
      * medal (D4), so ten medals need ten engravings and the smallest figure wins.
      *
-     * @param  array<int, int|null>  $selection
+     * @param  array<int, int|array<int, int>|null>  $selection
      */
     private static function available(ShopProduct $product, ?ShopProductVariant $variant, array $selection = []): ?int
     {
@@ -666,7 +729,7 @@ final class Cart
     /**
      * Hold a quantity to what is sellable and to the per line cap.
      *
-     * @param  array<int, int|null>  $selection
+     * @param  array<int, int|array<int, int>|null>  $selection
      */
     private static function clamp(int $quantity, ShopProduct $product, ?int $variantId, array $selection = []): int
     {
