@@ -14,6 +14,8 @@ use App\Models\TournamentMatchPlayer;
 use App\Models\TournamentStage;
 use App\Services\AdminLogger;
 use App\Support\ParticipantOptions;
+use App\Support\Tournament\MatchAwardSheet;
+use App\Support\Tournament\MatchRoster;
 use App\Support\Tournament\PlayerStandingsCalculator;
 use App\Support\Tournament\ScoreSheetFields;
 use App\Support\Tournament\ScoringEngine;
@@ -277,6 +279,15 @@ class MatchController extends Controller
             'matchAwards' => $rule?->matchAwards() ?? [],
             'awardRows' => $match->awards->keyBy('award_key'),
 
+            /*
+             | Whether the game's Star of the Match screen has anything to fill in
+             | here. False on a profile that hands out no awards, and on anything that
+             | is not a battle royale lobby, which is the same answer the endpoint
+             | gives: there is no way for the control to be drawn while the read
+             | refuses.
+             */
+            'readsAwards' => MatchAwardSheet::forRule($rule) !== null,
+
             // Which personal stat each award figure is, so picking a player fills the
             // award from what is already recorded for them in this match.
             'awardFieldMap' => $rule ? $this->awardFieldMap($rule) : [],
@@ -364,53 +375,14 @@ class MatchController extends Controller
     /**
      * Who each entrant is allowed to field, by entrant id.
      *
-     * Only participants on that entrant's own registration, and only those whose role
-     * is `player`. A manager is not fielded, and a person on another team's
-     * registration cannot appear here at all.
+     * In MatchRoster rather than here, because the award reader has to match a
+     * nickname off a screenshot against exactly the people this dropdown offers.
      *
      * @return array<int, \Illuminate\Support\Collection<int, EventParticipant>>
      */
     private function rostersFor(TournamentMatch $match, ?PointRule $rule): array
     {
-        if ($rule === null || ! $rule->tracksPlayers()) {
-            return [];
-        }
-
-        $registrationIds = $match->entrants
-            ->pluck('entrant.event_registration_id')
-            ->filter()
-            ->unique()
-            ->all();
-
-        if ($registrationIds === []) {
-            return [];
-        }
-
-        // playing(), not role = 'player': a manager who also holds a place is on
-        // the roster, and leaving them out here would keep them off every match
-        // line-up while they are named on the entry.
-        $byRegistration = EventParticipant::query()
-            ->whereIn('event_registration_id', $registrationIds)
-            ->playing()
-            ->orderBy('full_name')
-            // ign_name is selected because the pick-a-player dropdown leads with the
-            // handle that appears on the results screen being copied from.
-            ->get(['id', 'event_registration_id', 'full_name', 'ign_name', 'ign_player_id'])
-            ->groupBy('event_registration_id');
-
-        $rosters = [];
-
-        foreach ($match->entrants as $line) {
-            $registrationId = $line->entrant?->event_registration_id;
-
-            if ($line->tournament_entrant_id === null || $registrationId === null) {
-                continue;
-            }
-
-            $rosters[$line->tournament_entrant_id] = $byRegistration->get($registrationId, collect());
-        }
-
-        return $rosters;
+        return MatchRoster::forMatch($match, $rule);
     }
 
     /**

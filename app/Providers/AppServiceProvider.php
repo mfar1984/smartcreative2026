@@ -2,9 +2,11 @@
 
 namespace App\Providers;
 
+use App\Contracts\MatchAwardReader;
 use App\Contracts\ScoreSheetReader;
 use App\Services\Backup\DatabaseDumper;
 use App\Services\Backup\MysqlDumper;
+use App\Services\Vision\GeminiMatchAwardReader;
 use App\Services\Vision\GeminiScoreSheetReader;
 use App\Support\MailSettings;
 use App\Support\SecuritySettings;
@@ -55,12 +57,17 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(DatabaseDumper::class, fn () => MysqlDumper::forDefaultConnection());
 
         /*
-         | The screenshot reader on the score screen, behind an interface for the
+         | The screenshot readers on the score screen, behind interfaces for the
          | same reason: the supplier is bought by the call and will be changed one
-         | day. This line is the only place Gemini is named outside its own class,
-         | so changing supplier is a new class and this binding.
+         | day. These two lines are the only place Gemini is named outside its own
+         | classes, so changing supplier is a new class and a binding.
+         |
+         | One reads the results table, the other the game's Star of the Match
+         | screen. They share GeminiClient, which is where the key, the endpoint and
+         | the timeouts live.
          */
         $this->app->bind(ScoreSheetReader::class, GeminiScoreSheetReader::class);
+        $this->app->bind(MatchAwardReader::class, GeminiMatchAwardReader::class);
     }
 
     /**

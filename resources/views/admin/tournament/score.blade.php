@@ -35,6 +35,13 @@
         $opensDialog = $picksPlayers || $hasAwards;
 
         /*
+         | Whether the game's Star of the Match screen can be read into those cards.
+         | $readsAwards is the profile's answer; the rest is this screen's: no awards
+         | on the dialog and nobody to give one to means there is nothing to fill in.
+         */
+        $readsAwardSheet = $canScore && $hasAwards && $readsAwards;
+
+        /*
          | Marks only one competitor in the fixture may hold, and who currently holds
          | each of them.
          |
@@ -748,12 +755,33 @@
                                      figures its card on the website carries. --}}
                                 @if ($hasAwards)
                                     <div @class(['px-5 py-4', 'border-t border-gray-200' => $picksPlayers])>
-                                        <p class="text-xs font-bold uppercase tracking-wide text-gray-500">Star of the Match</p>
-                                        <p class="text-xs text-gray-500 mt-0.5">
-                                            Copied from the game's result screen. Picking a player fills in what is already
-                                            recorded for them in this match, and what is saved here counts on the player
-                                            leaderboard too. Leave an award to nobody if it was not given.
-                                        </p>
+                                        <div class="flex flex-wrap items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <p class="text-xs font-bold uppercase tracking-wide text-gray-500">Star of the Match</p>
+                                                <p class="text-xs text-gray-500 mt-0.5">
+                                                    Copied from the game's result screen. Picking a player fills in what is already
+                                                    recorded for them in this match, and what is saved here counts on the player
+                                                    leaderboard too. Leave an award to nobody if it was not given.
+                                                </p>
+                                            </div>
+
+                                            {{-- Beside the cards it fills in, and a plain button: it opens the
+                                                 picker outside this form, and the awards are still saved by the
+                                                 Save button below. --}}
+                                            @if ($readsAwardSheet)
+                                                <div class="flex shrink-0 items-center">
+                                                    <span data-award-sheet-status role="status" aria-live="polite"
+                                                          class="hidden text-xs mr-2"></span>
+
+                                                    <button type="button" data-award-sheet-pick
+                                                            title="Read the award cards off the game's Star of the Match screen"
+                                                            class="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                                                        <x-admin.icon name="clipboard" class="w-3.5 h-3.5" />
+                                                        Detect Image AI
+                                                    </button>
+                                                </div>
+                                            @endif
+                                        </div>
 
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                                             @foreach ($matchAwards as $award)
@@ -853,6 +881,77 @@
 
                 <input type="hidden" name="_form_complete" value="1">
             </form>
+
+            {{-- ===== Read the Star of the Match screen =====
+                 Three cards of four figures each, copied off a screen in the other
+                 window. Same promise as the results table reader above: it fills the
+                 award cards in and saves nothing.
+
+                 BELOW THE FORM, and that position is doing two jobs. Outside it, so a
+                 file chosen here is never posted with the result — the same reason the
+                 other picker sits outside. And after it in the document, so this
+                 review panel paints over the award dialog it is filling in: both are
+                 fixed at z-50, and the later of two positioned elements at the same
+                 level wins. Moving this block above the form would put the panel
+                 behind the dialog. --}}
+            @if ($readsAwardSheet)
+                <div data-award-sheet class="hidden"
+                     data-award-sheet-url="{{ route('admin.tournaments.matches.score.read-awards', $match) }}">
+                    <label for="award-sheet-images" class="sr-only">Star of the Match screenshots</label>
+                    <input type="file" id="award-sheet-images" accept="image/jpeg,image/png,image/webp" multiple>
+                </div>
+
+                <div id="award-sheet-dialog"
+                     class="fixed inset-0 z-50 hidden items-center justify-center bg-gray-900/60 p-4"
+                     role="dialog" aria-modal="true" aria-labelledby="award-sheet-dialog-title">
+
+                    <div class="w-full max-w-3xl rounded-xl bg-white shadow-xl overflow-hidden max-h-full flex flex-col">
+                        <div class="flex items-start justify-between gap-4 px-5 py-4 border-b border-gray-200">
+                            <div>
+                                <h2 id="award-sheet-dialog-title" class="text-base font-bold text-gray-900">
+                                    What the screenshot says
+                                </h2>
+                                <p class="text-sm text-gray-500 mt-0.5">
+                                    {{ $match->label() }} &middot; check every card against the image, then
+                                    Apply. Untick anything you would rather type yourself.
+                                </p>
+                            </div>
+
+                            <button type="button" data-award-sheet-close
+                                    class="shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
+                                    aria-label="Close">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div class="overflow-y-auto px-5 py-4">
+                            <div data-award-sheet-rows class="space-y-2"></div>
+                            <div data-award-sheet-unknown class="hidden mt-5"></div>
+                            <div data-award-sheet-uncovered class="hidden mt-5"></div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-t border-gray-200 bg-gray-50">
+                            <p class="text-xs text-gray-500 max-w-sm">
+                                Apply only types these figures into the award cards. Nothing is saved until
+                                you press {{ $match->isSettled() ? 'Correct Result' : 'Save Result' }}.
+                            </p>
+
+                            <div class="flex flex-wrap gap-2.5">
+                                <button type="button" data-award-sheet-close
+                                        class="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
+                                    Cancel
+                                </button>
+                                <button type="button" data-award-sheet-apply
+                                        class="rounded-lg border border-blue-600 bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition shadow-sm">
+                                    Apply
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            @endif
 
             {{-- ============ A squad out of a lobby ============
                  A lobby has no other side to hand a walkover to, so this is about one
@@ -1752,6 +1851,397 @@
                 close();
             }
         });
+    })();
+</script>
+@endpush
+@endif
+
+{{-- Only shipped where that control exists: a battle royale lobby whose profile
+     hands out awards, with players to give them to, and an operator who may score. --}}
+@if ($readsAwardSheet)
+@push('scripts')
+<script>
+    (function () {
+        /*
+         | Detect Image AI, on the Star of the Match screen.
+         |
+         | The same three rules as the results table reader above it. It never saves:
+         | Apply types into the award cards and stops, and the awards still go through
+         | the dialog's own Save button. It never chooses: a card whose nickname did
+         | not plainly match somebody arrives unticked and marked, and a card that
+         | matched no award in the profile is listed rather than forced onto one. And
+         | every line of the dialog is built with textContent, because those nicknames
+         | came out of a model reading somebody's screenshot.
+         */
+        const sheet = document.querySelector('[data-award-sheet]');
+        const dialog = document.getElementById('award-sheet-dialog');
+        const trigger = document.querySelector('[data-award-sheet-pick]');
+
+        if (!sheet || !dialog || !trigger) {
+            return;
+        }
+
+        const picker = document.getElementById('award-sheet-images');
+        const status = document.querySelector('[data-award-sheet-status]');
+        const rowsBox = dialog.querySelector('[data-award-sheet-rows]');
+        const unknownBox = dialog.querySelector('[data-award-sheet-unknown]');
+        const uncoveredBox = dialog.querySelector('[data-award-sheet-uncovered]');
+        const tokenField = document.querySelector('#score-form input[name="_token"]');
+
+        let reading = null;
+        let busy = false;
+
+        function say(message, tone) {
+            if (!status) {
+                return;
+            }
+
+            if (!message) {
+                status.className = 'hidden text-xs mr-2';
+                status.textContent = '';
+
+                return;
+            }
+
+            status.textContent = message;
+            status.className = 'text-xs mr-2 font-semibold '
+                + (tone === 'bad' ? 'text-red-600' : 'text-gray-500');
+        }
+
+        function el(tag, className, text) {
+            const node = document.createElement(tag);
+
+            node.className = className || '';
+
+            if (text !== undefined && text !== null) {
+                node.textContent = String(text);
+            }
+
+            return node;
+        }
+
+        function awardField(awardKey, fieldKey) {
+            return document.querySelector('[name="awards[' + awardKey + '][' + fieldKey + ']"]');
+        }
+
+        function change(label, from, to) {
+            const line = el('span', 'block text-xs text-gray-600 mt-0.5');
+
+            line.appendChild(el('span', 'font-semibold text-gray-500', label + ' '));
+            line.appendChild(el('span', 'text-gray-500', from));
+            line.appendChild(el('span', 'mx-1 text-gray-400', '\u2192'));
+            line.appendChild(el('span', 'font-bold text-gray-900 tabular-nums', to));
+
+            return line;
+        }
+
+        function block(boxNode, title, tone, lines) {
+            boxNode.textContent = '';
+
+            if (lines.length === 0) {
+                boxNode.className = 'hidden mt-5';
+
+                return;
+            }
+
+            boxNode.className = 'mt-5 rounded-lg border p-3 '
+                + (tone === 'amber' ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-gray-50');
+
+            boxNode.appendChild(el(
+                'p',
+                'text-xs font-bold uppercase tracking-wide mb-1.5 '
+                    + (tone === 'amber' ? 'text-amber-800' : 'text-gray-600'),
+                title,
+            ));
+
+            const list = el('ul', 'space-y-1');
+
+            lines.forEach(function (text) {
+                list.appendChild(el(
+                    'li',
+                    'text-xs ' + (tone === 'amber' ? 'text-amber-800' : 'text-gray-600'),
+                    text,
+                ));
+            });
+
+            boxNode.appendChild(list);
+        }
+
+        function render(data) {
+            rowsBox.textContent = '';
+
+            if (data.awards.length === 0) {
+                rowsBox.appendChild(el(
+                    'p',
+                    'rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800',
+                    data.unknown.length === 0
+                        ? 'This does not look like the Star of the Match screen. Nothing was read from it.'
+                        : 'Nothing on the screen matched an award this tournament hands out.',
+                ));
+            }
+
+            data.awards.forEach(function (award, index) {
+                // No player, or a nickname the server was not sure of. Either way the
+                // operator decides, so it starts unticked.
+                const flagged = !award.player || award.low_confidence;
+
+                const line = el('label', 'flex items-start gap-3 rounded-lg border p-3 cursor-pointer '
+                    + (flagged ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white hover:bg-blue-50/30'));
+
+                const box = document.createElement('input');
+
+                box.type = 'checkbox';
+                box.className = 'mt-0.5 w-5 h-5 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40';
+                box.checked = !flagged;
+                box.setAttribute('data-award-sheet-row', String(index));
+                line.appendChild(box);
+
+                const body = el('span', 'min-w-0 flex-1');
+                const head = el('span', 'flex flex-wrap items-center gap-2');
+
+                head.appendChild(el('span', 'text-sm font-semibold text-gray-900', award.label));
+
+                if (flagged) {
+                    head.appendChild(el(
+                        'span',
+                        'rounded bg-amber-200 px-1.5 py-0.5 text-xs font-bold text-amber-900',
+                        award.player ? 'Check the player' : 'Pick the player yourself',
+                    ));
+                }
+
+                body.appendChild(head);
+
+                if (award.player) {
+                    body.appendChild(el('span', 'block text-xs text-gray-600 mt-0.5',
+                        award.player.name + (award.player.ign ? ' \u00b7 ' + award.player.ign : '')));
+
+                    // The card was printed differently from the entry list. Worth
+                    // seeing: this is the character or two OCR of that font moves.
+                    if (award.read_as && award.player.ign !== award.read_as) {
+                        body.appendChild(el('span', 'block text-xs text-gray-400 mt-0.5',
+                            'Printed as "' + award.read_as + '"'));
+                    }
+                } else {
+                    body.appendChild(el('span', 'block text-xs font-semibold text-amber-800 mt-0.5',
+                        'Printed as "' + award.read_as + '" \u2014 ' + award.reason
+                            + '. The figures below go in; pick the player yourself.'));
+                }
+
+                award.fields.forEach(function (field) {
+                    if (!Object.prototype.hasOwnProperty.call(award.figures, field.key)) {
+                        return;
+                    }
+
+                    const input = awardField(award.key, field.key);
+
+                    // What is on the form now, read off the form: the operator may
+                    // have typed since the page loaded, and the figure Apply would
+                    // overwrite is the one in the box in front of them.
+                    body.appendChild(change(
+                        field.label,
+                        input && input.value !== '' ? input.value : 'blank',
+                        award.figures[field.key],
+                    ));
+                });
+
+                if (award.unreadable.length > 0) {
+                    const names = award.unreadable.map(function (key) {
+                        const field = award.fields.filter(function (one) { return one.key === key; })[0];
+
+                        return field ? field.label : key;
+                    });
+
+                    body.appendChild(el('span', 'block text-xs text-amber-800 mt-1',
+                        'Could not be read: ' + names.join(', ') + '. Type those in.'));
+                }
+
+                line.appendChild(body);
+                rowsBox.appendChild(line);
+            });
+
+            block(unknownBox, 'Cards that were left out', 'amber', data.unknown.map(function (card) {
+                return '"' + card.label + '"' + (card.player ? ' (' + card.player + ')' : '')
+                    + ' \u2014 ' + card.reason + '.';
+            }));
+
+            block(uncoveredBox, 'Awards the screenshot did not cover', 'gray', data.uncovered.map(function (award) {
+                return award.label;
+            }));
+        }
+
+        function open() {
+            dialog.classList.remove('hidden');
+            dialog.classList.add('flex');
+            dialog.querySelector('[data-award-sheet-apply]')?.focus();
+        }
+
+        function close() {
+            dialog.classList.add('hidden');
+            dialog.classList.remove('flex');
+            trigger.focus();
+        }
+
+        function apply() {
+            if (reading === null) {
+                return;
+            }
+
+            let filled = 0;
+
+            rowsBox.querySelectorAll('[data-award-sheet-row]').forEach(function (box) {
+                if (!box.checked) {
+                    return;
+                }
+
+                const award = reading.awards[Number(box.getAttribute('data-award-sheet-row'))];
+
+                if (!award) {
+                    return;
+                }
+
+                /*
+                 | ORDER MATTERS HERE, and this is the whole of why.
+                 |
+                 | The award dialog fills a card in from the player ledger when a
+                 | player is picked: its change handler clears what it filled last
+                 | time and writes whatever is already recorded for the new player in
+                 | this match. That handler is useful and it stays — but it must not
+                 | be the thing that decides what ends up on the card.
+                 |
+                 | So the player goes first, with the change event that handler
+                 | listens for. dispatchEvent is synchronous: it runs to completion
+                 | before the next line of this function does, which is what makes
+                 | the order a guarantee rather than a race.
+                 */
+                if (award.player) {
+                    const select = document.querySelector('[data-award-player="' + award.key + '"]');
+
+                    if (select) {
+                        select.value = String(award.player.id);
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+
+                // Then the screenshot's figures last, over the top of whatever the
+                // ledger just filled in. The screenshot is the evidence.
+                award.fields.forEach(function (field) {
+                    if (!Object.prototype.hasOwnProperty.call(award.figures, field.key)) {
+                        return;
+                    }
+
+                    const input = awardField(award.key, field.key);
+
+                    if (!input) {
+                        return;
+                    }
+
+                    input.value = String(award.figures[field.key]);
+
+                    // Not an auto-fill any more. A figure read off the image is
+                    // evidence, and picking a different player must not wipe it the
+                    // way it wipes a figure the ledger supplied.
+                    delete input.dataset.autofilled;
+
+                    filled++;
+                });
+            });
+
+            close();
+
+            say(filled === 0
+                ? 'Nothing was filled in.'
+                : filled + (filled === 1 ? ' figure' : ' figures') + ' filled in. Nothing is saved until you press Save.');
+        }
+
+        trigger.addEventListener('click', function () {
+            if (!busy) {
+                picker.click();
+            }
+        });
+
+        picker.addEventListener('change', function () {
+            if (busy || picker.files.length === 0) {
+                return;
+            }
+
+            const body = new FormData();
+
+            body.append('_token', tokenField ? tokenField.value : '');
+
+            Array.prototype.forEach.call(picker.files, function (file) {
+                body.append('images[]', file);
+            });
+
+            busy = true;
+            trigger.disabled = true;
+            say(picker.files.length === 1 ? 'Reading the image...' : 'Reading ' + picker.files.length + ' images...');
+
+            fetch(sheet.dataset.awardSheetUrl, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+                body: body,
+            })
+                .then(function (response) {
+                    return response.json()
+                        .then(function (data) { return { ok: response.ok, data: data }; })
+                        .catch(function () { return { ok: false, data: {} }; });
+                })
+                .then(function (result) {
+                    if (result.ok && result.data.ok) {
+                        reading = result.data;
+                        render(reading);
+                        say('');
+                        open();
+
+                        return;
+                    }
+
+                    const errors = result.data.errors
+                        ? Object.values(result.data.errors).flat().join(' ')
+                        : null;
+
+                    say(result.data.message || errors || 'The screenshot could not be read.', 'bad');
+                })
+                .catch(function () {
+                    say('The screenshot could not be read. Type the figures in instead.', 'bad');
+                })
+                .finally(function () {
+                    busy = false;
+                    trigger.disabled = false;
+
+                    // Cleared so picking the same file again still fires a change.
+                    picker.value = '';
+                });
+        });
+
+        dialog.querySelector('[data-award-sheet-apply]')?.addEventListener('click', apply);
+
+        dialog.querySelectorAll('[data-award-sheet-close]').forEach(function (button) {
+            button.addEventListener('click', close);
+        });
+
+        dialog.addEventListener('click', function (event) {
+            if (event.target === dialog) {
+                close();
+            }
+        });
+
+        /*
+         | Escape closes this panel and nothing else.
+         |
+         | On the capture phase, which runs before the award dialog's own Escape
+         | handler on the same document, and stopping the event there: closing the
+         | review panel must not also close the dialog it was about to fill in. With
+         | this panel shut the handler does nothing and Escape belongs to the dialog
+         | underneath again.
+         */
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && !dialog.classList.contains('hidden')) {
+                event.stopImmediatePropagation();
+                close();
+            }
+        }, true);
     })();
 </script>
 @endpush

@@ -39,6 +39,35 @@ class ScoreSheetException extends RuntimeException
     }
 
     /**
+     * Asked to read award cards for a profile that hands out no awards.
+     *
+     * The control is not drawn on such a fixture, but a POST does not need a button,
+     * and there is nothing for a card to be put against.
+     */
+    public static function noAwards(): self
+    {
+        return new self(
+            'The scoring profile defines no match awards.',
+            'This scoring profile hands out no Star of the Match awards, so there is nothing to read a screenshot into. Add them to the profile first.',
+        );
+    }
+
+    /**
+     * The model answered, but not with what it was asked for.
+     *
+     * A schema was declared on the request, so this is a model that ignored it or an
+     * answer cut off part way. Either way there is nothing to read, and guessing at
+     * half an answer is how a figure nobody checked reaches a card.
+     */
+    public static function unusableAnswer(): self
+    {
+        return new self(
+            'Gemini did not answer with what it was asked for.',
+            'The screenshot reader gave an answer that could not be used. Try a clearer image, or type the figures in.',
+        );
+    }
+
+    /**
      * Two rows claiming the same finishing position.
      *
      * The whole read is refused rather than the second row dropped. A table with

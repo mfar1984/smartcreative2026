@@ -891,6 +891,16 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('matches.score.read');
 
             /*
+            | The same thing for the game's Star of the Match screen, which is a
+            | different screen with different cards on it and so a different read.
+            | Same permission, same throttle, and the same promise: it fills the
+            | award dialog in and writes nothing.
+            */
+            Route::post('matches/{match}/score/read-awards', [ScoreSheetController::class, 'readAwards'])
+                ->middleware(['permission:tournaments.matches.score', 'throttle:20,1'])
+                ->name('matches.score.read-awards');
+
+            /*
             | The map a fixture is on and when it starts. Behind the draw permission
             | rather than the scoring one: this decides what the fixture is, not what
             | its result was, which is the same question generating a draw answers.

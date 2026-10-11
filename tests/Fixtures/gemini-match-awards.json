@@ -1,0 +1,21 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "{\"cards\":[{\"award\":\"going_all_out\",\"label\":\"Going All Out\",\"player\":\"QXCikoYELL\",\"figures\":[{\"field\":\"knock_outs\",\"value\":\"0\"},{\"field\":\"elims\",\"value\":\"7\"},{\"field\":\"bonus\",\"value\":\"4\"},{\"field\":\"damage\",\"value\":\"942\"}]},{\"award\":\"best_companion\",\"label\":\"Best Companion\",\"player\":\"LxRAAnZR\",\"figures\":[{\"field\":\"assists\",\"value\":\"1\"},{\"field\":\"rescue\",\"value\":\"2\"},{\"field\":\"health_restored\",\"value\":\"127\"},{\"field\":\"survival_time\",\"value\":\"434\"}]},{\"award\":\"finisher\",\"label\":\"Finisher\",\"player\":\"PRXiKobeBrynKR\",\"figures\":[{\"field\":\"elims\",\"value\":\"4\"},{\"field\":\"assists\",\"value\":\"3\"},{\"field\":\"travel_distance\",\"value\":\"9,617\"},{\"field\":\"survival_time\",\"value\":\"1,321\"}]}]}"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP"
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 1104,
+    "candidatesTokenCount": 263,
+    "totalTokenCount": 1367
+  },
+  "modelVersion": "gemini-flash-latest"
+}
