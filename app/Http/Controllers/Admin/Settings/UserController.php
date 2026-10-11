@@ -517,6 +517,24 @@ class UserController extends Controller
             }
         }
 
+        /*
+        | The same rule destroy() and setActivation() enforce, applied here too.
+        |
+        | Without it this dialog is a way around both of them: the lock icon
+        | refuses to deactivate the last super admin, and delete refuses to remove
+        | them, but Save on this form would have done it anyway and left nobody
+        | able to administer the system. Demotion counts as well as deactivation,
+        | because a super admin moved to another role stops being one.
+        */
+        $wouldStopAdministering = ! $validated['is_active']
+            || (int) $validated['role_id'] !== (int) $user->role_id;
+
+        if ($wouldStopAdministering && $user->role?->isSuperAdmin() && $this->activeSuperAdminCount() <= 1) {
+            throw ValidationException::withMessages([
+                'is_active' => 'This is the last super admin that can still sign in. Give somebody else that role first.',
+            ]);
+        }
+
         // A blank password field leaves the existing password in place.
         if (blank($validated['password'] ?? null)) {
             unset($validated['password']);

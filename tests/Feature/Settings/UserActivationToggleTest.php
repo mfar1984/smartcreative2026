@@ -32,8 +32,18 @@ class UserActivationToggleTest extends TestCase
 
     private const PASSWORD = 'Toggle-Pass-123!';
 
-    /** The grey the locked row is drawn in. Asserted raw, as it appears in class="". */
-    private const GREYED = 'bg-gray-50 opacity-60';
+    /**
+     * How a locked row is marked. Asserted raw, as it appears on the <tr>.
+     *
+     * The row is TINTED rather than dimmed: an opacity over the whole row took the
+     * small grey text under the contrast floor, so the background carries the
+     * meaning and the text keeps its own colour.
+     *
+     * Asserted on this attribute instead of the tint class, because the tint is an
+     * ordinary utility that also appears on buttons and disabled inputs elsewhere
+     * on the page, so "an active row is not greyed" could never be proved from it.
+     */
+    private const GREYED = 'data-locked="1"';
 
     private function deploy(): void
     {
@@ -195,6 +205,64 @@ class UserActivationToggleTest extends TestCase
             $row->forceFill(['is_active' => true])->save();
             $this->assertTrue($row->fresh()->is_active, $slug);
         }
+    }
+
+    /**
+     * The edit dialog must not be a way around the lock icon's guard.
+     *
+     * The toggle refuses to deactivate the last super admin and delete refuses to
+     * remove them, but Save on the edit form wrote whatever it was given, which
+     * left the same unrecoverable state by a different door.
+     */
+    public function test_the_edit_dialog_cannot_deactivate_the_last_super_admin(): void
+    {
+        $this->deploy();
+
+        $owner = $this->superAdmin();
+        $this->assertSame(1, User::query()
+            ->where('is_active', true)
+            ->whereHas('role', fn ($query) => $query->where('slug', Role::SUPER_ADMIN))
+            ->count());
+
+        // Another super admin does the editing, so the self-edit guard is not what
+        // refuses this: that one is already covered, and would hide the hole.
+        $editor = $this->superAdmin('Owner Bravo');
+        $editor->forceFill(['is_active' => false])->save();
+
+        $response = $this->actingAs($this->administrator())
+            ->from(route('admin.settings.users'))
+            ->put(route('admin.settings.users.update', $owner), [
+                'name' => $owner->name,
+                'username' => $owner->username,
+                'email' => $owner->email,
+                'role_id' => $owner->role_id,
+                'is_active' => '0',
+            ]);
+
+        $response->assertSessionHasErrors('is_active');
+        $this->assertTrue($owner->fresh()->is_active);
+    }
+
+    /** Demotion empties the role just as deactivation does, so it is refused too. */
+    public function test_the_edit_dialog_cannot_demote_the_last_super_admin(): void
+    {
+        $this->deploy();
+
+        $owner = $this->superAdmin();
+        $otherRole = Role::where('slug', 'administrator')->firstOrFail();
+
+        $response = $this->actingAs($this->administrator())
+            ->from(route('admin.settings.users'))
+            ->put(route('admin.settings.users.update', $owner), [
+                'name' => $owner->name,
+                'username' => $owner->username,
+                'email' => $owner->email,
+                'role_id' => $otherRole->id,
+                'is_active' => '1',
+            ]);
+
+        $response->assertSessionHasErrors('is_active');
+        $this->assertTrue($owner->fresh()->role->isSuperAdmin());
     }
 
     public function test_your_own_row_offers_no_deactivate_control_on_any_tab(): void

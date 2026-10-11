@@ -97,7 +97,7 @@
                             @forelse ($users as $index => $row)
                                 {{-- A locked row is greyed so the list reads at a glance, without
                                      anybody having to scan the Status column row by row. --}}
-                                <tr @class(['hover:bg-blue-50/40', 'bg-gray-50 opacity-60' => ! $row->is_active])>
+                                <tr @class(['hover:bg-blue-50/40', 'bg-gray-100' => ! $row->is_active]) @if (! $row->is_active) data-locked="1" @endif>
                                     <td class="px-6 py-3 text-gray-500">{{ $users->firstItem() + $index }}</td>
 
                                     <td class="px-6 py-3">
@@ -306,7 +306,7 @@
                         <tbody class="divide-y divide-gray-100">
                             @forelse ($handlers as $index => $row)
                                 {{-- Greyed when locked, same as the Users tab. --}}
-                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-50 opacity-60' => ! $row->is_active])>
+                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-100' => ! $row->is_active]) @if (! $row->is_active) data-locked="1" @endif>
                                     <td class="px-6 py-3 text-gray-500">{{ $handlers->firstItem() + $index }}</td>
 
                                     <td class="px-6 py-3">
@@ -545,7 +545,7 @@
                                 @endphp
 
                                 {{-- Greyed when locked, same as the Users tab. --}}
-                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-50 opacity-60' => ! $row->is_active])>
+                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-100' => ! $row->is_active]) @if (! $row->is_active) data-locked="1" @endif>
                                     <td class="px-6 py-3 text-gray-500">{{ $sponsors->firstItem() + $index }}</td>
 
                                     <td class="px-6 py-3">
@@ -762,7 +762,7 @@
                         <tbody class="divide-y divide-gray-100">
                             @forelse ($monitors as $index => $row)
                                 {{-- Greyed when locked, same as the Users tab. --}}
-                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-50 opacity-60' => ! $row->is_active])>
+                                <tr @class(['hover:bg-blue-50/40 align-top', 'bg-gray-100' => ! $row->is_active]) @if (! $row->is_active) data-locked="1" @endif>
                                     <td class="px-6 py-3 text-gray-500">{{ $monitors->firstItem() + $index }}</td>
 
                                     <td class="px-6 py-3">
