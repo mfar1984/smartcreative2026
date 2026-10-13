@@ -84,6 +84,27 @@
                        class="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/40 transition">
             </div>
 
+            {{-- Event and Item dropdowns appear only on the Offline tab.
+                 Online orders carry no collection_event_id, so these filters
+                 would always return zero results there. --}}
+            @if ($isOffline)
+                <label for="event_id" class="sr-only">Collection event</label>
+                <select id="event_id" name="event_id" class="{{ $select }}">
+                    <option value="">All events</option>
+                    @foreach ($collectionEvents as $event)
+                        <option value="{{ $event->id }}" @selected($eventId === (string) $event->id)>{{ $event->title }}</option>
+                    @endforeach
+                </select>
+
+                <label for="product_id" class="sr-only">Product</label>
+                <select id="product_id" name="product_id" class="{{ $select }}">
+                    <option value="">All items</option>
+                    @foreach ($activeProducts as $product)
+                        <option value="{{ $product->id }}" @selected($productId === (string) $product->id)>{{ $product->name }}</option>
+                    @endforeach
+                </select>
+            @endif
+
             <label for="status" class="sr-only">Status</label>
             <select id="status" name="status" class="{{ $select }}">
                 <option value="">All statuses</option>
@@ -102,7 +123,9 @@
 
             @if ($canExport)
                 <x-slot:actions>
-                    <a href="{{ route('admin.shop.orders.export', request()->only('tab', 'status', 'method', 'q')) }}"
+                    {{-- event_id and product_id travel with the export so the file
+                         matches exactly what is on screen. --}}
+                    <a href="{{ route('admin.shop.orders.export', request()->only('tab', 'status', 'method', 'q', 'event_id', 'product_id')) }}"
                        title="One row per order, matching the filters."
                        class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3.5 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition">
                         <x-admin.icon name="archive" class="w-4 h-4" />
@@ -158,6 +181,10 @@
                         <input type="hidden" name="q" value="{{ $search }}">
                         <input type="hidden" name="status" value="{{ $status }}">
                         <input type="hidden" name="method" value="{{ $method }}">
+                        @if ($isOffline)
+                            <input type="hidden" name="event_id" value="{{ $eventId }}">
+                            <input type="hidden" name="product_id" value="{{ $productId }}">
+                        @endif
 
                         <button type="submit"
                                 class="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 transition shadow-sm">

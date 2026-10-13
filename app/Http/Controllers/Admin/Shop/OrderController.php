@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Admin\Shop;
 
 use App\Http\Controllers\Controller;
 use App\Models\CollectionHandover;
+use App\Models\Event;
 use App\Models\ShopOrder;
+use App\Models\ShopProduct;
 use App\Services\AdminLogger;
 use App\Services\Collection\CollectionCodeException;
 use App\Services\Collection\CollectionVerifier;
@@ -69,10 +71,22 @@ class OrderController extends Controller
             'statuses' => $isOffline ? $this->offlineStatuses() : ShopOrder::STATUSES,
             'methods' => ShopOrder::METHODS,
 
+            // Offline-only dropdowns. Online never has collection_event_id, so
+            // loading the lists for the online tab would cost a query and render
+            // controls that do nothing.
+            'collectionEvents' => $isOffline ? $this->collectionEventOptions() : collect(),
+            'activeProducts' => $isOffline ? $this->activeProductOptions() : collect(),
+
             'search' => $filters['q'],
             'status' => $filters['status'],
             'method' => $filters['method'],
-            'isFiltered' => $filters['q'] !== '' || $filters['status'] !== '' || $filters['method'] !== '',
+            'eventId' => $filters['event_id'],
+            'productId' => $filters['product_id'],
+            'isFiltered' => $filters['q'] !== ''
+                || $filters['status'] !== ''
+                || $filters['method'] !== ''
+                || $filters['event_id'] !== ''
+                || $filters['product_id'] !== '',
 
             /*
              | The figures somebody opening this screen is actually looking for. Counted
@@ -110,7 +124,7 @@ class OrderController extends Controller
      * button emails is the set the operator is looking at. input() rather than
      * query(), because the bulk action posts the same four names in its body.
      *
-     * @return array{tab: string, q: string, status: string, method: string}
+     * @return array{tab: string, q: string, status: string, method: string, event_id: string, product_id: string}
      */
     private function filters(Request $request): array
     {
@@ -127,6 +141,11 @@ class OrderController extends Controller
              */
             'status' => $this->resolveKey($request->input('status'), ShopOrder::STATUSES),
             'method' => $this->resolveKey($request->input('method'), ShopOrder::METHODS),
+
+            // Offline-only. A non-numeric or unknown id is silently dropped, same
+            // pattern as resolveKey() above: junk in the URL must not widen the set.
+            'event_id' => $this->resolveIntId($request->input('event_id')),
+            'product_id' => $this->resolveIntId($request->input('product_id')),
         ];
     }
 
@@ -143,18 +162,51 @@ class OrderController extends Controller
     }
 
     /**
+     * A positive integer string when the value looks like one, otherwise empty.
+     *
+     * Silently drops anything that cannot be a real primary key — zero, negatives,
+     * strings — so a crafted URL cannot pass a nonsense id to the WHERE clause.
+     */
+    private function resolveIntId(mixed $value): string
+    {
+        if (! is_string($value) && ! is_int($value)) {
+            return '';
+        }
+
+        $int = (int) $value;
+
+        return $int > 0 ? (string) $int : '';
+    }
+
+    /**
      * The orders those filters select, in no particular order.
      *
      * The single definition of "what is on this screen". The list paginates it, the
      * bulk action walks it; neither rebuilds the clauses, so they cannot drift into
      * emailing a different set than the one being shown.
      *
-     * @param  array{tab: string, q: string, status: string, method: string}  $filters
+     * event_id and product_id are offline-only by definition: online orders never
+     * carry a collection_event_id, and the dropdowns are not rendered on the online
+     * tab, so both filters are applied regardless of the tab value — a non-empty
+     * event_id on the online tab simply matches nothing, which is the correct result.
+     *
+     * @param  array{tab: string, q: string, status: string, method: string, event_id: string, product_id: string}  $filters
      */
     private function matching(array $filters): Builder
     {
         return $this->filtered($filters['q'], $filters['status'], $filters['method'])
-            ->fulfilment($filters['tab']);
+            ->fulfilment($filters['tab'])
+            ->when(
+                $filters['event_id'] !== '',
+                fn (Builder $q) => $q->where('collection_event_id', (int) $filters['event_id']),
+            )
+            ->when(
+                $filters['product_id'] !== '',
+                fn (Builder $q) => $q->whereHas(
+                    'items',
+                    fn (Builder $inner) => $inner->where('shop_product_id', (int) $filters['product_id']),
+                ),
+            );
     }
 
     /**
@@ -176,6 +228,43 @@ class OrderController extends Controller
         return collect(ShopOrder::STATUSES)
             ->except([ShopOrder::STATUS_PACKING, ShopOrder::STATUS_SHIPPED])
             ->all();
+    }
+
+    /**
+     * Events that appear as collection points on at least one offline order.
+     *
+     * Dynamic, not hardcoded: only events that have orders in the database right
+     * now appear in the list, so the dropdown stays small and meaningful.
+     *
+     * @return \Illuminate\Support\Collection<int, Event>
+     */
+    private function collectionEventOptions(): \Illuminate\Support\Collection
+    {
+        $ids = ShopOrder::query()
+            ->fulfilment(ShopOrder::FULFILMENT_OFFLINE)
+            ->whereNotNull('collection_event_id')
+            ->distinct()
+            ->pluck('collection_event_id');
+
+        return Event::whereIn('id', $ids)
+            ->orderBy('title')
+            ->get(['id', 'title']);
+    }
+
+    /**
+     * All active shop products, for the Item filter dropdown.
+     *
+     * Active only: draft and archived products are in orders that already exist, but
+     * an operator filtering by a product that is no longer on sale is unusual enough
+     * that showing them would clutter the list without helping.
+     *
+     * @return \Illuminate\Support\Collection<int, ShopProduct>
+     */
+    private function activeProductOptions(): \Illuminate\Support\Collection
+    {
+        return ShopProduct::where('status', ShopProduct::STATUS_ACTIVE)
+            ->orderBy('name')
+            ->get(['id', 'name']);
     }
 
     /**
@@ -797,6 +886,10 @@ class OrderController extends Controller
             'status' => ['nullable', Rule::in(array_keys(ShopOrder::STATUSES))],
             'method' => ['nullable', Rule::in(array_keys(ShopOrder::METHODS))],
             'q' => ['nullable', 'string', 'max:190'],
+            // event_id and product_id are validated by resolveIntId() inside filters()
+            // — a non-integer is silently dropped, same pattern as status and method.
+            'event_id' => ['nullable', 'integer', 'min:1'],
+            'product_id' => ['nullable', 'integer', 'min:1'],
         ]);
 
         $filters = $this->filters($request);
@@ -1039,11 +1132,21 @@ class OrderController extends Controller
     /**
      * The filters in force, in words, for the activity entry.
      *
-     * @param  array{tab: string, q: string, status: string, method: string}  $filters
+     * @param  array{tab: string, q: string, status: string, method: string, event_id: string, product_id: string}  $filters
      */
     private function filterLabel(array $filters): string
     {
         $parts = [];
+
+        if ($filters['event_id'] !== '') {
+            $title = Event::where('id', (int) $filters['event_id'])->value('title');
+            $parts[] = 'event ' . ($title ?? $filters['event_id']);
+        }
+
+        if ($filters['product_id'] !== '') {
+            $name = ShopProduct::where('id', (int) $filters['product_id'])->value('name');
+            $parts[] = 'product ' . ($name ?? $filters['product_id']);
+        }
 
         if ($filters['status'] !== '') {
             $parts[] = 'status ' . (ShopOrder::STATUSES[$filters['status']] ?? $filters['status']);
