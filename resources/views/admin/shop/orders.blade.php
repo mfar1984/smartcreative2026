@@ -13,6 +13,12 @@
         App\Models\ShopOrder::STATUS_CANCELLED => 'gray',
         App\Models\ShopOrder::STATUS_REFUNDED => 'red',
     ];
+
+    $deletableStatuses = [
+        App\Models\ShopOrder::STATUS_PENDING_PAYMENT,
+        App\Models\ShopOrder::STATUS_CANCELLED,
+        App\Models\ShopOrder::STATUS_REFUNDED,
+    ];
 @endphp
 
 @section('title', 'Orders')
@@ -418,6 +424,28 @@
                                                 aria-label="Confirm collection of {{ $order->reference }}">
                                             <x-admin.icon name="check" class="w-4 h-4" />
                                         </button>
+                                    @endif
+
+                                    {{-- Delete. Only shown when the order is in a status
+                                         that carries no money (pending, cancelled, refunded)
+                                         AND the user holds shop.orders.delete.
+                                         A paid order is refused server-side regardless, so
+                                         the icon is never rendered on a row the server would
+                                         refuse — but that server guard still exists. --}}
+                                    @if ($canDelete && in_array($order->status, $deletableStatuses, true))
+                                        <form action="{{ route('admin.shop.orders.destroy', $order) }}" method="POST"
+                                              onsubmit="return confirm('Delete order {{ $order->reference }} for {{ addslashes($order->customer_name) }}?\n\nThis cannot be undone. The order record will be gone permanently.');">
+                                            @csrf
+                                            @method('DELETE')
+                                            <button type="submit"
+                                                    class="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
+                                                    title="Delete order {{ $order->reference }}"
+                                                    aria-label="Delete order {{ $order->reference }}">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                                </svg>
+                                            </button>
+                                        </form>
                                     @endif
                                 </div>
                             </td>

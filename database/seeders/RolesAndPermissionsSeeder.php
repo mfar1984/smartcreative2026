@@ -281,6 +281,10 @@ class RolesAndPermissionsSeeder extends Seeder
                 // Kept apart from payments.refund: being trusted with the shop is not
                 // the same as being trusted with registration fees.
                 'restore' => ['shop.orders.refund', 'Refund shop orders'],
+                // Destructive: removes the order record entirely. Not in BACKFILL —
+                // an existing administrator must be granted this by hand, because
+                // deleting orders is a different trust level from moving them along.
+                'delete' => ['shop.orders.delete', 'Delete pending, cancelled and refunded orders'],
             ],
             'Categories' => [
                 'view' => ['shop.categories.view', 'View shop categories'],
@@ -594,6 +598,7 @@ class RolesAndPermissionsSeeder extends Seeder
                 'shop.orders.notify',
                 'shop.orders.payment',
                 'shop.orders.refund',
+                'shop.orders.delete',
                 'shop.categories.view',
                 'shop.categories.create',
                 'shop.categories.update',

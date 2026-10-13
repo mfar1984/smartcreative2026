@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin\Shop;
 
 use App\Http\Controllers\Controller;
 use App\Models\CollectionHandover;
+use App\Models\CouponCode;
 use App\Models\Event;
 use App\Models\ShopOrder;
 use App\Models\ShopProduct;
@@ -114,6 +115,7 @@ class OrderController extends Controller
             'canConfirmPayment' => $request->user()->hasPermission('shop.orders.payment'),
             'canNotify' => $canNotify,
             'canExport' => $request->user()->hasPermission('shop.orders.view'),
+            'canDelete' => $request->user()->hasPermission('shop.orders.delete'),
         ]);
     }
 
@@ -1373,5 +1375,73 @@ class OrderController extends Controller
                 $order->reference,
                 $throughGateway ? '' : ' Recorded as returned by hand, since this order never went through the gateway.',
             ));
+    }
+
+    /**
+     * Permanently remove a stale order that never carried real money.
+     *
+     * Only three statuses are allowed: pending_payment, cancelled, refunded.
+     * A paid order is refused server-side even when the icon is hidden in the blade,
+     * because the icon gate is a UX courtesy, not the enforcement.
+     *
+     * Side effects, in order:
+     *   1. The coupon code that was spent on this order is freed — shop_order_id set
+     *      to null — so it can be reused if desired.
+     *   2. The collection handover row (polymorphic, no FK cascade) is deleted.
+     *   3. The order row is deleted; shop_order_items, shop_order_events,
+     *      shop_order_item_addons, and shop_order_checkouts all cascade.
+     *
+     * Stock is NOT returned on delete. ShopOrderWriter::moveTo() already says so:
+     * stock is only ever taken off when the order is marked paid, so a pending or
+     * cancelled order holds none, and a refunded order's stock was already returned
+     * at refund time.
+     */
+    public function destroy(Request $request, ShopOrder $order)
+    {
+        // Checked again here, not only on the route. Same pattern as refund().
+        if (! $request->user()->hasPermission('shop.orders.delete')) {
+            abort(403);
+        }
+
+        $deletable = [
+            ShopOrder::STATUS_PENDING_PAYMENT,
+            ShopOrder::STATUS_CANCELLED,
+            ShopOrder::STATUS_REFUNDED,
+        ];
+
+        if (! in_array($order->status, $deletable, true)) {
+            return redirect()
+                ->route('admin.shop.orders', ['tab' => $order->fulfilment])
+                ->withErrors([
+                    'delete' => sprintf(
+                        'Order %s is %s and cannot be deleted. Only pending, cancelled, and refunded orders may be removed.',
+                        $order->reference,
+                        strtolower($order->statusLabel()),
+                    ),
+                ]);
+        }
+
+        $reference = $order->reference;
+        $fulfilment = $order->fulfilment;
+
+        // Release the coupon so it can be reused on another order.
+        if ($order->coupon_code_id) {
+            CouponCode::query()->whereKey($order->coupon_code_id)->update(['shop_order_id' => null]);
+        }
+
+        // collection_handovers is polymorphic — no FK cascade — so delete it before
+        // the order row to avoid an orphan. morphOne() returns null when absent.
+        $order->handover()?->delete();
+
+        $order->delete();
+
+        AdminLogger::activity(
+            'shop.orders.delete',
+            sprintf('Deleted order %s (%s).', $reference, $order->statusLabel()),
+        );
+
+        return redirect()
+            ->route('admin.shop.orders', request()->only('tab', 'status', 'method', 'q', 'event_id', 'product_id') + ['tab' => $fulfilment])
+            ->with('status', sprintf('Order %s has been deleted.', $reference));
     }
 }

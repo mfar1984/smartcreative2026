@@ -1161,6 +1161,19 @@ Route::prefix('admin')->name('admin.')->group(function () {
                 ->name('orders.refund');
 
             /*
+            | Deleting stale orders that never carried money.
+            |
+            | Only pending_payment, cancelled, and refunded orders may be removed.
+            | Anything paid is refused server-side even if the icon is also hidden.
+            | Kept off BACKFILL deliberately: deleting an order record is a different
+            | trust level from moving one along, so an existing administrator receives
+            | it only by hand.
+            */
+            Route::delete('orders/{order}', [ShopOrderController::class, 'destroy'])
+                ->middleware(['permission:shop.orders.delete', 'throttle:20,1'])
+                ->name('orders.destroy');
+
+            /*
             | Tracking. The same orders read from the delivery end rather than the money
             | end, which is why it shares the orders permissions rather than inventing
             | its own: there is nothing here somebody with the order list cannot see.
