@@ -327,8 +327,9 @@ class OrderExportCsvTest extends ShopPaymentTestCase
         $content = $response->streamedContent();
 
         $this->assertStringContainsString($order->reference, $content);
-        // The cell must contain the name and the size in parentheses.
-        $this->assertStringContainsString('HSN Event Tee (L)', $content);
+        // Item name in the Item column, size in the Size column — now separate.
+        $this->assertStringContainsString('HSN Event Tee', $content);
+        $this->assertStringContainsString(',L,', $content);
     }
 
     public function test_csv_includes_both_variants_for_order_with_two_items(): void
@@ -357,8 +358,14 @@ class OrderExportCsvTest extends ShopPaymentTestCase
         $content = $response->streamedContent();
 
         $this->assertStringContainsString($order->reference, $content);
-        $this->assertStringContainsString('HSN Event Tee (XL)', $content);
-        $this->assertStringContainsString('Tote Bag (Blue)', $content);
+        // Two items = two rows; each row has the item name and its size separately.
+        $this->assertStringContainsString('HSN Event Tee', $content);
+        $this->assertStringContainsString(',XL,', $content);
+        $this->assertStringContainsString('Tote Bag', $content);
+        $this->assertStringContainsString(',Blue,', $content);
+        // The old single-cell format must NOT appear.
+        $this->assertStringNotContainsString('HSN Event Tee (XL)', $content);
+        $this->assertStringNotContainsString('Tote Bag (Blue)', $content);
     }
 
     public function test_csv_shows_item_name_alone_when_no_variant(): void
@@ -372,7 +379,24 @@ class OrderExportCsvTest extends ShopPaymentTestCase
 
         $this->assertStringContainsString($order->reference, $content);
         $this->assertStringContainsString('Event Programme', $content);
-        // Must not have empty parentheses next to the name.
+        // Size column blank — no empty parentheses.
         $this->assertStringNotContainsString('Event Programme ()', $content);
+    }
+
+    public function test_it_includes_one_row_per_item(): void
+    {
+        $order = $this->paidOfflineOrder();
+
+        $order->items()->delete();
+        $order->items()->create(['name' => 'Tee', 'variant_label' => 'S', 'unit_price' => 20.00, 'quantity' => 1, 'line_total' => 20.00]);
+        $order->items()->create(['name' => 'Tee', 'variant_label' => 'M', 'unit_price' => 20.00, 'quantity' => 1, 'line_total' => 20.00]);
+
+        $response = $this->export(['tab' => ShopOrder::FULFILMENT_OFFLINE]);
+
+        $response->assertOk();
+        $content = $response->streamedContent();
+
+        // Reference appears twice — once per item row.
+        $this->assertSame(2, substr_count($content, $order->reference));
     }
 }

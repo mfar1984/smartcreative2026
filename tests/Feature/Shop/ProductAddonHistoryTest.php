@@ -143,6 +143,10 @@ class ProductAddonHistoryTest extends ShopAddonTestCase
         $content = $response->streamedContent();
 
         $this->assertStringContainsString($order->reference, $content);
-        $this->assertStringContainsString('Champion Medal (S) + Engraving (Front) x2', $content);
+        // Item row: name and size in separate columns.
+        $this->assertStringContainsString('Champion Medal', $content);
+        $this->assertStringContainsString(',S,', $content);
+        // Addon row: addon name in the Addon column.
+        $this->assertStringContainsString('Engraving (Front)', $content);
     }
 }

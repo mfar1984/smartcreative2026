@@ -1027,8 +1027,13 @@ class OrderController extends Controller
             'Email',
             'Collect At',
             'Collect Date/Time',
-            'Items & Sizes',
-            'Total',
+            'Item',
+            'Size',
+            'Addon',
+            'Unit Price',
+            'Qty',
+            'Line Total',
+            'Order Total',
             'Method',
             'Status',
             'Payment',
@@ -1052,7 +1057,9 @@ class OrderController extends Controller
                 ->orderBy('id')
                 ->chunk(50, function ($orders) use ($handle) {
                     foreach ($orders as $order) {
-                        fputcsv($handle, $this->exportRow($order));
+                        foreach ($this->exportRows($order) as $row) {
+                            fputcsv($handle, $row);
+                        }
                     }
                 });
 
@@ -1063,7 +1070,85 @@ class OrderController extends Controller
     }
 
     /**
-     * One order as a row of cells, in the same order as the CSV header.
+     * One order as multiple rows of cells — one row per item line, then one row
+     * per add-on under each item. This shape lets the operator sort and filter by
+     * size and add-on in Excel without the whole order collapsing into one cell.
+     *
+     * Order-level fields (reference, name, IC …) are repeated on every row so
+     * every row is self-contained and the sheet stays sortable.
+     *
+     * @return array<int, array<int, string>>
+     */
+    private function exportRows(ShopOrder $order): array
+    {
+        if ($order->isCollected()) {
+            $handOver = 'Collected';
+        } elseif ($order->awaitsCollection()) {
+            $handOver = 'Awaiting collection';
+        } else {
+            $handOver = $order->isPendingPayment() ? 'Not paid yet' : '';
+        }
+
+        // Columns that are the same on every row for this order.
+        $common = [
+            $order->reference,
+            (string) ($order->customer_name ?? ''),
+            (string) ($order->identity_card ?? ''),
+            (string) ($order->customer_phone ?? ''),
+            (string) ($order->customer_email ?? ''),
+            (string) ($order->collection_location ?: ($order->collection_label ?: '')),
+            $order->collection_at ? $order->collection_at->format('d M Y, g:i a') : '',
+        ];
+
+        $tail = [
+            (string) ($order->grand_total ?? ''),
+            $order->methodLabel(),
+            $order->statusLabel(),
+            $order->isPaid() ? 'Paid' : 'Unpaid',
+            $handOver,
+            $order->created_at ? LocalTime::format($order->created_at, 'Y-m-d H:i') : '',
+            $order->delivered_at ? LocalTime::format($order->delivered_at, 'Y-m-d H:i') : '',
+            ($order->handover && $order->handover->byThirdParty()) ? (string) ($order->handover->collector_ic ?? '') : '',
+            ($order->handover && $order->handover->byThirdParty()) ? (string) ($order->handover->collector_name ?? '') : '',
+        ];
+
+        $rows = [];
+
+        foreach ($order->items as $item) {
+            // Main item row: name, size (variant), no addon column, price, qty, line total.
+            $rows[] = array_merge($common, [
+                (string) $item->name,
+                (string) ($item->variant_label ?? ''),
+                '',                                          // Addon column — blank for the item row
+                PaymentFigures::money((float) $item->unit_price),
+                (string) $item->quantity,
+                PaymentFigures::money((float) $item->line_total),
+            ], $tail);
+
+            // One sub-row per add-on, indented under the item so the eye groups them.
+            foreach ($item->addons as $addon) {
+                $rows[] = array_merge($common, [
+                    '',                                      // Item column — blank on addon rows
+                    '',                                      // Size column — blank on addon rows
+                    (string) $addon->describe(),
+                    PaymentFigures::money((float) $addon->unit_price),
+                    (string) $addon->quantity,
+                    PaymentFigures::money((float) $addon->line_total),
+                ], $tail);
+            }
+        }
+
+        // An order with no items at all (should not happen, but be safe).
+        if ($rows === []) {
+            $rows[] = array_merge($common, ['', '', '', '', '', ''], $tail);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @deprecated  Replaced by exportRows(). Kept so existing tests that call it
+     *              directly do not break; remove after the next test update.
      *
      * @return array<int, string>
      */
