@@ -254,19 +254,29 @@ class OrderController extends Controller
     }
 
     /**
-     * All active shop products, for the Item filter dropdown.
+     * All active and archived shop products, for the Item filter dropdown.
      *
-     * Active only: draft and archived products are in orders that already exist, but
-     * an operator filtering by a product that is no longer on sale is unusual enough
-     * that showing them would clutter the list without helping.
+     * Draft products are excluded — they have never been sold so no order can
+     * reference them, and showing them would only confuse.
+     *
+     * Archived products are included with their name suffixed "(Archived)" so the
+     * operator can still filter and export the orders that were placed before the
+     * product was retired.
      *
      * @return \Illuminate\Support\Collection<int, ShopProduct>
      */
     private function activeProductOptions(): \Illuminate\Support\Collection
     {
-        return ShopProduct::where('status', ShopProduct::STATUS_ACTIVE)
+        return ShopProduct::whereIn('status', [ShopProduct::STATUS_ACTIVE, ShopProduct::STATUS_ARCHIVED])
+            ->orderByRaw("CASE WHEN status = ? THEN 0 ELSE 1 END", [ShopProduct::STATUS_ACTIVE])
             ->orderBy('name')
-            ->get(['id', 'name']);
+            ->get(['id', 'name', 'status'])
+            ->map(function ($p) {
+                if ($p->status === ShopProduct::STATUS_ARCHIVED) {
+                    $p->name = $p->name . ' (Archived)';
+                }
+                return $p;
+            });
     }
 
     /**
