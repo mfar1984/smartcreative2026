@@ -236,6 +236,54 @@ class AdminConfirmCollectionTest extends ShopPaymentTestCase
         ]);
     }
 
+    /**
+     * The ordinary counter press, posted the way the browser actually posts it.
+     *
+     * The three collector boxes sit in a hidden block that stays in the DOM, so a
+     * buyer collection sends them EMPTY rather than omitting them. Every other test
+     * here leaves them out entirely, which is why all of them passed while the real
+     * screen answered "the collector name field must be a string" and refused to
+     * hand anything over.
+     */
+    public function test_a_buyer_collection_posts_the_collector_boxes_empty_and_is_accepted(): void
+    {
+        $order = $this->paidOfflineOrder();
+
+        $response = $this->confirm($order, self::CAN_UPDATE, [
+            'collector' => 'buyer',
+            'collector_name' => '',
+            'collector_ic' => '',
+            'collector_phone' => '',
+            'code' => '',
+            'override_reason' => '',
+            'note' => '',
+        ]);
+
+        $response->assertSessionHasNoErrors();
+        $response->assertRedirect();
+
+        $after = $order->fresh();
+        $this->assertSame(ShopOrder::STATUS_DELIVERED, $after->status);
+        $this->assertTrue($after->isCollected());
+    }
+
+    /** A third-party handover with the boxes left empty is still refused. */
+    public function test_a_third_party_collection_still_demands_the_collector_details(): void
+    {
+        $order = $this->paidOfflineOrder();
+
+        $response = $this->confirm($order, self::CAN_UPDATE, [
+            'collector' => 'other',
+            'collector_name' => '',
+            'collector_ic' => '',
+            'collector_phone' => '',
+        ]);
+
+        $response->assertSessionHasErrors(['collector_name', 'collector_ic', 'collector_phone']);
+
+        $this->assertSame(ShopOrder::STATUS_PAID, $order->fresh()->status);
+    }
+
     public function test_the_row_reads_collected_once_it_has_been_handed_over(): void
     {
         $order = $this->paidOfflineOrder();

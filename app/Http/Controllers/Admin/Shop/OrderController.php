@@ -528,9 +528,19 @@ class OrderController extends Controller
              */
             'collector' => ['nullable', Rule::in(array_keys(CollectionHandover::KINDS))],
 
-            'collector_name' => ['required_if:collector,other', 'string', 'max:190'],
-            'collector_ic' => ['required_if:collector,other', 'string', 'max:30'],
-            'collector_phone' => ['required_if:collector,other', 'string', 'max:30'],
+            /*
+             | nullable FIRST, and it is not decoration.
+             |
+             | The three boxes live in a hidden block that stays in the DOM, so a
+             | buyer collection posts them empty. ConvertEmptyStringsToNull turns
+             | those into null, and 'string' run against null fails — which is how a
+             | counter pressing Collected on the ordinary case got told the collector
+             | name must be a string. required_if is an implicit rule and still
+             | fires, so a third-party handover is as strict as it ever was.
+             */
+            'collector_name' => ['nullable', 'required_if:collector,other', 'string', 'max:190'],
+            'collector_ic' => ['nullable', 'required_if:collector,other', 'string', 'max:30'],
+            'collector_phone' => ['nullable', 'required_if:collector,other', 'string', 'max:30'],
 
             // Never logged, never echoed, never put in an error message.
             'code' => ['nullable', 'string', 'max:12'],
